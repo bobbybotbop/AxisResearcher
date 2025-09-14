@@ -1,0 +1,1 @@
+./e.bat [command] [input]
