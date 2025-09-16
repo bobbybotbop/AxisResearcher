@@ -28,6 +28,58 @@ CLIENT_ID = os.getenv('client_id')
 CLIENT_SECRET = os.getenv('client_secret')
 USER_TOKEN = os.getenv('user_token')
 REFRESH_TOKEN = os.getenv('refresh_token')
+OPENROUTER_API_KEY = os.getenv('openrouter_api_key')
+
+
+def call_openrouter_llm(prompt):
+    """Call OpenRouter Sonoma Sky Alpha API to generate optimized eBay listing content."""
+    if not OPENROUTER_API_KEY:
+        print("❌ OpenRouter API key not found. Please set OPENROUTER_API_KEY in your .env file")
+        return None
+    
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    
+    data = {
+        "model": "openrouter/sonoma-sky-alpha",
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "temperature": 0.7,
+        "max_tokens": 1000
+    }
+    
+    try:
+        print("🤖 Calling OpenRouter Sonoma Sky Alpha...")
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        response.raise_for_status()
+        
+        result = response.json()
+        
+        if 'choices' in result and len(result['choices']) > 0:
+            content = result['choices'][0]['message']['content']
+            print("✅ Received response from OpenRouter")
+            return content
+        else:
+            print("❌ Unexpected response format from OpenRouter")
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Error calling OpenRouter API: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        print(f"❌ Error parsing OpenRouter response: {e}")
+        return None
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        return None
 
 
 def remove_html_tags(text):
@@ -893,41 +945,52 @@ def singleCopyListing(id):
     else:
         print("❌ No listing data available")
     
-    
+    prompt = f"""
+You are an expert eBay SEO copywriter. Rewrite the item's title and description.
 
+Requirements
+- Title: ≤80 characters, include high-intent keywords users search for. Do not add the phrases "3D printed" or "PETG" to the title unless they are already present in the original title. Preserve important specifics (brand/model/size/color) if present. Use normal capitalization, no ALL CAPS, no emojis, no quotes, no color specification in the title. continiously adding keywords relating to the product until you are most close to 80 characters.
+- Description: keyword-rich but human-readable. Please add to the description by adding keywords relating to the product which are most commonly searched. Explicitly state the material is PETG. State that the product comes in black. Remove any mentions of who it is made by or the maker/manufacturer name. please format the description in modern, simple, and clean HTML and feel free to use clear list, no shipping info.
+
+
+Output format (strict JSON):
+{{
+  "edited_title": "...",
+  "edited_description": "..."
+}}
+
+Original title:
+{listing.get('title', '')}
+
+Original description:
+{listing.get('description', '')}
+"""
     
-    # valid_token = helper_get_valid_token()
-    # if not valid_token:
-    #     print("❌ Error: Could not get valid access token")
-    #     return None
+    # Call OpenRouter API to get optimized content
+    llm_response = call_openrouter_llm(prompt)
     
-    # url = f"https://api.ebay.com/buy/browse/v1/item/{id}"
-    
-    # headers = {
-    #     'X-EBAY-C-ENDUSERCTX': f'contextualLocation=country=US,zip={ZIP_CODE}',
-    #     'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
-    #     'Authorization': f'Bearer {valid_token}',
-    #     'Content-Type': 'application/json'
-    # }
-    
-    # try:
-    #     print(f"�� Fetching sales data for item: {id}")
-    #     response = requests.get(url, headers=headers)
-        
-    #     if response.status_code == 200:
-    #         item = response.json()
+    if llm_response:
+        try:
+            # Parse JSON response
+            optimized_content = json.loads(llm_response)
             
-    #         print(f"✅ Item Details Retrieved:")
-    #         print(f"Title: {item.get('title', 'N/A')}")
-    #         print(f"Price: ${item.get('price', {}).get('value', 'N/A')} {item.get('price', {}).get('currency', '')}")
-    #         print(f"Condition: {item.get('description', 'N/A')}")
-    #         print(f"Seller: {item.get('seller', {}).get('username', 'N/A')}")
-    #     else:
-    #         print("get request unsuccessful ", response)
-    # except Exception as e:
-    #     print(f"❌ Error in request #{request_count}: {e}")
-    
-
+            print("\n🎯 Optimized eBay Listing:")
+            print("=" * 50)
+            print(f"📝 Optimized Title ({len(optimized_content.get('edited_title', ''))} chars):")
+            print(f"   {optimized_content.get('edited_title', 'N/A')}")
+            print(f"\n📄 Optimized Description:")
+            print(f"   {optimized_content.get('edited_description', 'N/A')}")
+            print("=" * 50)
+            
+            return optimized_content
+            
+        except json.JSONDecodeError as e:
+            print(f"❌ Error parsing LLM response as JSON: {e}")
+            print(f"Raw response: {llm_response}")
+            return None
+    else:
+        print("❌ Failed to get response from OpenRouter")
+        return None
             
 
 def run_command(command, *args):
