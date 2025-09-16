@@ -19,6 +19,7 @@ import json
 import time
 from datetime import datetime
 import sys
+import re
 
 
 load_dotenv()
@@ -27,6 +28,33 @@ CLIENT_ID = os.getenv('client_id')
 CLIENT_SECRET = os.getenv('client_secret')
 USER_TOKEN = os.getenv('user_token')
 REFRESH_TOKEN = os.getenv('refresh_token')
+
+
+def remove_html_tags(text):
+    """Efficiently remove HTML tags from text using regex."""
+    if not text or not isinstance(text, str):
+        return text
+    
+    # Remove HTML tags
+    clean_text = re.sub(r'<[^>]+>', '', text)
+    
+    # Decode common HTML entities
+    html_entities = {
+        '&amp;': '&',
+        '&lt;': '<',
+        '&gt;': '>',
+        '&quot;': '"',
+        '&#39;': "'",
+        '&nbsp;': ' '
+    }
+    
+    for entity, replacement in html_entities.items():
+        clean_text = clean_text.replace(entity, replacement)
+    
+    # Clean up extra whitespace
+    clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+    
+    return clean_text
 
 ZIP_CODE = 14853
 # HELPER functions ===========================
@@ -287,16 +315,21 @@ def single_search_by_seller(seller_username, query="", limit=50, offset=0):
         print(f"❌ Error searching by seller: {e}")
         return None
 
-def single_get_detailed_item_data(item_id):
+def single_get_detailed_item_data(item_id, verbose=True):
     """
     Get detailed sales data for a specific item including estimatedSoldQuantity
     
     Args:
         item_id (str): The eBay item ID (e.g., "v1|123456789|0")
+        verbose (bool): If True, prints detailed information. Default: False (echo off)
     
     Returns:
         dict: Item details including estimated sales data
     """
+
+    if item_id[0] != 'v':
+        item_id = "v1|" + item_id + "|0"
+ 
     # Get a valid token
     valid_token = helper_get_valid_token()
     if not valid_token:
@@ -313,13 +346,15 @@ def single_get_detailed_item_data(item_id):
     }
     
     try:
-        print(f"�� Fetching sales data for item: {item_id}")
+        if verbose:
+            print(f"🔍 Fetching sales data for item: {item_id}")
         response = requests.get(url, headers=headers)
         
         if response.status_code == 200:
             item = response.json()
             
-            print(f"✅ Item Details Retrieved:")
+            if verbose:
+                print(f"✅ Item Details Retrieved:")
             # print(f"Title: {item.get('title', 'N/A')}")
             # print(f"Price: ${item.get('price', {}).get('value', 'N/A')} {item.get('price', {}).get('currency', '')}")
             # print(f"Seller: {item.get('seller', {}).get('username', 'N/A')}")
@@ -327,21 +362,26 @@ def single_get_detailed_item_data(item_id):
             # Extract estimated sales data
             estimated_availabilities = item.get('estimatedAvailabilities', [])
             
-            if estimated_availabilities:
-                print(f"\n📊 Sales Data:")
+            if estimated_availabilities: # might cause error later
+                if verbose:
+                    print(f"\n📊 Sales Data:")
                 for i, availability in enumerate(estimated_availabilities):
                     estimated_sold = availability.get('estimatedSoldQuantity')
                     estimated_available = availability.get('estimatedAvailableQuantity')
                     
                     item_title = item.get('title', 'N/A')
-                    print(f"Title: {item_title}")
+                    if verbose:
+                        print(f"Title: {item_title}")
                     if estimated_sold is not None:
-                        print(f"    Estimated Sold: {estimated_sold} units")
+                        if verbose:
+                            print(f"    Estimated Sold: {estimated_sold} units")
                     else:
-                        print(f"    Estimated Sold: Not available")
+                        if verbose:
+                            print(f"    Estimated Sold: Not available")
                     
                     if estimated_available is not None:
-                        print(f"    Estimated Available: {estimated_available} units")
+                        if verbose:
+                            print(f"    Estimated Available: {estimated_available} units")
             
             # Get price information
             price_info = item.get('price', {})
@@ -349,8 +389,9 @@ def single_get_detailed_item_data(item_id):
             currency = price_info.get('currency', 'USD')
             formatted_price = f"${price_value} {currency}" if price_value != 'N/A' else 'N/A'
             
-            # Get description (shortDescription or description)
-            description = item.get('shortDescription') or item.get('description', 'No description available')
+            # Get description (shortDescription or description) and remove HTML
+            description = item.get('description') or item.get('description', 'No description available')
+            description = remove_html_tags(description)
             
             # Get date (item creation date)
             item_creation_date = item.get('itemCreationDate', 'N/A')
@@ -837,7 +878,20 @@ def singleCopyListing(id):
     if (id[0] == 'h' or id[0] == 'e'):
         id = id.split('/itm/')[1].split('?')[0]
 
-    print(single_get_detailed_item_data(id))
+    listing = single_get_detailed_item_data(id, verbose = False)
+
+    if listing:
+        print("📦 Listing Details:")
+        print(f"   Item ID: {listing.get('item_id', 'N/A')}")
+        print(f"   Title: {listing.get('title', 'N/A')}")
+        print(f"   Description: {listing.get('description', 'N/A')}")
+        print(f"   Date: {listing.get('date', 'N/A')}")
+        print(f"   Number Sold: {listing.get('numbersold', 'N/A')}")
+        print(f"   Price: {listing.get('price', 'N/A')}")
+        print(f"   Number of Pictures: {listing.get('numberOfPictures', 'N/A')}")
+        print(f"   Thumbnail URL: {listing.get('thumbnailURL', 'N/A')}")
+    else:
+        print("❌ No listing data available")
     
     
 
