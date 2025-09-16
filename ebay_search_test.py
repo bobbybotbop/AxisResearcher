@@ -26,19 +26,17 @@ API_KEY = os.getenv('api_key')
 CLIENT_ID = os.getenv('client_id')
 CLIENT_SECRET = os.getenv('client_secret')
 USER_TOKEN = os.getenv('user_token')
+REFRESH_TOKEN = os.getenv('refresh_token')
+
 ZIP_CODE = 14853
 # HELPER functions ===========================
 def helper_get_valid_token():
-
-
     """Get a valid access token, refresh if needed"""
     if not USER_TOKEN:
         print("❌ No user token available")
-        # TODO: enable auto refresh
-        # print("🔄 Attempting to refresh access token...")
-        # new_token = refreshToken()
-        return None
-
+        print("🔄 Attempting to refresh access token...")
+        new_token = refreshToken()
+        return new_token
     else:
         return USER_TOKEN
 
@@ -76,20 +74,24 @@ def handle_http_error(response, context=""):
         print(f"❌ Unexpected error ({status_code}) {context}")
     
 
-# work in progress
 def refreshToken():
     """
+    Refresh access token using eBay's refresh token grant flow.
     Based on eBay OAuth documentation: https://developer.ebay.com/api-docs/static/oauth-refresh-token-request.html
     
     Returns:
         str: New access token if successful, None if failed
     """
-    if not USER_TOKEN:
+    if not REFRESH_TOKEN:
         print("❌ No refresh token available. Cannot refresh access token.")
         return None
     
+    if not CLIENT_ID:
+        print("❌ No client_id available. Cannot refresh access token.")
+        return None
+    
     if not CLIENT_SECRET:
-        print("❌ No client secret available. Cannot refresh access token.")
+        print("❌ No client_secret available. Cannot refresh access token.")
         return None
     
     # eBay OAuth token endpoint (Production)
@@ -97,7 +99,7 @@ def refreshToken():
     
     # Create Basic Auth header as per documentation
     # Format: Base64(client_id:client_secret)
-    auth_string = f"{API_KEY}:{CLIENT_SECRET}"
+    auth_string = f"{CLIENT_ID}:{CLIENT_SECRET}"
     auth_bytes = base64.b64encode(auth_string.encode()).decode()
     
     # Headers as specified in eBay documentation
@@ -107,27 +109,30 @@ def refreshToken():
     }
     
     # Request payload for refresh token grant
-    # As per: https://developer.ebay.com/api-docs/static/oauth-refresh-token-request.html
+    # As per eBay API documentation format
     data = {
         'grant_type': 'refresh_token',
-        'refresh_token': USER_TOKEN,
-        'scope': 'https://api.ebay.com/oauth/api_scope'
+        'refresh_token': REFRESH_TOKEN,
+        'scope': 'https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/buy.item.bulk'
     }
     
     try:
         print("🔄 Requesting new access token...")
+        print(f"🔍 Debug - CLIENT_ID: {CLIENT_ID[:10]}..." if CLIENT_ID else "❌ CLIENT_ID not set")
+        print(f"🔍 Debug - REFRESH_TOKEN: {REFRESH_TOKEN[:20]}..." if REFRESH_TOKEN else "❌ REFRESH_TOKEN not set")
+        print(f"🔍 Debug - Request data: {data}")
         response = requests.post(url, headers=headers, data=data)
         
         if response.status_code == 200:
             token_data = response.json()
             new_access_token = token_data.get('access_token')
-            new_refresh_token = token_data.get('refresh_token', USER_TOKEN)
+            new_refresh_token = token_data.get('refresh_token', REFRESH_TOKEN)
             expires_in = token_data.get('expires_in', 7200)  # Default 2 hours
             token_type = token_data.get('token_type', 'User Access Token')
             
             # Update .env file with new tokens
             set_key('.env', 'user_token', new_access_token)
-            if new_refresh_token != USER_TOKEN:
+            if new_refresh_token != REFRESH_TOKEN:
                 set_key('.env', 'refresh_token', new_refresh_token)
             
             print("✅ Access token refreshed successfully!")
@@ -890,7 +895,8 @@ def getTopSellingItems(input_filename="IDExport.json", top_n=50, output_filename
 def singleCopyListing(id):
     if (id[0] == 'h' or id[0] == 'e'):
         id = id.split('/itm/')[1].split('?')[0]
-    print(id)
+
+    print(single_get_detailed_item_data(id))
     
     
 
@@ -989,6 +995,7 @@ def run_command(command, *args):
         print(f"❌ Error: {e}")
 
 if __name__ == "__main__":
+
     if len(sys.argv) < 2:
         print("❌ Usage: python ebay_search_test.py <command> [args...]")
         print("Commands: search, seller, item, collect, process, top, copy, refresh")
