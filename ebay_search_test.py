@@ -75,95 +75,36 @@ def handle_http_error(response, context=""):
     
 
 def refreshToken():
-    """
-    Refresh access token using eBay's refresh token grant flow.
-    Based on eBay OAuth documentation: https://developer.ebay.com/api-docs/static/oauth-refresh-token-request.html
+
+    import webbrowser
+    webbrowser.open("https://developer.ebay.com/my/auth/?env=production&index=0")
+    # """
+    # Open eBay OAuth link and update user token with user input.
+    # """
+    # import webbrowser
     
-    Returns:
-        str: New access token if successful, None if failed
-    """
-    if not REFRESH_TOKEN:
-        print("❌ No refresh token available. Cannot refresh access token.")
-        return None
+    # # Open eBay OAuth authorization URL
+    # oauth_url = "https://developer.ebay.com/my/auth/?env=production&index=0"
+    # print(refresh_token)
+    # print(f"📱 Please complete the OAuth flow and copy your user token")
     
-    if not CLIENT_ID:
-        print("❌ No client_id available. Cannot refresh access token.")
-        return None
+    # # Get new user token from user input
+    # if refresh_token is None:
+    #     webbrowser.open(oauth_url)
+    #     new_user_token = input("Enter your new user token: ").strip()
+    #     if not new_user_token:
+    #         print("❌ User token is required")
+    #         return None
+    # else:
+    #     new_user_token = refresh_token
+    #     print(f"Using provided user token: {refresh_token[:20]}...")
     
-    if not CLIENT_SECRET:
-        print("❌ No client_secret available. Cannot refresh access token.")
-        return None
+    # # Update the user token in .env file
+    # set_key('.env', 'user_token', new_user_token)
+    # print(f"✅ User token updated successfully!")
+    # print(f"New token: {new_user_token[:20]}...")
     
-    # eBay OAuth token endpoint (Production)
-    url = "https://api.ebay.com/identity/v1/oauth2/token"
-    
-    # Create Basic Auth header as per documentation
-    # Format: Base64(client_id:client_secret)
-    auth_string = f"{CLIENT_ID}:{CLIENT_SECRET}"
-    auth_bytes = base64.b64encode(auth_string.encode()).decode()
-    
-    # Headers as specified in eBay documentation
-    headers = {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Authorization': f'Basic {auth_bytes}'
-    }
-    
-    # Request payload for refresh token grant
-    # As per eBay API documentation format
-    data = {
-        'grant_type': 'refresh_token',
-        'refresh_token': REFRESH_TOKEN,
-        'scope': 'https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/buy.item.bulk'
-    }
-    
-    try:
-        print("🔄 Requesting new access token...")
-        print(f"🔍 Debug - CLIENT_ID: {CLIENT_ID[:10]}..." if CLIENT_ID else "❌ CLIENT_ID not set")
-        print(f"🔍 Debug - REFRESH_TOKEN: {REFRESH_TOKEN[:20]}..." if REFRESH_TOKEN else "❌ REFRESH_TOKEN not set")
-        print(f"🔍 Debug - Request data: {data}")
-        response = requests.post(url, headers=headers, data=data)
-        
-        if response.status_code == 200:
-            token_data = response.json()
-            new_access_token = token_data.get('access_token')
-            new_refresh_token = token_data.get('refresh_token', REFRESH_TOKEN)
-            expires_in = token_data.get('expires_in', 7200)  # Default 2 hours
-            token_type = token_data.get('token_type', 'User Access Token')
-            
-            # Update .env file with new tokens
-            set_key('.env', 'user_token', new_access_token)
-            if new_refresh_token != REFRESH_TOKEN:
-                set_key('.env', 'refresh_token', new_refresh_token)
-            
-            print("✅ Access token refreshed successfully!")
-            print(f"Token type: {token_type}")
-            print(f"Token expires in: {expires_in} seconds ({expires_in/3600:.1f} hours)")
-            print(f"New token: {new_access_token[:20]}...")
-            
-            return new_access_token
-        else:
-            print(f"❌ Token refresh failed: {response.status_code}")
-            print(f"Response: {response.text}")
-            
-            # Handle specific error cases
-            if response.status_code == 400:
-                print("💡 This might be due to:")
-                print("   - Invalid refresh token")
-                print("   - Refresh token expired")
-                print("   - Invalid client credentials")
-            elif response.status_code == 401:
-                print("💡 This might be due to:")
-                print("   - Invalid client_id or client_secret")
-                print("   - Malformed Basic Auth header")
-            
-            return None
-            
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Network error refreshing token: {e}")
-        return None
-    except Exception as e:
-        print(f"❌ Unexpected error refreshing token: {e}")
-        return None
+    # return new_user_token
 
 # SINGLE functions ===========================
 
@@ -229,7 +170,7 @@ def singleSearch(query):
             
         elif response.status_code == 401:
             print("🔄 Token expired, refreshing...")
-            new_token = refreshToken()
+            # new_token = refreshToken()
             if new_token:
                 # Retry the request with new token
                 headers['Authorization'] = f'Bearer {new_token}'
@@ -328,7 +269,7 @@ def single_search_by_seller(seller_username, query="", limit=50, offset=0):
             
         elif response.status_code == 401:
             print("🔄 Token expired, refreshing...")
-            new_token = refreshToken()
+            # new_token = refreshToken()
             if new_token:
                 # Retry with new token
                 headers['Authorization'] = f'Bearer {new_token}'
@@ -538,7 +479,7 @@ def getItemIds(seller_username, query=" ", limit_per_request=200,save_to_file=Tr
                 
             elif response.status_code == 401:
                 print("🔄 Token expired, refreshing...")
-                new_token = refreshToken()
+                # new_token = refreshToken()
                 if new_token:
                     # Retry with new token
                     headers['Authorization'] = f'Bearer {new_token}'
@@ -983,11 +924,10 @@ def run_command(command, *args):
             singleCopyListing(args[0])
             
         elif command == "refresh":
-            print("🔄 Refreshing token...")
             refreshToken()
             
         else:
-            print("❌ Available commands: search, seller, item, collect, process, top, copy, refresh")
+            print("❌ Available commands: search, seller, item, collect, process, top, copy, refresh [token]")
             
     except ValueError as e:
         print(f"❌ {e}")
@@ -998,7 +938,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         print("❌ Usage: python ebay_search_test.py <command> [args...]")
-        print("Commands: search, seller, item, collect, process, top, copy, refresh")
+        print("Commands: search, seller, item, collect, process, top, copy, refresh [token]")
         sys.exit(1)
     
     run_command(sys.argv[1], *sys.argv[2:])
