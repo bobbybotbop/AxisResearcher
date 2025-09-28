@@ -866,64 +866,11 @@ def processSalesExportFromFile(input_filename, output_filename):
         print(f"❌ Error saving top items file: {e}")
         return top_items
 
-def getTopSellingItems(input_filename="IDExport.json", top_n=50, output_filename=None):
+def getTopSellingItems(input_filename="SalesExport.json", top_n=50, pastDays = 9999):
     
-    """
-    Get the top N selling items from a file and export them.
-    
-    Args:
-        input_filename (str): Name of the file containing item IDs
-        top_n (int): Number of top items to return
-        output_filename (str): Name of the output file (optional)
-    
-    Returns:
-        list: Top N selling items
-    """
-    if not output_filename:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_filename = f"Top{top_n}Sales_{timestamp}.json"
-    
-    print(f"🏆 Getting top {top_n} selling items...")
-    
-    # Process all items first
-    all_items = processSalesExportFromFile(input_filename, "temp_sales_export.json")
-    
-    if not all_items:
-        print("❌ No items to process")
-        return []
-    
-    # Get top N items with sales data
-    items_with_sales = [item for item in all_items if item.get('numbersold') is not None]
-    top_items = items_with_sales[:top_n]
-    
-    # Prepare top items data
-    top_items_data = {
-        'source_file': input_filename,
-        'total_items_processed': len(all_items),
-        'top_n': top_n,
-        'export_date': datetime.now().isoformat(),
-        'top_items': top_items
-    }
-    
-    # Export top items
-    try:
-        with open(output_filename, 'w', encoding='utf-8') as f:
-            json.dump(top_items_data, f, indent=2, ensure_ascii=False)
-        
-        print(f"�� Top {top_n} items exported to: {output_filename}")
-        
-        # Display top items summary
-        if top_items:
-            total_sold = sum(item.get('numbersold', 0) for item in top_items)
-            print(f"\n�� Top {top_n} Summary:")
-            print(f"  Total estimated units sold: {total_sold}")
-            print(f"  Average sold per item: {total_sold/len(top_items):.1f}")
-        
-        return top_items
-        
-    except Exception as e:
-        print(f"❌ Error saving top items file: {e}")
-        return top_items
+   
+
+def getByRatio(input_filename="SalesExport.json"):
 
 
 def singleCopyListing(id):
