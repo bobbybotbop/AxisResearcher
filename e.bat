@@ -1,2 +1,2 @@
 @echo off
-python ebay_search_test.py %* 
+python main_ebay_commands.py %* 

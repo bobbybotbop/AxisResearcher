@@ -20,6 +20,8 @@ import time
 from datetime import datetime
 import sys
 import re
+from single_functions import singleSearch, single_search_by_seller
+from helper_functions import remove_html_tags, helper_get_valid_token, handle_http_error, refreshToken
 
 
 load_dotenv()
@@ -29,6 +31,8 @@ CLIENT_SECRET = os.getenv('client_secret')
 USER_TOKEN = os.getenv('user_token')
 REFRESH_TOKEN = os.getenv('refresh_token')
 OPENROUTER_API_KEY = os.getenv('openrouter_api_key')
+
+ZIP_CODE = 14853
 
 
 def call_openrouter_llm(prompt):
@@ -82,301 +86,16 @@ def call_openrouter_llm(prompt):
         return None
 
 
-def remove_html_tags(text):
-    """Efficiently remove HTML tags from text using regex."""
-    if not text or not isinstance(text, str):
-        return text
-    
-    # Remove HTML tags
-    clean_text = re.sub(r'<[^>]+>', '', text)
-    
-    # Decode common HTML entities
-    html_entities = {
-        '&amp;': '&',
-        '&lt;': '<',
-        '&gt;': '>',
-        '&quot;': '"',
-        '&#39;': "'",
-        '&nbsp;': ' '
-    }
-    
-    for entity, replacement in html_entities.items():
-        clean_text = clean_text.replace(entity, replacement)
-    
-    # Clean up extra whitespace
-    clean_text = re.sub(r'\s+', ' ', clean_text).strip()
-    
-    return clean_text
-
-ZIP_CODE = 14853
-# HELPER functions ===========================
-def helper_get_valid_token():
-    """Get a valid access token, refresh if needed"""
-    if not USER_TOKEN:
-        print("❌ No user token available")
-        print("🔄 Attempting to refresh access token...")
-        new_token = refreshToken()
-        return new_token
-    else:
-        return USER_TOKEN
-
-# Add this helper function near the top with your other helper functions (around line 29)
-
-def handle_http_error(response, context=""):
-    """
-    Handle HTTP error responses with specific messages and suggestions.
-    
-    Args:
-        response: requests.Response object
-        context (str): Additional context for the error (e.g., item ID, operation)
-    
-    Returns:
-        None
-    """
-    status_code = response.status_code
-    
-    if status_code == 401:
-        print(f"❌ Authentication failed {context}")
-        print("💡 Token may be expired or invalid")
-    elif status_code == 403:
-        print(f"❌ Access forbidden {context}")
-        print("💡 Check if you have permission to access this resource")
-    elif status_code == 404:
-        print(f"❌ Resource not found {context}")
-        print("💡 Item may have been removed or ID is incorrect")
-    elif status_code == 429:
-        print(f"❌ Rate limit exceeded {context}")
-        print("💡 Too many requests - please wait before trying again")
-    elif status_code >= 500:
-        print(f"❌ Server error ({status_code}) {context}")
-        print("💡 eBay servers are experiencing issues")
-    else:
-        print(f"❌ Unexpected error ({status_code}) {context}")
-    
-
-def refreshToken():
-
-    import webbrowser
-    webbrowser.open("https://developer.ebay.com/my/auth/?env=production&index=0")
-    # """
-    # Open eBay OAuth link and update user token with user input.
-    # """
-    # import webbrowser
-    
-    # # Open eBay OAuth authorization URL
-    # oauth_url = "https://developer.ebay.com/my/auth/?env=production&index=0"
-    # print(refresh_token)
-    # print(f"📱 Please complete the OAuth flow and copy your user token")
-    
-    # # Get new user token from user input
-    # if refresh_token is None:
-    #     webbrowser.open(oauth_url)
-    #     new_user_token = input("Enter your new user token: ").strip()
-    #     if not new_user_token:
-    #         print("❌ User token is required")
-    #         return None
-    # else:
-    #     new_user_token = refresh_token
-    #     print(f"Using provided user token: {refresh_token[:20]}...")
-    
-    # # Update the user token in .env file
-    # set_key('.env', 'user_token', new_user_token)
-    # print(f"✅ User token updated successfully!")
-    # print(f"New token: {new_user_token[:20]}...")
-    
-    # return new_user_token
-
-# SINGLE functions ===========================
-
-
-def singleSearch(query):
-    # Get a valid token, refresh if needed
-    valid_token = helper_get_valid_token()
-    
-    if not valid_token:
-        print("❌ Error: Could not get valid access token")
-        return
-
-    url = "https://api.ebay.com/buy/browse/v1/item_summary/search"
-
-    # Headers for Browse API
-    headers = {
-        'X-EBAY-C-ENDUSERCTX': f'contextualLocation=country=US,zip={ZIP_CODE}',
-        'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
-        'Authorization': f'Bearer {valid_token}',
-        'Content-Type': 'application/json'
-    }
-
-    # Parameters for Browse API
-    params = {
-        'q': query,
-        'limit': 10,
-        'offset': 0,
-        'fieldgroups': 'EXTENDED',  # Get additional item details
-        'sort': 'BEST_MATCH',  # Sort by best match
-        'filter': 'buyingOptions:{FIXED_PRICE}'  # Only show Buy It Now items
-    }
-
-    # Make request with headers
-    try:
-        response = requests.get(url, headers=headers, params=params)
-
-        # print(f"Status Code: {response.status_code}")
-        # print(f"Response Headers: {dict(response.headers)}")
-
-        if response.status_code == 200:
-            """Parse and display the API response"""
-            data = response.json()
-            print("✅ Success! Browse API Response:")
-            
-            # Extract key information from Browse API response
-            total = data.get('total', 0)
-            items = data.get('itemSummaries', [])
-            
-            print(f"Total items found: {total}")
-            print(f"Items returned: {len(items)}")
-            print("\nFirst few items:")
-            
-            for i, item in enumerate(items[:3]):  # Show first 3 items
-                print(f"\nItem {i+1}:")
-                print(f"  Title: {item.get('title', 'N/A')}")
-                print(f"  Price: {item.get('price', {}).get('value', 'N/A')} {item.get('price', {}).get('currency', '')}")
-                print(f"  Condition: {item.get('condition', 'N/A')}")
-                print(f"  Seller: {item.get('seller', {}).get('username', 'N/A')}")
-                print(f"  Item URL: {item.get('itemWebUrl', 'N/A')}")
-            
-            print(f"\nFull response structure:")
-            print(f"Keys in response: {list(data.keys())}")
-            
-        elif response.status_code == 401:
-            print("🔄 Token expired, refreshing...")
-            # new_token = refreshToken()
-            if new_token:
-                # Retry the request with new token
-                headers['Authorization'] = f'Bearer {new_token}'
-                response = requests.get(url, headers=headers, params=params)
-                if response.status_code == 200:
-                    parse(response)
-                else:
-                    print(f"❌ Still failed after refresh: {response.status_code}")
-            else:
-                print("❌ Could not refresh token")
-        else:
-            print(f"❌ Error occurred: {response.status_code}")
-            print(f"Response: {response.text}")
-
-    except Exception as e:
-        print(f"Error parsing JSON: {e}")
-        print("Raw response:")
-        print(response.text)
-
-def single_search_by_seller(seller_username, query="", limit=50, offset=0):
-    """
-    Search for all items from a specific eBay seller/store.
-    
-    Args:
-        seller_username (str): The eBay username of the seller
-        query (str): Optional keyword search to filter within seller's items
-        limit (int): Number of items to return (max 200)
-        offset (int): Offset for pagination
-    
-    Returns:
-        dict: Search results with items from the specified seller
-    """
-    # Get a valid token, refresh if needed
-    valid_token = helper_get_valid_token()
-    
-    if not valid_token:
-        print("❌ Error: Could not get valid access token")
-        return None
-    
-    url = "https://api.ebay.com/buy/browse/v1/item_summary/search"
-    
-    # Headers for Browse API
-    headers = {
-        'X-EBAY-C-ENDUSERCTX': f'contextualLocation=country=US,zip={ZIP_CODE}',
-        'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
-        'Authorization': f'Bearer {valid_token}',
-        'Content-Type': 'application/json'
-    }
-    
-    # Parameters for Browse API with seller filter
-    params = {
-        'limit': min(limit, 200),  # Max 200 per request
-        'offset': offset,
-        'fieldgroups': 'EXTENDED',
-        'sort': 'BEST_MATCH',
-        'filter': f'sellers:{{{seller_username}}}'  # Filter by specific seller
-    }
-    
-    # Add keyword search if provided
-    if query:
-        params['q'] = query
-    
-    try:
-        print(f"🔍 Searching items from seller: {seller_username}")
-        if query:
-            print(f"🔍 With keyword filter: {query}")
-        
-        response = requests.get(url, headers=headers, params=params)
-        
-        if response.status_code == 200:
-            data = response.json()
-            total = data.get('total', 0)
-            items = data.get('itemSummaries', [])
-            print(data)
-            print(f"✅ Found {total} total items from {seller_username}")
-            print(f"📦 Retrieved {len(items)} items in this response")
-            
-            # Display first few items
-            if items:
-                print(f"\n📋 First few items from {seller_username}:")
-                for i, item in enumerate(items[:5]):  # Show first 5 items
-                    print(f"\nItem {i+1}:")
-                    print(f"  Title: {item.get('title', 'N/A')}")
-                    print(f"  Price: {item.get('price', {}).get('value', 'N/A')} {item.get('price', {}).get('currency', '')}")
-                    print(f"  Condition: {item.get('condition', 'N/A')}")
-                    print(f"  Item ID: {item.get('itemId', 'N/A')}")
-                    print(f"  Item URL: {item.get('itemWebUrl', 'N/A')}")
-            
-            return {
-                'total_items': total,
-                'items': items,
-                'seller': seller_username,
-                'query': query,
-                'has_more': len(items) < total
-            }
-            
-        elif response.status_code == 401:
-            print("🔄 Token expired, refreshing...")
-            # new_token = refreshToken()
-            if new_token:
-                # Retry with new token
-                headers['Authorization'] = f'Bearer {new_token}'
-                response = requests.get(url, headers=headers, params=params)
-                if response.status_code == 200:
-                    return search_by_seller(seller_username, query, limit, offset)
-            print("❌ Could not refresh token")
-            return None
-        else:
-            print(f"❌ Error occurred: {response.status_code}")
-            print(f"Response: {response.text}")
-            return None
-            
-    except Exception as e:
-        print(f"❌ Error searching by seller: {e}")
-        return None
-
 def single_get_detailed_item_data(item_id, verbose=True):
     """
-    Get detailed sales data for a specific item including estimatedSoldQuantity
+    Get complete detailed data for a specific item from eBay API
     
     Args:
         item_id (str): The eBay item ID (e.g., "v1|123456789|0")
-        verbose (bool): If True, prints detailed information. Default: False (echo off)
+        verbose (bool): If True, prints detailed information. Default: True
     
     Returns:
-        dict: Item details including estimated sales data
+        dict: Complete item data from eBay API
     """
 
     if item_id[0] != 'v':
@@ -399,83 +118,46 @@ def single_get_detailed_item_data(item_id, verbose=True):
     
     try:
         if verbose:
-            print(f"🔍 Fetching sales data for item: {item_id}")
+            print(f"🔍 Fetching complete item data for: {item_id}")
         response = requests.get(url, headers=headers)
         
         if response.status_code == 200:
             item = response.json()
             
             if verbose:
-                print(f"✅ Item Details Retrieved:")
-            # print(f"Title: {item.get('title', 'N/A')}")
-            # print(f"Price: ${item.get('price', {}).get('value', 'N/A')} {item.get('price', {}).get('currency', '')}")
-            # print(f"Seller: {item.get('seller', {}).get('username', 'N/A')}")
-            
-            # Extract estimated sales data
-            estimated_availabilities = item.get('estimatedAvailabilities', [])
-            
-            if estimated_availabilities: # might cause error later
-                if verbose:
+                print(f"✅ Complete Item Data Retrieved:")
+                print(f"   Title: {item.get('title', 'N/A')}")
+                print(f"   Price: ${item.get('price', {}).get('value', 'N/A')} {item.get('price', {}).get('currency', '')}")
+                print(f"   Seller: {item.get('seller', {}).get('username', 'N/A')}")
+                
+                # Show estimated sales data if available
+                estimated_availabilities = item.get('estimatedAvailabilities', [])
+                if estimated_availabilities:
                     print(f"\n📊 Sales Data:")
-                for i, availability in enumerate(estimated_availabilities):
-                    estimated_sold = availability.get('estimatedSoldQuantity')
-                    estimated_available = availability.get('estimatedAvailableQuantity')
-                    
-                    item_title = item.get('title', 'N/A')
-                    if verbose:
-                        print(f"Title: {item_title}")
-                    if estimated_sold is not None:
-                        if verbose:
+                    for i, availability in enumerate(estimated_availabilities):
+                        estimated_sold = availability.get('estimatedSoldQuantity')
+                        estimated_available = availability.get('estimatedAvailableQuantity')
+                        
+                        if estimated_sold is not None:
                             print(f"    Estimated Sold: {estimated_sold} units")
-                    else:
-                        if verbose:
+                        else:
                             print(f"    Estimated Sold: Not available")
-                    
-                    if estimated_available is not None:
-                        if verbose:
+                        
+                        if estimated_available is not None:
                             print(f"    Estimated Available: {estimated_available} units")
             
-            # Get price information
-            price_info = item.get('price', {})
-            price_value = price_info.get('value', 'N/A')
-            currency = price_info.get('currency', 'USD')
-            formatted_price = f"${price_value} {currency}" if price_value != 'N/A' else 'N/A'
-            
-            # Get description (shortDescription or description) and remove HTML
-            description = item.get('description') or item.get('description', 'No description available')
-            description = remove_html_tags(description)
-            
-            # Get date (item creation date)
-            item_creation_date = item.get('itemCreationDate', 'N/A')
-            
-            # Get number of pictures
-            images = item.get('image', {})
-            image_urls = images.get('imageUrl', []) if isinstance(images.get('imageUrl'), list) else [images.get('imageUrl')] if images.get('imageUrl') else []
-            number_of_pictures = len([url for url in image_urls if url])
-            
-            # Get thumbnail URL
-            thumbnail_url = images.get('thumbnailUrl') or images.get('imageUrl') if isinstance(images.get('imageUrl'), str) else (image_urls[0] if image_urls else 'N/A')
-            
-            return {
-                'item_id': item_id,
-                'title': item_title,
-                'description': description,
-                'date': item_creation_date,
-                'numbersold': estimated_availabilities[0].get('estimatedSoldQuantity') if estimated_availabilities else None,
-                'price': formatted_price,
-                'numberOfPictures': number_of_pictures,
-                'thumbnailURL': thumbnail_url
-            }
+            # Return the complete item object
+            return item
             
         else:
             handle_http_error(response, "single_get_detailed_item_data")
+            return None
     except Exception as e:
-        print(f"❌ Error fetching item sales data: {e}")
+        print(f"❌ Error fetching item data: {e}")
         return None
 
-def getItemIds(seller_username, query=" ", limit_per_request=200,save_to_file=True, filename="IDExport"):
+def getItemIds(seller_username, query=" ", limit_per_request=200):
     
-
     """
     Get all item IDs from a specific eBay seller with pagination and rate limiting.
     
@@ -567,8 +249,6 @@ def getItemIds(seller_username, query=" ", limit_per_request=200,save_to_file=Tr
                 offset += limit_per_request
                 
                 # Pause between requests to avoid rate limiting
-                print(f"⏳ Pausing .1 seconds before next request...")
-                time.sleep(.1)
                 
             elif response.status_code == 401:
                 print("🔄 Token expired, refreshing...")
@@ -597,8 +277,6 @@ def getItemIds(seller_username, query=" ", limit_per_request=200,save_to_file=Tr
                             break
                         
                         offset += limit_per_request
-                        print(f"⏳ Pausing .1 seconds before next request...")
-                        time.sleep(.1)
                         continue
                 print("❌ Could not refresh token")
                 break
@@ -618,17 +296,19 @@ def getItemIds(seller_username, query=" ", limit_per_request=200,save_to_file=Tr
     if query:
         print(f"Query filter: {query}")
     
-    # Save to file if requested
-    if save_to_file and all_item_ids:
-        # Generate filename if not provided
-        if not filename:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            safe_seller = seller_username.replace(" ", "_").replace("/", "_")
-            if query:
-                safe_query = query.replace(" ", "_").replace("/", "_")
-                filename = f"item_ids_{safe_seller}_{safe_query}_{timestamp}.json"
-            else:
-                filename = f"item_ids_{safe_seller}_{timestamp}.json"
+    # Always save to file
+    if all_item_ids:
+        # Create folder for seller if it doesn't exist
+        safe_seller = seller_username.replace(" ", "_").replace("/", "_").replace("\\", "_")
+        seller_folder = safe_seller
+        
+        if not os.path.exists(seller_folder):
+            os.makedirs(seller_folder)
+            print(f"📁 Created folder: {seller_folder}")
+        
+        # Generate filename with seller username and date
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{seller_folder}/{safe_seller}_{timestamp}.json"
         
         # Prepare data to save
         save_data = {
@@ -651,18 +331,96 @@ def getItemIds(seller_username, query=" ", limit_per_request=200,save_to_file=Tr
             print(f"❌ Error saving to file: {e}")
     
     return all_item_ids
-def processSalesExportFromFile(input_filename, output_filename):
+
+def find_newest_seller_file(seller_username):
     """
-    Load item IDs from IDExport.json, get sales data for each item, sort by estimated sold quantity,
-    and export the sorted data to SalesExport.json.
+    Find the newest file for a specific seller.
     
     Args:
-        input_filename (str): Name of the file containing item IDs (default: IDExport.json)
-        output_filename (str): Name of the output file for sales data (default: SalesExport.json)
+        seller_username (str): The eBay username of the seller
+    
+    Returns:
+        str: Path to the newest file, or None if no files found
+    """
+    import glob
+    
+    # Create safe seller name for folder matching
+    safe_seller = seller_username.replace(" ", "_").replace("/", "_").replace("\\", "_")
+    
+    # Look for files in the seller's folder
+    pattern = f"{safe_seller}/{safe_seller}_*.json"
+    files = glob.glob(pattern)
+    
+    if not files:
+        # Also check for files without the seller folder structure
+        pattern = f"{safe_seller}_*.json"
+        files = glob.glob(pattern)
+    
+    if not files:
+        print(f"❌ No files found for seller: {seller_username}")
+        print(f"💡 Make sure you've run 'collect' command first to gather item IDs")
+        return None
+    
+    # Sort files by modification time (newest first)
+    files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+    
+    newest_file = files[0]
+    print(f"📁 Found newest file for {seller_username}: {newest_file}")
+    
+    return newest_file
+
+def processSalesExportFromFile(seller_username=None, output_filename=None, limit=None):
+    """
+    Process sales data for a seller by finding their newest item ID file and generating sales export.
+    
+    Args:
+        seller_username (str): The eBay username of the seller (required)
+        output_filename (str): Name of the output file for sales data (optional, auto-generated if not provided)
+        limit (int): Maximum number of item IDs to process (optional, processes all if not specified)
     
     Returns:
         list: Sorted list of items with sales data
     """
+    if not seller_username:
+        print("❌ Error: seller_username is required")
+        print("💡 Usage: process <seller_username> [limit] [output_filename]")
+        return []
+    
+    # Find the newest file for this seller
+    input_filename = find_newest_seller_file(seller_username)
+    if not input_filename:
+        return []
+    
+    # Generate output filename and folder structure
+    safe_seller = seller_username.replace(" ", "_").replace("/", "_").replace("\\", "_")
+    
+    # Create seller folder if it doesn't exist
+    seller_folder = safe_seller
+    if not os.path.exists(seller_folder):
+        os.makedirs(seller_folder)
+        print(f"📁 Created seller folder: {seller_folder}")
+    
+    # Create processed-sales-data subfolder
+    processed_folder = os.path.join(seller_folder, "processed-sales-data")
+    if not os.path.exists(processed_folder):
+        os.makedirs(processed_folder)
+        print(f"📁 Created processed-sales-data folder: {processed_folder}")
+    
+    # Generate filename based on input filename
+    if not output_filename:
+        # Extract the base filename from input_filename and add PROCESSED prefix
+        input_basename = os.path.basename(input_filename)
+        # Remove the .json extension and add PROCESSED prefix
+        base_name = input_basename.replace('.json', '')
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_filename = f"PROCESSED_{base_name}_{timestamp}.json"
+    
+    # Ensure the output filename is in the processed-sales-data folder
+    if not os.path.dirname(output_filename):
+        output_filename = os.path.join(processed_folder, output_filename)
+    elif not output_filename.startswith(processed_folder):
+        output_filename = os.path.join(processed_folder, os.path.basename(output_filename))
+    
     print(f"📁 Loading item IDs from: {input_filename}")
     
     # Load item IDs from file
@@ -674,7 +432,14 @@ def processSalesExportFromFile(input_filename, output_filename):
         seller_username = data.get('seller_username', 'Unknown')
         query = data.get('query', '')
         
-        print(f"✅ Loaded {len(item_ids)} item IDs from {seller_username}")
+        # Apply limit if specified
+        if limit is not None and limit > 0:
+            original_count = len(item_ids)
+            item_ids = item_ids[:limit]
+            print(f"✅ Loaded {len(item_ids)} item IDs from {seller_username} (limited from {original_count})")
+        else:
+            print(f"✅ Loaded {len(item_ids)} item IDs from {seller_username}")
+        
         if query:
             print(f"Query filter: {query}")
             
@@ -719,11 +484,25 @@ def processSalesExportFromFile(input_filename, output_filename):
     print(f"\n🔄 Sorting items by estimated sold quantity...")
     
     # Filter items that have sales data and sort
-    items_with_sales = [item for item in all_sales_data if item.get('numbersold') is not None]
-    items_without_sales = [item for item in all_sales_data if item.get('numbersold') is None]
+    def get_estimated_sold_quantity(item):
+        """Extract estimated sold quantity from complete item data"""
+        estimated_availabilities = item.get('estimatedAvailabilities', [])
+        if estimated_availabilities:
+            return estimated_availabilities[0].get('estimatedSoldQuantity')
+        return None
+    
+    def get_formatted_price(item):
+        """Extract formatted price from complete item data"""
+        price_info = item.get('price', {})
+        price_value = price_info.get('value', 'N/A')
+        currency = price_info.get('currency', 'USD')
+        return f"${price_value} {currency}" if price_value != 'N/A' else 'N/A'
+    
+    items_with_sales = [item for item in all_sales_data if get_estimated_sold_quantity(item) is not None]
+    items_without_sales = [item for item in all_sales_data if get_estimated_sold_quantity(item) is None]
     
     # Sort by estimated sold quantity (descending)
-    sorted_items = sorted(items_with_sales, key=lambda x: x.get('numbersold', 0), reverse=True)
+    sorted_items = sorted(items_with_sales, key=lambda x: get_estimated_sold_quantity(x) or 0, reverse=True)
     
     # Add items without sales data at the end
     final_sorted_list = sorted_items + items_without_sales
@@ -734,9 +513,9 @@ def processSalesExportFromFile(input_filename, output_filename):
     # Display top 10 items
     print(f"\n🏆 Top 10 Best Selling Items:")
     for i, item in enumerate(sorted_items[:10]):
-        sold_qty = item.get('numbersold', 0)
+        sold_qty = get_estimated_sold_quantity(item) or 0
         title = item.get('title', 'N/A')[:50]
-        price = item.get('price', 'N/A')
+        price = get_formatted_price(item)
         print(f"  {i+1:2d}. {sold_qty:3d} sold - {price} - {title}...")
     
     # Prepare export data
@@ -749,6 +528,7 @@ def processSalesExportFromFile(input_filename, output_filename):
         'items_without_sales_data': len(items_without_sales),
         'export_date': datetime.now().isoformat(),
         'sorted_by': 'numbersold_desc',
+        'limit_applied': limit if limit else None,
         'items': final_sorted_list
     }
     
@@ -762,11 +542,11 @@ def processSalesExportFromFile(input_filename, output_filename):
         
         # Display summary statistics
         if sorted_items:
-            total_sold = sum(item.get('numbersold', 0) for item in sorted_items)
+            total_sold = sum(get_estimated_sold_quantity(item) or 0 for item in sorted_items)
             avg_sold = total_sold / len(sorted_items)
-            max_sold = max(item.get('numbersold', 0) for item in sorted_items)
+            max_sold = max(get_estimated_sold_quantity(item) or 0 for item in sorted_items)
             
-            print(f"\n Sales Summary:")
+            print(f"\n📊 Sales Summary:")
             print(f"  Total estimated units sold: {total_sold}")
             print(f"  Average sold per item: {avg_sold:.1f}")
             print(f"  Highest selling item: {max_sold} units")
@@ -820,8 +600,16 @@ def processSalesExportFromFile(input_filename, output_filename):
         print("❌ No items found in file")
         return []
     
+    # Helper function to extract estimated sold quantity from complete item data
+    def get_estimated_sold_quantity_from_item(item):
+        """Extract estimated sold quantity from complete item data"""
+        estimated_availabilities = item.get('estimatedAvailabilities', [])
+        if estimated_availabilities:
+            return estimated_availabilities[0].get('estimatedSoldQuantity')
+        return None
+    
     # Get top N items with sales data (they're already sorted)
-    items_with_sales = [item for item in all_items if item.get('numbersold') is not None]
+    items_with_sales = [item for item in all_items if get_estimated_sold_quantity_from_item(item) is not None]
     top_items = items_with_sales[:top_n]
     
     print(f"📊 Found {len(items_with_sales)} items with sales data")
@@ -847,18 +635,24 @@ def processSalesExportFromFile(input_filename, output_filename):
         
         # Display top items summary
         if top_items:
-            total_sold = sum(item.get('numbersold', 0) for item in top_items)
-            print(f"\n Top {top_n} Summary:")
+            total_sold = sum(get_estimated_sold_quantity_from_item(item) or 0 for item in top_items)
+            print(f"\n🏆 Top {top_n} Summary:")
             print(f"  Total estimated units sold: {total_sold}")
             print(f"  Average sold per item: {total_sold/len(top_items):.1f}")
             
             # Show top 5 items
             print(f"\n🏆 Top 5 Items:")
             for i, item in enumerate(top_items[:5]):
-                sold_qty = item.get('numbersold', 0)
+                sold_qty = get_estimated_sold_quantity_from_item(item) or 0
                 title = item.get('title', 'N/A')[:40]
-                price = item.get('price', 'N/A')
-                print(f"  {i+1}. {sold_qty:3d} sold - {price} - {title}...")
+                
+                # Extract price information
+                price_info = item.get('price', {})
+                price_value = price_info.get('value', 'N/A')
+                currency = price_info.get('currency', 'USD')
+                formatted_price = f"${price_value} {currency}" if price_value != 'N/A' else 'N/A'
+                
+                print(f"  {i+1}. {sold_qty:3d} sold - {formatted_price} - {title}...")
         
         return top_items
         
@@ -867,10 +661,120 @@ def processSalesExportFromFile(input_filename, output_filename):
         return top_items
 
 def getTopSellingItems(input_filename="SalesExport.json", top_n=50, pastDays = 9999):
+    """
+    Get the top N selling items from a processed sales export file.
     
-   
+    Args:
+        input_filename (str): Name of the file containing processed sales data (SalesExport.json)
+        top_n (int): Number of top items to return
+        pastDays (int): Number of past days to filter (not implemented yet)
+    
+    Returns:
+        list: Top N selling items
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_filename = f"Top{top_n}Sales_{timestamp}.json"
+    
+    print(f"🏆 Getting top {top_n} selling items from {input_filename}...")
+    
+    # Load the processed sales data
+    try:
+        with open(input_filename, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        all_items = data.get('items', [])
+        seller_username = data.get('seller_username', 'Unknown')
+        
+        print(f"✅ Loaded {len(all_items)} items from {seller_username}")
+        
+    except FileNotFoundError:
+        print(f"❌ File not found: {input_filename}")
+        print(f"💡 Make sure you've run processSalesExportFromFile() first to create {input_filename}")
+        return []
+    except json.JSONDecodeError:
+        print(f"❌ Invalid JSON file: {input_filename}")
+        return []
+    except Exception as e:
+        print(f"❌ Error loading file: {e}")
+        return []
+    
+    if not all_items:
+        print("❌ No items found in file")
+        return []
+    
+    # Helper function to extract estimated sold quantity from complete item data
+    def get_estimated_sold_quantity_from_item(item):
+        """Extract estimated sold quantity from complete item data"""
+        estimated_availabilities = item.get('estimatedAvailabilities', [])
+        if estimated_availabilities:
+            return estimated_availabilities[0].get('estimatedSoldQuantity')
+        return None
+    
+    # Get top N items with sales data (they're already sorted)
+    items_with_sales = [item for item in all_items if get_estimated_sold_quantity_from_item(item) is not None]
+    top_items = items_with_sales[:top_n]
+    
+    print(f"📊 Found {len(items_with_sales)} items with sales data")
+    print(f"🏆 Selecting top {min(top_n, len(top_items))} items")
+    
+    # Prepare top items data
+    top_items_data = {
+        'source_file': input_filename,
+        'seller_username': seller_username,
+        'total_items_available': len(all_items),
+        'items_with_sales_data': len(items_with_sales),
+        'top_n': top_n,
+        'export_date': datetime.now().isoformat(),
+        'top_items': top_items
+    }
+    
+    # Export top items
+    try:
+        with open(output_filename, 'w', encoding='utf-8') as f:
+            json.dump(top_items_data, f, indent=2, ensure_ascii=False)
+        
+        print(f" Top {top_n} items exported to: {output_filename}")
+        
+        # Display top items summary
+        if top_items:
+            total_sold = sum(get_estimated_sold_quantity_from_item(item) or 0 for item in top_items)
+            print(f"\n🏆 Top {top_n} Summary:")
+            print(f"  Total estimated units sold: {total_sold}")
+            print(f"  Average sold per item: {total_sold/len(top_items):.1f}")
+            
+            # Show top 5 items
+            print(f"\n🏆 Top 5 Items:")
+            for i, item in enumerate(top_items[:5]):
+                sold_qty = get_estimated_sold_quantity_from_item(item) or 0
+                title = item.get('title', 'N/A')[:40]
+                
+                # Extract price information
+                price_info = item.get('price', {})
+                price_value = price_info.get('value', 'N/A')
+                currency = price_info.get('currency', 'USD')
+                formatted_price = f"${price_value} {currency}" if price_value != 'N/A' else 'N/A'
+                
+                print(f"  {i+1}. {sold_qty:3d} sold - {formatted_price} - {title}...")
+        
+        return top_items
+        
+    except Exception as e:
+        print(f"❌ Error saving top items file: {e}")
+        return top_items
+
 
 def getByRatio(input_filename="SalesExport.json"):
+    """
+    Get items sorted by ratio (placeholder function).
+    
+    Args:
+        input_filename (str): Name of the file containing processed sales data
+    
+    Returns:
+        list: Items sorted by ratio
+    """
+    print("⚠️ getByRatio function not yet implemented")
+    return []
 
 
 def singleCopyListing(id):
@@ -881,14 +785,37 @@ def singleCopyListing(id):
 
     if listing:
         print("📦 Listing Details:")
-        print(f"   Item ID: {listing.get('item_id', 'N/A')}")
+        print(f"   Item ID: {listing.get('itemId', 'N/A')}")
         print(f"   Title: {listing.get('title', 'N/A')}")
-        print(f"   Description: {listing.get('description', 'N/A')}")
-        print(f"   Date: {listing.get('date', 'N/A')}")
-        print(f"   Number Sold: {listing.get('numbersold', 'N/A')}")
-        print(f"   Price: {listing.get('price', 'N/A')}")
-        print(f"   Number of Pictures: {listing.get('numberOfPictures', 'N/A')}")
-        print(f"   Thumbnail URL: {listing.get('thumbnailURL', 'N/A')}")
+        
+        # Extract description and remove HTML tags
+        description = listing.get('description', 'No description available')
+        clean_description = remove_html_tags(description)
+        print(f"   Description: {clean_description}")
+        
+        print(f"   Date: {listing.get('itemCreationDate', 'N/A')}")
+        
+        # Extract estimated sold quantity
+        estimated_availabilities = listing.get('estimatedAvailabilities', [])
+        estimated_sold = estimated_availabilities[0].get('estimatedSoldQuantity') if estimated_availabilities else None
+        print(f"   Number Sold: {estimated_sold if estimated_sold is not None else 'N/A'}")
+        
+        # Extract price information
+        price_info = listing.get('price', {})
+        price_value = price_info.get('value', 'N/A')
+        currency = price_info.get('currency', 'USD')
+        formatted_price = f"${price_value} {currency}" if price_value != 'N/A' else 'N/A'
+        print(f"   Price: {formatted_price}")
+        
+        # Extract number of pictures
+        images = listing.get('image', {})
+        image_urls = images.get('imageUrl', []) if isinstance(images.get('imageUrl'), list) else [images.get('imageUrl')] if images.get('imageUrl') else []
+        number_of_pictures = len([url for url in image_urls if url])
+        print(f"   Number of Pictures: {number_of_pictures}")
+        
+        # Extract thumbnail URL
+        thumbnail_url = images.get('thumbnailUrl') or images.get('imageUrl') if isinstance(images.get('imageUrl'), str) else (image_urls[0] if image_urls else 'N/A')
+        print(f"   Thumbnail URL: {thumbnail_url}")
     else:
         print("❌ No listing data available")
     
@@ -907,10 +834,10 @@ Output format (strict JSON):
 }}
 
 Original title:
-{listing.get('title', '')}
+{listing.get('title', '') if listing else ''}
 
 Original description:
-{listing.get('description', '')}
+{clean_description if listing else ''}
 """
     
     # Call OpenRouter API to get optimized content
@@ -962,9 +889,20 @@ def run_command(command, *args):
             result = single_get_detailed_item_data(args[0])
             if result:
                 print(f"✅ Title: {result.get('title', 'N/A')}")
-                print(f"💰 Price: {result.get('price', 'N/A')}")
-                print(f"📊 Sold: {result.get('numbersold', 'N/A')}")
-                print(f"📅 Date: {result.get('date', 'N/A')}")
+                
+                # Extract price information
+                price_info = result.get('price', {})
+                price_value = price_info.get('value', 'N/A')
+                currency = price_info.get('currency', 'USD')
+                formatted_price = f"${price_value} {currency}" if price_value != 'N/A' else 'N/A'
+                print(f"💰 Price: {formatted_price}")
+                
+                # Extract estimated sold quantity
+                estimated_availabilities = result.get('estimatedAvailabilities', [])
+                estimated_sold = estimated_availabilities[0].get('estimatedSoldQuantity') if estimated_availabilities else None
+                print(f"📊 Sold: {estimated_sold if estimated_sold is not None else 'N/A'}")
+                
+                print(f"📅 Date: {result.get('itemCreationDate', 'N/A')}")
                 
         elif command == "collect":
             if not args: raise ValueError("Usage: collect <seller_username> [query] [limit]")
@@ -973,9 +911,14 @@ def run_command(command, *args):
             getItemIds(seller, query, limit)
             
         elif command == "process":
-            input_file, output_file = args[0] if args else "IDExport.json", args[1] if len(args) > 1 else "SalesExport.json"
-            print(f"📊 Processing: {input_file} -> {output_file}")
-            processSalesExportFromFile(input_file, output_file)
+            if not args: raise ValueError("Usage: process <seller_username> [limit] [output_filename]")
+            seller_username = args[0]
+            limit = int(args[1]) if len(args) > 1 and args[1].isdigit() else None
+            output_filename = args[2] if len(args) > 2 else (args[1] if len(args) > 1 and not args[1].isdigit() else None)
+            print(f"📊 Processing newest file for seller: {seller_username}")
+            if limit:
+                print(f"🔢 Limiting to {limit} items")
+            processSalesExportFromFile(seller_username, output_filename, limit)
             
         elif command == "top":
             input_file, top_n, output_file = args[0] if args else "SalesExport.json", int(args[1]) if len(args) > 1 else 50, args[2] if len(args) > 2 else None
@@ -1001,7 +944,7 @@ def run_command(command, *args):
 if __name__ == "__main__":
 
     if len(sys.argv) < 2:
-        print("❌ Usage: python ebay_search_test.py <command> [args...]")
+        print("❌ Usage: python main_ebay_commands.py <command> [args...]")
         print("Commands: search, seller, item, collect, process, top, copy, refresh [token]")
         sys.exit(1)
     
