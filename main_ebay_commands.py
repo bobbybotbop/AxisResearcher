@@ -867,6 +867,368 @@ Original description:
         return None
             
 
+def add_item(item_data):
+    """
+    Create and publish a new listing on eBay using the Trading API AddItem endpoint.
+    
+    Args:
+        item_data (dict): Dictionary containing all mandatory information for creating an item
+    
+    Returns:
+        dict: Response containing item ID and fees if successful, or error information
+    """
+    import xml.etree.ElementTree as ET
+    from datetime import datetime, timedelta
+    
+    # Get a valid token for Trading API
+    # Use the same user_token as other functions in this codebase
+    valid_token = helper_get_valid_token()
+    if not valid_token:
+        print("❌ Error: Could not get valid access token")
+        return {"success": False, "error": "Could not get valid access token"}
+    
+    # Use production endpoint
+    url = "https://api.ebay.com/ws/api.dll"
+    site_id = "0"  # US Production
+    print("🚀 Using eBay Production environment")
+    
+    # Validate required fields
+    required_fields = [
+        'Title', 'Description', 'CategoryID', 'StartPrice', 'ConditionID',
+        'Country', 'Currency', 'DispatchTimeMax', 'ListingDuration', 'ListingType',
+        'PaymentMethods', 'PayPalEmailAddress', 'PostalCode', 'Quantity'
+    ]
+    
+    missing_fields = [field for field in required_fields if field not in item_data]
+    if missing_fields:
+        error_msg = f"Missing required fields: {', '.join(missing_fields)}"
+        print(f"❌ {error_msg}")
+        return {"success": False, "error": error_msg}
+    
+    # Set default values for optional fields if not provided
+    defaults = {
+        'ReturnsAcceptedOption': 'ReturnsAccepted',
+        'RefundOption': 'MoneyBack',
+        'ReturnsWithinOption': 'Days_30',
+        'ShippingCostPaidByOption': 'Buyer',
+        'ShippingType': 'Flat',
+        'ShippingService': 'USPSPriority',
+        'ShippingServiceCost': '5.99',
+        'Location': 'United States'
+    }
+    
+    for key, default_value in defaults.items():
+        if key not in item_data:
+            item_data[key] = default_value
+    
+    # Construct the XML payload
+    xml_payload = f"""<?xml version="1.0" encoding="utf-8"?>
+<AddItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+    <RequesterCredentials>
+      <eBayAuthToken>{valid_token}</eBayAuthToken>
+    </RequesterCredentials>
+  <Item>
+    <Title><![CDATA[{item_data['Title']}]]></Title>
+    <Description><![CDATA[{item_data['Description']}]]></Description>
+    <PrimaryCategory>
+      <CategoryID>{item_data['CategoryID']}</CategoryID>
+    </PrimaryCategory>
+    <StartPrice>{item_data['StartPrice']}</StartPrice>
+    <ConditionID>{item_data['ConditionID']}</ConditionID>
+    <Country>{item_data['Country']}</Country>
+    <Currency>{item_data['Currency']}</Currency>
+    <DispatchTimeMax>{item_data['DispatchTimeMax']}</DispatchTimeMax>
+    <ListingDuration>{item_data['ListingDuration']}</ListingDuration>
+    <ListingType>{item_data['ListingType']}</ListingType>
+    <PaymentMethods>{item_data['PaymentMethods']}</PaymentMethods>
+    <PayPalEmailAddress>{item_data['PayPalEmailAddress']}</PayPalEmailAddress>
+    <PostalCode>{item_data['PostalCode']}</PostalCode>
+    <Quantity>{item_data['Quantity']}</Quantity>
+    <Location>{item_data.get('Location', 'United States')}</Location>
+    <ReturnPolicy>
+      <ReturnsAcceptedOption>{item_data['ReturnsAcceptedOption']}</ReturnsAcceptedOption>
+      <RefundOption>{item_data['RefundOption']}</RefundOption>
+      <ReturnsWithinOption>{item_data['ReturnsWithinOption']}</ReturnsWithinOption>
+      <ShippingCostPaidByOption>{item_data['ShippingCostPaidByOption']}</ShippingCostPaidByOption>
+    </ReturnPolicy>
+    <ShippingDetails>
+      <ShippingType>{item_data['ShippingType']}</ShippingType>
+      <ShippingServiceOptions>
+        <ShippingService>{item_data['ShippingService']}</ShippingService>
+        <ShippingServiceCost>{item_data['ShippingServiceCost']}</ShippingServiceCost>
+      </ShippingServiceOptions>
+    </ShippingDetails>
+    <Site>US</Site>
+  </Item>
+</AddItemRequest>"""
+    
+    # Set the headers for eBay Trading API
+    # Use the same credentials as other functions in this codebase
+    headers = {
+        "X-EBAY-API-SITEID": site_id,
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+        "X-EBAY-API-CALL-NAME": "AddItem",
+        "X-EBAY-API-DEV-NAME": CLIENT_ID,
+        "X-EBAY-API-APP-NAME": API_KEY,
+        "X-EBAY-API-CERT-NAME": CLIENT_SECRET,
+        "Content-Type": "text/xml"
+    }
+    
+    try:
+        print(f"📦 Creating listing: {item_data['Title'][:50]}...")
+        print(f"💰 Price: ${item_data['StartPrice']} {item_data['Currency']}")
+        print(f"📂 Category: {item_data['CategoryID']}")
+        
+        response = requests.post(url, data=xml_payload, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            # Parse the response
+            response_xml = ET.fromstring(response.content)
+            ack = response_xml.find(".//{urn:ebay:apis:eBLBaseComponents}Ack")
+            
+            if ack is not None and ack.text == "Success":
+                # Extract success information
+                item_id = response_xml.find(".//{urn:ebay:apis:eBLBaseComponents}ItemID")
+                start_date = response_xml.find(".//{urn:ebay:apis:eBLBaseComponents}StartDate")
+                end_date = response_xml.find(".//{urn:ebay:apis:eBLBaseComponents}EndDate")
+                
+                result = {
+                    "success": True,
+                    "item_id": item_id.text if item_id is not None else None,
+                    "start_date": start_date.text if start_date is not None else None,
+                    "end_date": end_date.text if end_date is not None else None,
+                    "ack": "Success"
+                }
+                
+                # Extract fees information
+                fees = response_xml.find(".//{urn:ebay:apis:eBLBaseComponents}Fees")
+                if fees is not None:
+                    result["fees"] = []
+                    for fee in fees.findall(".//{urn:ebay:apis:eBLBaseComponents}Fee"):
+                        fee_name = fee.find(".//{urn:ebay:apis:eBLBaseComponents}Name")
+                        fee_amount = fee.find(".//{urn:ebay:apis:eBLBaseComponents}Fee")
+                        if fee_name is not None and fee_amount is not None:
+                            result["fees"].append({
+                                "name": fee_name.text,
+                                "amount": fee_amount.text
+                            })
+                
+                print(f"✅ Item listed successfully!")
+                print(f"🆔 Item ID: {result['item_id']}")
+                print(f"📅 Start Date: {result['start_date']}")
+                print(f"📅 End Date: {result['end_date']}")
+                
+                return result
+            else:
+                # Handle errors
+                errors = response_xml.findall(".//{urn:ebay:apis:eBLBaseComponents}Errors")
+                error_messages = []
+                for error in errors:
+                    error_code = error.find(".//{urn:ebay:apis:eBLBaseComponents}ErrorCode")
+                    short_message = error.find(".//{urn:ebay:apis:eBLBaseComponents}ShortMessage")
+                    long_message = error.find(".//{urn:ebay:apis:eBLBaseComponents}LongMessage")
+                    
+                    if error_code is not None and short_message is not None:
+                        error_msg = f"Error {error_code.text}: {short_message.text}"
+                        error_messages.append(error_msg)
+                        print(f"❌ {error_msg}")
+                
+                return {
+                    "success": False,
+                    "error": "; ".join(error_messages),
+                    "raw_response": response.text
+                }
+        else:
+            print(f"❌ HTTP Error: {response.status_code}")
+            print(f"Response: {response.text}")
+            return {
+                "success": False,
+                "error": f"HTTP {response.status_code}",
+                "raw_response": response.text
+            }
+            
+    except Exception as e:
+        error_msg = f"Exception occurred: {str(e)}"
+        print(f"❌ {error_msg}")
+        return {"success": False, "error": error_msg}
+
+
+def extract_item_data_for_listing(item_data, seller_info=None):
+    """
+    Extract and map data from processed sales data to create item_data for AddItem API.
+    
+    Args:
+        item_data (dict): Item data from processed sales export
+        seller_info (dict): Optional seller information (PayPal email, location, etc.)
+    
+    Returns:
+        dict: Mapped item data ready for AddItem API
+    """
+    import random
+    
+    # Extract basic information
+    title = item_data.get('title', 'Sample Item')
+    description = item_data.get('shortDescription', 'No description available')
+    
+    # Get price information
+    price_info = item_data.get('price', {})
+    price_value = price_info.get('value', '9.99')
+    currency = price_info.get('currency', 'USD')
+    
+    # Get category information
+    category_path = item_data.get('categoryPath', '')
+    category_id_path = item_data.get('categoryIdPath', '')
+    
+    # Extract the primary category ID (first one in the path)
+    primary_category_id = category_id_path.split('|')[0] if category_id_path else '888'  # Default to Sporting Goods
+    
+    # Get condition information
+    condition_id = item_data.get('conditionId', '1000')  # Default to New
+    
+    # Get location information
+    item_location = item_data.get('itemLocation', {})
+    location_city = item_location.get('city', 'Unknown City')
+    location_state = item_location.get('stateOrProvince', 'Unknown State')
+    location_country = item_location.get('country', 'US')
+    location_postal = item_location.get('postalCode', '12345')
+    
+    # Create description with additional details
+    enhanced_description = f"""
+    <div>
+        <h3>Product Description</h3>
+        <p>{description}</p>
+        
+        <h3>Key Features</h3>
+        <ul>
+            <li>High-quality construction</li>
+            <li>Made from durable PETG material</li>
+            <li>Available in black color</li>
+            <li>Perfect for everyday use</li>
+        </ul>
+        
+        <h3>Shipping & Returns</h3>
+        <p>Fast and reliable shipping. 30-day return policy.</p>
+        
+        <h3>Questions?</h3>
+        <p>Feel free to contact us with any questions!</p>
+    </div>
+    """
+    
+    # Create mapped item data
+    mapped_data = {
+        'Title': title,
+        'Description': enhanced_description,
+        'CategoryID': primary_category_id,
+        'StartPrice': price_value,
+        'ConditionID': condition_id,
+        'Country': location_country,
+        'Currency': currency,
+        'DispatchTimeMax': '3',  # 3 business days
+        'ListingDuration': 'GTC',  # Good 'Til Cancelled
+        'ListingType': 'FixedPriceItem',
+        'PaymentMethods': 'PayPal',
+        'PayPalEmailAddress': seller_info.get('paypal_email', 'test@example.com') if seller_info else 'test@example.com',
+        'PostalCode': location_postal,
+        'Quantity': '1',
+        'Location': f"{location_city}, {location_state}, {location_country}",
+        'ReturnsAcceptedOption': 'ReturnsAccepted',
+        'RefundOption': 'MoneyBack',
+        'ReturnsWithinOption': 'Days_30',
+        'ShippingCostPaidByOption': 'Buyer',
+        'ShippingType': 'Flat',
+        'ShippingService': 'USPSPriority',
+        'ShippingServiceCost': '5.99'
+    }
+    
+    return mapped_data
+
+
+def test_add_item_with_sales_data(filename=None, item_index=0):
+    """
+    Test the add_item function using data from processed sales export.
+    
+    Args:
+        filename (str): Path to processed sales data file (optional)
+        item_index (int): Index of item to test with (default: 0)
+    
+    Returns:
+        dict: Result of the add_item test
+    """
+    import random
+    
+    # Default to the processed sales data file
+    if not filename:
+        filename = "3dexcel/processed-sales-data/PROCESSED_3dexcel_20250928_161528_20250928_171132.json"
+    
+    print(f"🧪 Testing AddItem function with data from: {filename}")
+    
+    try:
+        # Load the processed sales data
+        with open(filename, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        items = data.get('items', [])
+        if not items:
+            print("❌ No items found in the processed sales data")
+            return {"success": False, "error": "No items found in processed sales data"}
+        
+        # Select an item (random if index is -1, otherwise use specified index)
+        if item_index == -1:
+            selected_item = random.choice(items)
+            print(f"🎲 Randomly selected item from {len(items)} available items")
+        else:
+            if item_index >= len(items):
+                item_index = 0
+                print(f"⚠️ Item index {item_index} out of range, using first item")
+            selected_item = items[item_index]
+            print(f"📦 Using item at index {item_index} of {len(items)} available items")
+        
+        # Display selected item information
+        print(f"\n📋 Selected Item Details:")
+        print(f"   Title: {selected_item.get('title', 'N/A')}")
+        print(f"   Price: ${selected_item.get('price', {}).get('value', 'N/A')} {selected_item.get('price', {}).get('currency', 'USD')}")
+        print(f"   Category: {selected_item.get('categoryPath', 'N/A')}")
+        print(f"   Condition: {selected_item.get('condition', 'N/A')}")
+        
+        # Create seller info (you would replace this with actual seller information)
+        seller_info = {
+            'paypal_email': 'test@example.com',  # Replace with actual PayPal email
+            'location': 'United States'
+        }
+        
+        # Extract and map the data
+        print(f"\n🔄 Mapping item data for AddItem API...")
+        item_data_for_listing = extract_item_data_for_listing(selected_item, seller_info)
+        
+        # Display mapped data
+        print(f"\n📝 Mapped Item Data:")
+        print(f"   Title: {item_data_for_listing['Title'][:50]}...")
+        print(f"   Category ID: {item_data_for_listing['CategoryID']}")
+        print(f"   Price: ${item_data_for_listing['StartPrice']} {item_data_for_listing['Currency']}")
+        print(f"   Condition ID: {item_data_for_listing['ConditionID']}")
+        print(f"   Location: {item_data_for_listing['Location']}")
+        print(f"   PayPal Email: {item_data_for_listing['PayPalEmailAddress']}")
+        
+        # Test the add_item function (in production mode)
+        print(f"\n🚀 Testing AddItem function in production mode...")
+        result = add_item(item_data_for_listing)
+        
+        return result
+        
+    except FileNotFoundError:
+        error_msg = f"File not found: {filename}"
+        print(f"❌ {error_msg}")
+        return {"success": False, "error": error_msg}
+    except json.JSONDecodeError:
+        error_msg = f"Invalid JSON file: {filename}"
+        print(f"❌ {error_msg}")
+        return {"success": False, "error": error_msg}
+    except Exception as e:
+        error_msg = f"Error testing AddItem: {str(e)}"
+        print(f"❌ {error_msg}")
+        return {"success": False, "error": error_msg}
+
+
 def run_command(command, *args):
     """Command runner for eBay API functions"""
     command = command.lower()
@@ -933,8 +1295,13 @@ def run_command(command, *args):
         elif command == "refresh":
             refreshToken()
             
+        elif command == "test-add":
+            item_index = int(args[0]) if args else 0
+            print(f"🧪 Testing AddItem function with item index: {item_index}")
+            test_add_item_with_sales_data(item_index=item_index)
+            
         else:
-            print("❌ Available commands: search, seller, item, collect, process, top, copy, refresh [token]")
+            print("❌ Available commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index]")
             
     except ValueError as e:
         print(f"❌ {e}")
@@ -945,7 +1312,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         print("❌ Usage: python main_ebay_commands.py <command> [args...]")
-        print("Commands: search, seller, item, collect, process, top, copy, refresh [token]")
+        print("Commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index]")
         sys.exit(1)
     
     run_command(sys.argv[1], *sys.argv[2:])
