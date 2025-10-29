@@ -27,7 +27,7 @@ Example: e.bat collect ebaySeller "phone" 200
 
 Saves to: <seller_username>/<seller_username>_YYYYMMDD_HHMMSS.json
 
-[SCREENSHOT: Collection process output]
+
 
 Sales Data Processing
 Process collected items to fetch sales data, extract sold quantities, and sort by performance.
