@@ -5,8 +5,6 @@ Overview
 
 AxisResearcher is a Python tool for researching eBay listings, analyzing sales data, and creating optimized listings using the eBay Browse API, Trading API, and OpenRouter AI.
 
-[SCREENSHOT: Main interface or command examples]
-
 Installation
 
 Requirements: Python 3.x, python-dotenv, requests
@@ -20,6 +18,9 @@ Requirements: Python 3.x, python-dotenv, requests
 Core Features
 
 Item Collection
+<img width="1061" height="522" alt="image" src="https://github.com/user-attachments/assets/9f53fb9d-e637-4f83-8940-b72abcfa4d10" />
+
+
 Collect all item IDs from a seller's inventory with automatic pagination.
 
 Usage: e.bat collect <seller_username> [query] [limit]
@@ -30,6 +31,10 @@ Saves to: <seller_username>/<seller_username>_YYYYMMDD_HHMMSS.json
 
 
 Sales Data Processing
+
+<img width="1031" height="591" alt="image" src="https://github.com/user-attachments/assets/76f6f505-62eb-43f9-a792-6e8c51ab36af" />
+<img width="1051" height="645" alt="image" src="https://github.com/user-attachments/assets/9332faa7-2048-4745-99ef-8bab0d127965" />
+
 Process collected items to fetch sales data, extract sold quantities, and sort by performance.
 
 Usage: e.bat process <seller_username> [limit] [output_filename]
@@ -42,15 +47,6 @@ Generates:
 
 Saves to: <seller_username>/processed-sales-data/PROCESSED_*.json
 
-[SCREENSHOT: Sales processing output and statistics]
-
-Top Selling Items
-Extract the top N selling items from processed data.
-
-Usage: e.bat top [input_file] [top_n] [output_file]
-Example: e.bat top SalesExport.json 50
-
-[SCREENSHOT: Top items output]
 
 AI Powered Listing Copy
 Copy and optimize listings using AI. Generates SEO optimized titles (80 chars) and keyword rich descriptions.
