@@ -36,7 +36,7 @@ ZIP_CODE = 14853
 
 
 def call_openrouter_llm(prompt):
-    """Call OpenRouter Sonoma Sky Alpha API to generate optimized eBay listing content."""
+    """Call OpenRouter DeepSeek R1 0528 API to generate optimized eBay listing content."""
     if not OPENROUTER_API_KEY:
         print("❌ OpenRouter API key not found. Please set OPENROUTER_API_KEY in your .env file")
         return None
@@ -49,19 +49,17 @@ def call_openrouter_llm(prompt):
     }
     
     data = {
-        "model": "openrouter/sonoma-sky-alpha",
+        "model": "deepseek/deepseek-r1-0528",
         "messages": [
             {
                 "role": "user",
                 "content": prompt
             }
         ],
-        "temperature": 0.7,
-        "max_tokens": 1000
     }
     
     try:
-        print("🤖 Calling OpenRouter Sonoma Sky Alpha...")
+        print("🤖 Calling OpenRouter deepseek-r1-0528...")
         response = requests.post(url, headers=headers, json=data, timeout=30)
         response.raise_for_status()
         
@@ -298,9 +296,15 @@ def getItemIds(seller_username, query=" ", limit_per_request=200):
     
     # Always save to file
     if all_item_ids:
+        # Create Collected-Data folder if it doesn't exist
+        collected_data_folder = "Collected-Data"
+        if not os.path.exists(collected_data_folder):
+            os.makedirs(collected_data_folder)
+            print(f"📁 Created folder: {collected_data_folder}")
+        
         # Create folder for seller if it doesn't exist
         safe_seller = seller_username.replace(" ", "_").replace("/", "_").replace("\\", "_")
-        seller_folder = safe_seller
+        seller_folder = os.path.join(collected_data_folder, safe_seller)
         
         if not os.path.exists(seller_folder):
             os.makedirs(seller_folder)
@@ -308,7 +312,7 @@ def getItemIds(seller_username, query=" ", limit_per_request=200):
         
         # Generate filename with seller username and date
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{seller_folder}/{safe_seller}_{timestamp}.json"
+        filename = os.path.join(seller_folder, f"{safe_seller}_{timestamp}.json")
         
         # Prepare data to save
         save_data = {
@@ -347,13 +351,18 @@ def find_newest_seller_file(seller_username):
     # Create safe seller name for folder matching
     safe_seller = seller_username.replace(" ", "_").replace("/", "_").replace("\\", "_")
     
-    # Look for files in the seller's folder
-    pattern = f"{safe_seller}/{safe_seller}_*.json"
+    # Look for files in the seller's folder within Collected-Data
+    pattern = f"Collected-Data/{safe_seller}/{safe_seller}_*.json"
     files = glob.glob(pattern)
     
     if not files:
-        # Also check for files without the seller folder structure
-        pattern = f"{safe_seller}_*.json"
+        # Also check for files without the seller folder structure in Collected-Data
+        pattern = f"Collected-Data/{safe_seller}_*.json"
+        files = glob.glob(pattern)
+    
+    if not files:
+        # Fallback: check old location (for backward compatibility)
+        pattern = f"{safe_seller}/{safe_seller}_*.json"
         files = glob.glob(pattern)
     
     if not files:
@@ -394,8 +403,14 @@ def processSalesExportFromFile(seller_username=None, output_filename=None, limit
     # Generate output filename and folder structure
     safe_seller = seller_username.replace(" ", "_").replace("/", "_").replace("\\", "_")
     
+    # Create Collected-Data folder if it doesn't exist
+    collected_data_folder = "Collected-Data"
+    if not os.path.exists(collected_data_folder):
+        os.makedirs(collected_data_folder)
+        print(f"📁 Created folder: {collected_data_folder}")
+    
     # Create seller folder if it doesn't exist
-    seller_folder = safe_seller
+    seller_folder = os.path.join(collected_data_folder, safe_seller)
     if not os.path.exists(seller_folder):
         os.makedirs(seller_folder)
         print(f"📁 Created seller folder: {seller_folder}")
@@ -571,7 +586,14 @@ def processSalesExportFromFile(seller_username=None, output_filename=None, limit
     """
     if not output_filename:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_filename = f"Top{top_n}Sales_{timestamp}.json"
+        
+        # Create Collected-Data folder if it doesn't exist
+        collected_data_folder = "Collected-Data"
+        if not os.path.exists(collected_data_folder):
+            os.makedirs(collected_data_folder)
+            print(f"📁 Created folder: {collected_data_folder}")
+        
+        output_filename = os.path.join(collected_data_folder, f"Top{top_n}Sales_{timestamp}.json")
     
     print(f"🏆 Getting top {top_n} selling items from {input_filename}...")
     
@@ -673,7 +695,14 @@ def getTopSellingItems(input_filename="SalesExport.json", top_n=50, pastDays = 9
         list: Top N selling items
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_filename = f"Top{top_n}Sales_{timestamp}.json"
+    
+    # Create Collected-Data folder if it doesn't exist
+    collected_data_folder = "Collected-Data"
+    if not os.path.exists(collected_data_folder):
+        os.makedirs(collected_data_folder)
+        print(f"📁 Created folder: {collected_data_folder}")
+    
+    output_filename = os.path.join(collected_data_folder, f"Top{top_n}Sales_{timestamp}.json")
     
     print(f"🏆 Getting top {top_n} selling items from {input_filename}...")
     
@@ -781,7 +810,7 @@ def singleCopyListing(id):
     if (id[0] == 'h' or id[0] == 'e'):
         id = id.split('/itm/')[1].split('?')[0]
 
-    listing = single_get_detailed_item_data(id, verbose = False)
+    listing = single_get_detailed_item_data(id, verbose = True)
 
     if listing:
         print("📦 Listing Details:")
@@ -816,54 +845,53 @@ def singleCopyListing(id):
         # Extract thumbnail URL
         thumbnail_url = images.get('thumbnailUrl') or images.get('imageUrl') if isinstance(images.get('imageUrl'), str) else (image_urls[0] if image_urls else 'N/A')
         print(f"   Thumbnail URL: {thumbnail_url}")
-    else:
-        print("❌ No listing data available")
-    
-    prompt = f"""
-You are an expert eBay SEO copywriter. Rewrite the item's title and description.
-
-Requirements
-- Title: ≤80 characters, include high-intent keywords users search for. Do not add the phrases "3D printed" or "PETG" to the title unless they are already present in the original title. Preserve important specifics (brand/model/size/color) if present. Use normal capitalization, no ALL CAPS, no emojis, no quotes, no color specification in the title. continiously adding keywords relating to the product until you are most close to 80 characters.
-- Description: keyword-rich but human-readable. Please add to the description by adding keywords relating to the product which are most commonly searched. Explicitly state the material is PETG. State that the product comes in black. Remove any mentions of who it is made by or the maker/manufacturer name. please format the description in modern, simple, and clean HTML and feel free to use clear list, no shipping info.
-
-
-Output format (strict JSON):
-{{
-  "edited_title": "...",
-  "edited_description": "..."
-}}
-
-Original title:
-{listing.get('title', '') if listing else ''}
-
-Original description:
-{clean_description if listing else ''}
-"""
-    
-    # Call OpenRouter API to get optimized content
-    llm_response = call_openrouter_llm(prompt)
-    
-    if llm_response:
+        
+        # Load prompt template from file
+        prompt_template_path = "llm_prompt_template.txt"
         try:
-            # Parse JSON response
-            optimized_content = json.loads(llm_response)
+            with open(prompt_template_path, 'r', encoding='utf-8') as f:
+                prompt_template = f.read()
+        except FileNotFoundError:
+            print(f"❌ Prompt template file not found: {prompt_template_path}")
+            return None
+        except Exception as e:
+            print(f"❌ Error loading prompt template: {e}")
+            return None
+        
+        # Format the prompt with listing data
+        prompt = prompt_template.format(
+            original_title=listing.get('title', ''),
+            original_description=clean_description
+        )
+        
+        # Call OpenRouter API to get optimized content
+        llm_response = call_openrouter_llm(prompt)
+        
+        if llm_response:
+            try:
             
-            print("\n🎯 Optimized eBay Listing:")
-            print("=" * 50)
-            print(f"📝 Optimized Title ({len(optimized_content.get('edited_title', ''))} chars):")
-            print(f"   {optimized_content.get('edited_title', 'N/A')}")
-            print(f"\n📄 Optimized Description:")
-            print(f"   {optimized_content.get('edited_description', 'N/A')}")
-            print("=" * 50)
-            
-            return optimized_content
-            
-        except json.JSONDecodeError as e:
-            print(f"❌ Error parsing LLM response as JSON: {e}")
-            print(f"Raw response: {llm_response}")
+                # Parse JSON response
+                optimized_content = json.loads(llm_response)
+                
+                print("\n🎯 Optimized eBay Listing:")
+                print("=" * 50)
+                print(f"📝 Optimized Title ({len(optimized_content.get('edited_title', ''))} chars):")
+                print(f"   {optimized_content.get('edited_title', 'N/A')}")
+                print(f"\n📄 Optimized Description:")
+                print(f"   {optimized_content.get('edited_description', 'N/A')}")
+                print("=" * 50)
+                
+                return optimized_content
+                
+            except json.JSONDecodeError as e:
+                print(f"❌ Error parsing LLM response as JSON: {e}")
+                print(f"Raw response: {llm_response}")
+                return None
+        else:
+            print("❌ Failed to get response from OpenRouter")
             return None
     else:
-        print("❌ Failed to get response from OpenRouter")
+        print("❌ No listing data available")
         return None
             
 
@@ -1158,7 +1186,7 @@ def test_add_item_with_sales_data(filename=None, item_index=0):
     
     # Default to the processed sales data file
     if not filename:
-        filename = "3dexcel/processed-sales-data/PROCESSED_3dexcel_20250928_161528_20250928_171132.json"
+        filename = "Collected-Data/3dexcel/processed-sales-data/PROCESSED_3dexcel_20250928_161528_20250928_171132.json"
     
     print(f"🧪 Testing AddItem function with data from: {filename}")
     
