@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Constants
-USER_TOKEN = os.getenv('user_token')
+APPLICATION_TOKEN = os.getenv('application_token')
 REFRESH_TOKEN = os.getenv('refresh_token')
 
 
@@ -47,13 +47,13 @@ def remove_html_tags(text):
 
 def helper_get_valid_token():
     """Get a valid access token, refresh if needed"""
-    if not USER_TOKEN:
-        print("❌ No user token available")
+    if not APPLICATION_TOKEN:
+        print("❌ No application token available")
         print("🔄 Attempting to refresh access token...")
         new_token = refreshToken()
         return new_token
     else:
-        return USER_TOKEN
+        return APPLICATION_TOKEN
 
 
 def handle_http_error(response, context=""):

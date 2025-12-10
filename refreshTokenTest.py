@@ -222,7 +222,7 @@ def exchange_authorization_code(authorization_code, environment="sandbox", scope
             
             # Save tokens to .env file
             try:
-                set_key('.env', 'user_token', access_token)
+                set_key('.env', 'application_token', access_token)
                 if refresh_token:
                     set_key('.env', 'refresh_token', refresh_token)
                 print(f"💾 Tokens saved to .env file")
@@ -257,7 +257,7 @@ def exchange_authorization_code(authorization_code, environment="sandbox", scope
         return None
 
 
-def refresh_user_token(environment="sandbox", scopes=None):
+def refresh_application_token(environment="sandbox", scopes=None):
     """
     Refresh user access token using refresh token.
     
@@ -333,7 +333,7 @@ def refresh_user_token(environment="sandbox", scopes=None):
             
             # Save tokens to .env file
             try:
-                set_key('.env', 'user_token', access_token)
+                set_key('.env', 'application_token', access_token)
                 if new_refresh_token != REFRESH_TOKEN:
                     set_key('.env', 'refresh_token', new_refresh_token)
                 print(f"💾 Tokens updated in .env file")
@@ -448,7 +448,7 @@ def test_functions():
     print("\n2️⃣ Testing token refresh...")
     try:
         if REFRESH_TOKEN:
-            token_response = refresh_user_token(environment="sandbox")
+            token_response = refresh_application_token(environment="sandbox")
             if token_response:
                 print("✅ Token refresh successful")
             else:
@@ -496,7 +496,7 @@ if __name__ == "__main__":
             
         elif command == "refresh":
             env = sys.argv[2] if len(sys.argv) > 2 else "sandbox"
-            refresh_user_token(environment=env)
+            refresh_application_token(environment=env)
             
         elif command == "flow":
             env = sys.argv[2] if len(sys.argv) > 2 else "sandbox"

@@ -19,7 +19,7 @@ ZIP_CODE = 14853
 API_KEY = os.getenv('api_key')
 CLIENT_ID = os.getenv('client_id')
 CLIENT_SECRET = os.getenv('client_secret')
-USER_TOKEN = os.getenv('user_token')
+APPLICATION_TOKEN = os.getenv('application_token')
 REFRESH_TOKEN = os.getenv('refresh_token')
 
 

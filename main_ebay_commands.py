@@ -6,7 +6,7 @@ The Browse API requires OAuth authentication (user token), unlike the Finding AP
 
 Required environment variables:
 - api_key: Your eBay App ID
-- user_token: Your OAuth user token (obtained through OAuth flow)
+- application_token: Your OAuth application token (obtained through OAuth flow)
 
 API Documentation: https://developer.ebay.com/api-docs/buy/browse/resources/item_summary/methods/search
 """
@@ -20,14 +20,43 @@ import time
 from datetime import datetime
 import sys
 import re
-from single_functions import singleSearch, single_search_by_seller
+import importlib.util
+
+# Import single_functions module (handles unused folder)
+single_functions_spec = importlib.util.spec_from_file_location("single_functions", "unused/single_functions.py")
+single_functions_module = importlib.util.module_from_spec(single_functions_spec)
+single_functions_spec.loader.exec_module(single_functions_module)
+singleSearch = single_functions_module.singleSearch
+single_search_by_seller = single_functions_module.single_search_by_seller
 from helper_functions import remove_html_tags, helper_get_valid_token, handle_http_error, refreshToken
+
+# Import upload_to_ebay module (from copyScripts folder)
+upload_to_ebay_spec = importlib.util.spec_from_file_location("upload_to_ebay", "copyScripts/upload_to_ebay.py")
+upload_to_ebay_module = importlib.util.module_from_spec(upload_to_ebay_spec)
+upload_to_ebay_spec.loader.exec_module(upload_to_ebay_module)
+upload_complete_listing = upload_to_ebay_module.upload_complete_listing
+create_inventory_location = upload_to_ebay_module.create_inventory_location
+create_test_listing = upload_to_ebay_module.create_test_listing
+
+# Import create_text module (from copyScripts folder)
+create_text_spec = importlib.util.spec_from_file_location("create_text", "copyScripts/create_text.py")
+create_text_module = importlib.util.module_from_spec(create_text_spec)
+create_text_spec.loader.exec_module(create_text_module)
+singleCopyListing = create_text_module.singleCopyListing
+
+# Import create-image module (handles hyphenated filename)
+spec = importlib.util.spec_from_file_location("create_image", "copyScripts/create-image.py")
+create_image_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(create_image_module)
+generate_image_from_urls = create_image_module.generate_image_from_urls
+ImageType = create_image_module.ImageType
 
 
 load_dotenv()
 API_KEY = os.getenv('api_key')
 CLIENT_ID = os.getenv('client_id')
 CLIENT_SECRET = os.getenv('client_secret')
+APPLICATION_TOKEN = os.getenv('application_token')
 USER_TOKEN = os.getenv('user_token')
 REFRESH_TOKEN = os.getenv('refresh_token')
 OPENROUTER_API_KEY = os.getenv('openrouter_api_key')
@@ -806,95 +835,6 @@ def getByRatio(input_filename="SalesExport.json"):
     return []
 
 
-def singleCopyListing(id):
-    if (id[0] == 'h' or id[0] == 'e'):
-        id = id.split('/itm/')[1].split('?')[0]
-
-    listing = single_get_detailed_item_data(id, verbose = True)
-
-    if listing:
-        print("📦 Listing Details:")
-        print(f"   Item ID: {listing.get('itemId', 'N/A')}")
-        print(f"   Title: {listing.get('title', 'N/A')}")
-        
-        # Extract description and remove HTML tags
-        description = listing.get('description', 'No description available')
-        clean_description = remove_html_tags(description)
-        print(f"   Description: {clean_description}")
-        
-        print(f"   Date: {listing.get('itemCreationDate', 'N/A')}")
-        
-        # Extract estimated sold quantity
-        estimated_availabilities = listing.get('estimatedAvailabilities', [])
-        estimated_sold = estimated_availabilities[0].get('estimatedSoldQuantity') if estimated_availabilities else None
-        print(f"   Number Sold: {estimated_sold if estimated_sold is not None else 'N/A'}")
-        
-        # Extract price information
-        price_info = listing.get('price', {})
-        price_value = price_info.get('value', 'N/A')
-        currency = price_info.get('currency', 'USD')
-        formatted_price = f"${price_value} {currency}" if price_value != 'N/A' else 'N/A'
-        print(f"   Price: {formatted_price}")
-        
-        # Extract number of pictures
-        images = listing.get('image', {})
-        image_urls = images.get('imageUrl', []) if isinstance(images.get('imageUrl'), list) else [images.get('imageUrl')] if images.get('imageUrl') else []
-        number_of_pictures = len([url for url in image_urls if url])
-        print(f"   Number of Pictures: {number_of_pictures}")
-        
-        # Extract thumbnail URL
-        thumbnail_url = images.get('thumbnailUrl') or images.get('imageUrl') if isinstance(images.get('imageUrl'), str) else (image_urls[0] if image_urls else 'N/A')
-        print(f"   Thumbnail URL: {thumbnail_url}")
-        
-        # Load prompt template from file
-        prompt_template_path = "llm_prompt_template.txt"
-        try:
-            with open(prompt_template_path, 'r', encoding='utf-8') as f:
-                prompt_template = f.read()
-        except FileNotFoundError:
-            print(f"❌ Prompt template file not found: {prompt_template_path}")
-            return None
-        except Exception as e:
-            print(f"❌ Error loading prompt template: {e}")
-            return None
-        
-        # Format the prompt with listing data
-        prompt = prompt_template.format(
-            original_title=listing.get('title', ''),
-            original_description=clean_description
-        )
-        
-        # Call OpenRouter API to get optimized content
-        llm_response = call_openrouter_llm(prompt)
-        
-        if llm_response:
-            try:
-            
-                # Parse JSON response
-                optimized_content = json.loads(llm_response)
-                
-                print("\n🎯 Optimized eBay Listing:")
-                print("=" * 50)
-                print(f"📝 Optimized Title ({len(optimized_content.get('edited_title', ''))} chars):")
-                print(f"   {optimized_content.get('edited_title', 'N/A')}")
-                print(f"\n📄 Optimized Description:")
-                print(f"   {optimized_content.get('edited_description', 'N/A')}")
-                print("=" * 50)
-                
-                return optimized_content
-                
-            except json.JSONDecodeError as e:
-                print(f"❌ Error parsing LLM response as JSON: {e}")
-                print(f"Raw response: {llm_response}")
-                return None
-        else:
-            print("❌ Failed to get response from OpenRouter")
-            return None
-    else:
-        print("❌ No listing data available")
-        return None
-            
-
 def add_item(item_data):
     """
     Create and publish a new listing on eBay using the Trading API AddItem endpoint.
@@ -909,7 +849,7 @@ def add_item(item_data):
     from datetime import datetime, timedelta
     
     # Get a valid token for Trading API
-    # Use the same user_token as other functions in this codebase
+    # Use the same application_token as other functions in this codebase
     valid_token = helper_get_valid_token()
     if not valid_token:
         print("❌ Error: Could not get valid access token")
@@ -1079,6 +1019,110 @@ def add_item(item_data):
         error_msg = f"Exception occurred: {str(e)}"
         print(f"❌ {error_msg}")
         return {"success": False, "error": error_msg}
+
+
+def create_ebay_listing(sku, inventory_item_data, locale="en_US", use_user_token=True):
+    """
+    Create or replace an inventory item using the eBay Inventory API.
+    
+    Args:
+        sku (str): Seller-defined SKU value for the inventory item (required)
+        inventory_item_data (dict): Dictionary containing inventory item data including:
+            - availability: dict with shipToLocationAvailability
+            - condition: str (e.g., "NEW", "USED_EXCELLENT")
+            - product: dict with title, description, aspects, imageUrls
+            - locale: str (optional, defaults to parameter value)
+            - packageWeightAndSize: dict (optional but recommended)
+        locale (str): Locale code (e.g., "en_US"). Default: "en_US"
+        use_user_token (bool): If True, use user_token instead of application_token. Default: False
+    
+    Returns:
+        dict: Response containing statusCode, SKU, and any warnings/errors, or None on failure
+    """
+    # Get a valid token
+    if use_user_token:
+        valid_token = USER_TOKEN
+        if not valid_token:
+            print("❌ Error: Could not get valid user token")
+            return None
+    else:
+        valid_token = helper_get_valid_token()
+        if not valid_token:
+            print("❌ Error: Could not get valid access token")
+            return None
+    
+    # Ensure locale is set in the data
+    if 'locale' not in inventory_item_data:
+        inventory_item_data['locale'] = locale
+    
+    # Endpoint for creating/replacing a single inventory item
+    url = f"https://api.ebay.com/sell/inventory/v1/inventory_item/{sku}"
+    
+    # Convert locale format from en_US to en-US for Content-Language header
+    content_language = locale.replace('_', '-') if '_' in locale else locale
+    
+    headers = {
+        'Authorization': f'Bearer {valid_token}',
+        'Content-Language': content_language,
+        'Content-Type': 'application/json'
+    }
+    
+    try:
+        # Print headers with masked Authorization token for security
+        for key, value in headers.items():
+            
+            print(f"   {key}: {value}")
+        
+        response = requests.put(url, headers=headers, json=inventory_item_data, timeout=30)
+        
+        # According to eBay API docs, 204 (No Content) is the expected success response
+        # for createOrReplaceInventoryItem - it means success with no response body
+        if response.status_code == 204:
+            print(f"✅ Successfully created/updated inventory item")
+            print(f"🆔 SKU: {sku}")
+            # 204 responses have no body, so return a success dict
+            return {
+                "success": True,
+                "sku": sku,
+                "status_code": 204,
+                "message": "Inventory item created/updated successfully"
+            }
+        elif response.status_code == 200 or response.status_code == 201:
+            # Handle other success codes if they occur (though 204 is standard)
+            result = response.json()
+            print(f"✅ Successfully created/updated inventory item")
+            print(f"🆔 SKU: {result.get('sku', sku)}")
+            
+            # Check for warnings
+            warnings = result.get('warnings', [])
+            if warnings:
+                print(f"⚠️ Warnings:")
+                for warning in warnings:
+                    print(f"   - {warning.get('message', 'Unknown warning')}")
+            
+            # Check for errors
+            errors = result.get('errors', [])
+            if errors:
+                print(f"❌ Errors:")
+                for error in errors:
+                    print(f"   - {error.get('message', 'Unknown error')}")
+            
+            return result
+        else:
+            handle_http_error(response, f"create_ebay_listing (SKU: {sku})")
+            try:
+                error_data = response.json()
+                print(f"Error details: {json.dumps(error_data, indent=2)}")
+            except:
+                print(f"Response text: {response.text}")
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Request error: {e}")
+        return None
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        return None
 
 
 def extract_item_data_for_listing(item_data, seller_info=None):
@@ -1328,8 +1372,46 @@ def run_command(command, *args):
             print(f"🧪 Testing AddItem function with item index: {item_index}")
             test_add_item_with_sales_data(item_index=item_index)
             
+        elif command == "createinv":
+            print(f"📍 Creating inventory location: PlasticLoveShopLocation")
+            result = create_inventory_location()
+            if result:
+                print(f"\n✅ Location created successfully!")
+            else:
+                print(f"\n❌ Location creation failed. Check the error messages above.")
+            
+        elif command == "list":
+            # All test data is hardcoded in create_test_listing() function in upload_to_ebay.py
+            create_test_listing(locale="en-US", use_user_token=True)
+            
+        elif command == "image":
+            if len(args) < 2:
+                raise ValueError("Usage: image <image_url> <image_type>")
+            image_url = args[0]
+            image_type_str = args[1].upper()
+            
+            # Validate and convert image type
+            if image_type_str == "PROFESSIONAL":
+                image_type = ImageType.PROFESSIONAL
+            elif image_type_str == "REAL_WORLD" or image_type_str == "REALWORLD":
+                image_type = ImageType.REAL_WORLD
+            else:
+                raise ValueError("Image type must be 'PROFESSIONAL' or 'REAL_WORLD'")
+            
+            print(f"🖼️ Generating image from URL: {image_url}")
+            print(f"📝 Image type: {image_type.value}")
+            
+            # Call the image generation function
+            result = generate_image_from_urls([image_url], image_type)
+            
+            if result:
+                print(f"\n✅ Image generated successfully!")
+                print(f"📁 Saved to: {result}")
+            else:
+                print(f"\n❌ Failed to generate image")
+            
         else:
-            print("❌ Available commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index]")
+            print("❌ Available commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, image <url> <type>")
             
     except ValueError as e:
         print(f"❌ {e}")
@@ -1340,7 +1422,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         print("❌ Usage: python main_ebay_commands.py <command> [args...]")
-        print("Commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index]")
+        print("Commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, image <url> <type>")
         sys.exit(1)
     
     run_command(sys.argv[1], *sys.argv[2:])

@@ -100,7 +100,7 @@ Required Environment Variables (.env file):
   client_id - eBay Client ID
   client_secret - eBay Client Secret
   api_key - eBay API Key
-  user_token - OAuth user token
+  application_token - OAuth application token
   refresh_token - OAuth refresh token
 
 Optional:
