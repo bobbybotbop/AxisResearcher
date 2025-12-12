@@ -50,6 +50,7 @@ create_image_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(create_image_module)
 generate_image_from_urls = create_image_module.generate_image_from_urls
 decode_image_from_response = create_image_module.decode_image_from_response
+upload_image_to_ebay = create_image_module.upload_image_to_ebay
 ImageType = create_image_module.ImageType
 
 
@@ -1423,9 +1424,24 @@ def run_command(command, *args):
                 print(f"📁 Image file: {result}")
             else:
                 print(f"\n❌ Failed to decode image from JSON file")
+        
+        elif command == "upload":
+            # Optional picture name argument
+            picture_name = args[0] if args else "Uploaded Image"
+            print(f"📤 Uploading image to eBay Picture Services...")
+            print(f"📝 Picture name: {picture_name}")
+            
+            # Call the upload function
+            result = upload_image_to_ebay(picture_name=picture_name)
+            
+            if result:
+                print(f"\n✅ Image uploaded successfully!")
+                print(f"🔗 Image URL: {result}")
+            else:
+                print(f"\n❌ Failed to upload image to eBay")
             
         else:
-            print("❌ Available commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, image <url> <type>, decode")
+            print("❌ Available commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, image <url> <type>, decode, upload [picture_name]")
             
     except ValueError as e:
         print(f"❌ {e}")
@@ -1436,7 +1452,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         print("❌ Usage: python main_ebay_commands.py <command> [args...]")
-        print("Commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, image <url> <type>, decode <json_file>")
+        print("Commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, image <url> <type>, decode, upload [picture_name]")
         sys.exit(1)
     
     run_command(sys.argv[1], *sys.argv[2:])
