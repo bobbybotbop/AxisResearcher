@@ -49,6 +49,7 @@ spec = importlib.util.spec_from_file_location("create_image", "copyScripts/creat
 create_image_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(create_image_module)
 generate_image_from_urls = create_image_module.generate_image_from_urls
+decode_image_from_response = create_image_module.decode_image_from_response
 ImageType = create_image_module.ImageType
 
 
@@ -1401,17 +1402,30 @@ def run_command(command, *args):
             print(f"🖼️ Generating image from URL: {image_url}")
             print(f"📝 Image type: {image_type.value}")
             
-            # Call the image generation function
+            # Call the image generation function (saves JSON response)
             result = generate_image_from_urls([image_url], image_type)
             
             if result:
-                print(f"\n✅ Image generated successfully!")
-                print(f"📁 Saved to: {result}")
+                print(f"\n✅ API response saved successfully!")
+                print(f"📁 JSON file: {result}")
+                print(f"💡 Use 'decode {result}' to extract and save the image")
             else:
                 print(f"\n❌ Failed to generate image")
+        
+        elif command == "decode":
+            print(f"🔍 Decoding image from most recent API response...")
+            
+            # Call the decode function
+            result = decode_image_from_response()
+            
+            if result:
+                print(f"\n✅ Image decoded and saved successfully!")
+                print(f"📁 Image file: {result}")
+            else:
+                print(f"\n❌ Failed to decode image from JSON file")
             
         else:
-            print("❌ Available commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, image <url> <type>")
+            print("❌ Available commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, image <url> <type>, decode")
             
     except ValueError as e:
         print(f"❌ {e}")
@@ -1422,7 +1436,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         print("❌ Usage: python main_ebay_commands.py <command> [args...]")
-        print("Commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, image <url> <type>")
+        print("Commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, image <url> <type>, decode <json_file>")
         sys.exit(1)
     
     run_command(sys.argv[1], *sys.argv[2:])
