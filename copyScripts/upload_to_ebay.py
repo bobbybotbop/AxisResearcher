@@ -36,8 +36,34 @@ load_dotenv()
 USER_TOKEN = os.getenv('user_token')
 APPLICATION_TOKEN = os.getenv('application_token')
 
-# eBay API base URL
-EBAY_INVENTORY_API_BASE = "https://api.ebay.com/sell/inventory/v1"
+# eBay Business Policy IDs (from .env)
+FULFILLMENT_POLICY_ID = os.getenv('fulfillment_policy_id')
+PAYMENT_POLICY_ID = os.getenv('payment_policy_id')
+RETURN_POLICY_ID = os.getenv('return_policy_id')
+
+# Import constants and test data from combine_data module
+from combine_data import (
+    EBAY_INVENTORY_API_BASE,
+    MERCHANT_LOCATION_KEY,
+    DEFAULT_QUANTITY,
+    DEFAULT_DIMESIONS,
+    DEFAULT_WEIGHT,
+    TEST_SKU,
+    TEST_INVENTORY_ITEM_DATA,
+    TEST_OFFER_DATA
+)
+
+# Helper function to get listing policies dict (uses .env values)
+def get_listing_policies():
+    """Get listing policies from environment variables."""
+    policies = {}
+    if FULFILLMENT_POLICY_ID:
+        policies["fulfillmentPolicyId"] = FULFILLMENT_POLICY_ID
+    if PAYMENT_POLICY_ID:
+        policies["paymentPolicyId"] = PAYMENT_POLICY_ID
+    if RETURN_POLICY_ID:
+        policies["returnPolicyId"] = RETURN_POLICY_ID
+    return policies if policies else None
 
 
 def create_ebay_listing(sku, inventory_item_data, locale="en-US", use_user_token=True):
@@ -501,10 +527,10 @@ def upload_complete_listing(sku, inventory_item_data, offer_data, locale="en-US"
 
 def create_test_listing(locale="en-US", use_user_token=True):
     """
-    Create a test listing with all data hardcoded in this function.
+    Create a test listing using centralized test data constants.
     
-    This function contains all the test data for a GoPro Hero4 listing.
-    No arguments are needed - all data is self-contained.
+    This function uses test data imported from combine_data module (TEST_INVENTORY_ITEM_DATA, etc.)
+    and loads listing policies from environment variables.
     
     Args:
         locale (str): Locale code. Default: "en-US"
@@ -513,74 +539,21 @@ def create_test_listing(locale="en-US", use_user_token=True):
     Returns:
         dict: Final result with listing ID, or None on failure
     """
-    # Test SKU - all data is hardcoded in this function
-    test_sku = "TEST_007"
-    print(f"🚀 Publishing complete listing to eBay with SKU: {test_sku}")
+    print(f"🚀 Publishing complete listing to eBay with SKU: {TEST_SKU}")
     
-    # Step 1: Inventory Item Data
-    test_inventory_item_data = {
-        "availability": {
-            "shipToLocationAvailability": {
-                "quantity": 2
-            }
-        },
-        "condition": "NEW",
-        "packageWeightAndSize": {
-            "weight": {
-                "value": "0.5",
-                "unit": "POUND"
-            },
-            "dimensions": {
-                "length": "6",
-                "width": "4",
-                "height": "3",
-                "unit": "INCH"
-            }
-        },
-        "product": {
-            "title": "GoPro Hero4 Helmet Cam",
-            "description": "New GoPro Hero4 Helmet Cam. Unopened box. Perfect for capturing your adventures in stunning HD quality.",
-            "aspects": {
-                "Brand": ["GoPro"],
-                "Type": ["Helmet/Action"],
-                "Storage Type": ["Removable"],
-                "Recording Definition": ["High Definition"],
-                "Media Format": ["Flash Drive (SSD)"],
-                "Optical Zoom": ["10x"]
-            },
-            "imageUrls": [
-                "http://i.ebayimg.com/images/i/182196556219-0-1/s-l1000.jpg",
-                "http://i.ebayimg.com/images/i/182196556219-0-1/s-l1001.jpg",
-                "http://i.ebayimg.com/images/i/182196556219-0-1/s-l1002.jpg"
-            ]
-        }
-    }
+    # Use centralized test data (defined at top of file)
+    test_inventory_item_data = TEST_INVENTORY_ITEM_DATA.copy()
+    test_offer_data = TEST_OFFER_DATA.copy()
+    test_offer_data["merchantLocationKey"] = MERCHANT_LOCATION_KEY
     
-    # Step 2: Offer Data (required for publishing)
-    test_offer_data = {
-        "marketplaceId": "EBAY_US",
-        "format": "FIXED_PRICE",
-        "quantity": 2,
-        "pricingSummary": {
-            "price": {
-                "value": "199.99",
-                "currency": "USD"
-            }
-        },
-        "listingDuration": "GTC",  # Good 'Til Cancelled
-        "categoryId": "181415",  # Cameras & Photo > Camcorders
-        "merchantLocationKey": "PlasticLoveShopLocation",  # Use the created inventory location
-        # Optional: Add listing policies if you have them set up
-        "listingPolicies": {
-            "fulfillmentPolicyId": "278845890014",
-            "paymentPolicyId": "278845829014",
-            "returnPolicyId": "278848523014"
-        }
-    }
+    # Add listing policies from .env if available
+    policies = get_listing_policies()
+    if policies:
+        test_offer_data["listingPolicies"] = policies
     
     # Run the complete workflow (creates inventory item, creates offer, and publishes)
     result = upload_complete_listing(
-        sku=test_sku,
+        sku=TEST_SKU,
         inventory_item_data=test_inventory_item_data,
         offer_data=test_offer_data,
         locale=locale,
@@ -614,8 +587,8 @@ if __name__ == "__main__":
     print("📍 Example: Creating Inventory Location")
     print("=" * 60)
     location_result = create_inventory_location(
-        merchant_location_key="PlasticLoveShopLocation",
-        location_name="PlasticLoveShopLocation",
+        merchant_location_key=MERCHANT_LOCATION_KEY,
+        location_name=MERCHANT_LOCATION_KEY,
         postal_code="11545",
         country="US"
     )
@@ -668,30 +641,15 @@ if __name__ == "__main__":
         }
     }
     
-    # Step 2: Offer Data
-    # Note: You may need to set up business policies in your eBay account
-    # If you don't have policies, you can omit listingPolicies (eBay will use defaults)
-    test_offer_data = {
-        "marketplaceId": "EBAY_US",
-        "format": "FIXED_PRICE",
-        "quantity": 1,
-        "pricingSummary": {
-            "price": {
-                "value": "199.99",
-                "currency": "USD"
-            }
-        },
-        "listingDuration": "GTC",  # Good 'Til Cancelled
-        "categoryId": "181415",  # Cameras & Photo > Camcorders (example category)
-        # Optional: Add listing policies if you have them set up
-        "listingPolicies": {
-            "fulfillmentPolicyId": "278845890014",
-            "paymentPolicyId": "278845829014",
-            "returnPolicyId": "278848523014"
-        },
-        # Optional: Specify merchant location
-        "merchantLocationKey": "PlasticLoveShopLocation"
-    }
+    # Step 2: Offer Data (using centralized test data from top of file)
+    test_offer_data = TEST_OFFER_DATA.copy()
+    test_offer_data["quantity"] = 1  # Override quantity for this example
+    test_offer_data["merchantLocationKey"] = MERCHANT_LOCATION_KEY
+    
+    # Add listing policies from .env if available
+    policies = get_listing_policies()
+    if policies:
+        test_offer_data["listingPolicies"] = policies
     
     # Run the complete workflow
     result = upload_complete_listing(

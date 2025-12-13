@@ -15,3 +15,9 @@ token_expiration=
 
 # OpenRouter API Key (for AI content generation)
 openrouter_api_key=your_openrouter_api_key_here
+
+# eBay Business Policies (required for listings)
+# Get these from: https://www.ebay.com/sh/landing > Account > Site Preferences > Business Policies
+fulfillment_policy_id=your_fulfillment_policy_id_here
+payment_policy_id=your_payment_policy_id_here
+return_policy_id=your_return_policy_id_here
