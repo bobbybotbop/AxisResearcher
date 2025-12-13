@@ -95,49 +95,47 @@ def save_config(config):
     except Exception as e:
         print(f"❌ Error saving config: {e}")
 
-def get_counter():
+def get_sku(return_counter=False):
     """
-    Get the current counter value from config.
-    
-    Returns:
-        int: Current counter value
-    """
-    config = load_config()
-    return config["counter"]
-
-def get_sku():
-    """
-    Get the current SKU based on the counter value.
+    Get the current counter and/or SKU based on the counter value.
     Format: AXIS_[counter]
     
-    Returns:
-        str: Current SKU in format AXIS_[counter]
-    """
-    counter = get_counter()
-    return f"AXIS_{counter}"
-
-def increment_counter():
-    """
-    Increment the counter and save it to config.
+    Args:
+        return_counter (bool): If True, returns both counter and SKU as a tuple
     
     Returns:
-        int: New counter value
+        str or tuple: Current SKU in format AXIS_[counter], or (counter, SKU) if return_counter is True
+    """
+    config = load_config()
+    counter = config["counter"]
+    sku = f"AXIS_{counter}"
+    
+    if return_counter:
+        return counter, sku
+    return sku
+
+def get_next_sku(return_counter=False):
+    """
+    Increment the counter and return the new counter and/or SKU.
+    Format: AXIS_[counter]
+    
+    Args:
+        return_counter (bool): If True, returns both counter and SKU as a tuple
+    
+    Returns:
+        str or tuple: New SKU in format AXIS_[counter] after incrementing, 
+                     or (counter, SKU) if return_counter is True
     """
     config = load_config()
     config["counter"] = config["counter"] + 1
     save_config(config)
-    return config["counter"]
-
-def get_next_sku():
-    """
-    Increment the counter and return the new SKU.
-    Format: AXIS_[counter]
     
-    Returns:
-        str: New SKU in format AXIS_[counter] after incrementing
-    """
-    increment_counter()
-    return get_sku()
+    counter = config["counter"]
+    sku = f"AXIS_{counter}"
+    
+    if return_counter:
+        return counter, sku
+    return sku
 
 # Load configuration on import
 _config = load_config()
