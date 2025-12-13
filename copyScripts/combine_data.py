@@ -4,7 +4,16 @@ Module for creating eBay inventory and offer objects and saving them to JSON fil
 
 import os
 import json
+from dotenv import load_dotenv
 from datetime import datetime
+
+# Load environment variables
+load_dotenv()
+
+# eBay Business Policy IDs (from .env)
+FULFILLMENT_POLICY_ID = os.getenv('fulfillment_policy_id')
+PAYMENT_POLICY_ID = os.getenv('payment_policy_id')
+RETURN_POLICY_ID = os.getenv('return_policy_id')
 
 # eBay API base URL
 EBAY_INVENTORY_API_BASE = "https://api.ebay.com/sell/inventory/v1"
@@ -40,8 +49,8 @@ TEST_INVENTORY_ITEM_DATA = {
         "dimensions": DEFAULT_DIMESIONS
     },
     "product": {
-        "title": "GoPro Hero4 Helmet Cam",
-        "description": "New GoPro Hero4 Helmet Cam. Unopened box. Perfect for capturing your adventures in stunning HD quality.",
+        "title": "GoPro Hero4 Helmet Cam", # need to change
+        "description": "New GoPro Hero4 Helmet Cam. Unopened box. Perfect for capturing your adventures in stunning HD quality.",  # need to change
         "aspects": {
             "Brand": ["GoPro"],
             "Type": ["Helmet/Action"],
@@ -54,7 +63,7 @@ TEST_INVENTORY_ITEM_DATA = {
             "http://i.ebayimg.com/images/i/182196556219-0-1/s-l1000.jpg",
             "http://i.ebayimg.com/images/i/182196556219-0-1/s-l1001.jpg",
             "http://i.ebayimg.com/images/i/182196556219-0-1/s-l1002.jpg"
-        ]
+        ]  # need to change
     }
 }
 
@@ -65,13 +74,30 @@ TEST_OFFER_DATA = {
     "quantity": DEFAULT_QUANTITY,
     "pricingSummary": {
         "price": {
-            "value": "199.99",
+            "value": "199.99", # need to change
             "currency": "USD"
         }
     },
-    "listingDuration": "GTC",  # Good 'Til Cancelled
-    "categoryId": "181415",  # Cameras & Photo > Camcorders
+    "listingDuration": "GTC", 
+    "categoryId": "181415",  # need to change
 }
+
+
+def get_listing_policies():
+    """
+    Get listing policies from environment variables.
+    
+    Returns:
+        dict: Dictionary with policy IDs, or None if no policies are set
+    """
+    policies = {}
+    if FULFILLMENT_POLICY_ID:
+        policies["fulfillmentPolicyId"] = FULFILLMENT_POLICY_ID
+    if PAYMENT_POLICY_ID:
+        policies["paymentPolicyId"] = PAYMENT_POLICY_ID
+    if RETURN_POLICY_ID:
+        policies["returnPolicyId"] = RETURN_POLICY_ID
+    return policies if policies else None
 
 
 def create_inventory_and_offer_listing(
@@ -106,9 +132,19 @@ def create_inventory_and_offer_listing(
     if "merchantLocationKey" not in offer_data:
         offer_data["merchantLocationKey"] = MERCHANT_LOCATION_KEY
     
+    # Add listing policies from .env if available and not already present
+    if "listingPolicies" not in offer_data:
+        policies = get_listing_policies()
+        if policies:
+            offer_data["listingPolicies"] = policies
+    
+    # Get current date and time
+    created_datetime = datetime.now().isoformat()
+    
     # Create the combined listing object
     listing_object = {
         "sku": sku,
+        "createdDateTime": created_datetime,
         "inventoryItem": inventory_item_data,
         "offer": offer_data
     }
@@ -117,10 +153,9 @@ def create_inventory_and_offer_listing(
     output_dir = "Generated_Listings"
     os.makedirs(output_dir, exist_ok=True)
     
-    # Generate filename if not provided
+    # Generate filename if not provided (simply use SKU)
     if output_filename is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_filename = f"listing_{sku}_{timestamp}.json"
+        output_filename = f"{sku}.json"
     
     # Ensure filename ends with .json
     if not output_filename.endswith(".json"):
@@ -138,3 +173,45 @@ def create_inventory_and_offer_listing(
     
     return output_path
 
+
+def load_listing_data(sku=None, filename=None):
+    """
+    Load inventory and offer data from a JSON file in Generated_Listings folder.
+    
+    Args:
+        sku (str, optional): SKU for the listing to load. If None, uses TEST_SKU.
+                             If filename is provided, sku is ignored.
+        filename (str, optional): Specific filename to load. If None, finds most recent file for SKU.
+    
+    Returns:
+        dict: Dictionary with "sku", "inventoryItem", and "offer" keys, or None if file doesn't exist
+    """
+    output_dir = "Generated_Listings"
+    
+    # If specific filename provided, use it
+    if filename:
+        filepath = os.path.join(output_dir, filename)
+        if not filepath.endswith(".json"):
+            filepath += ".json"
+    else:
+        # Use SKU to find the file (simply {sku}.json)
+        if sku is None:
+            sku = TEST_SKU
+        
+        # File is simply {sku}.json
+        filepath = os.path.join(output_dir, f"{sku}.json")
+    
+    try:
+        if not os.path.exists(filepath):
+            print(f"⚠️  Listing data file not found: {filepath}")
+            return None
+        
+        # Load from JSON file
+        with open(filepath, 'r', encoding='utf-8') as f:
+            listing_data = json.load(f)
+        
+        print(f"✅ Loaded listing data from: {os.path.basename(filepath)}")
+        return listing_data
+    except Exception as e:
+        print(f"❌ Error loading listing data file: {e}")
+        return None

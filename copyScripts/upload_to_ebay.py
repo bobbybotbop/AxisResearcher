@@ -36,12 +36,14 @@ load_dotenv()
 USER_TOKEN = os.getenv('user_token')
 APPLICATION_TOKEN = os.getenv('application_token')
 
-# eBay Business Policy IDs (from .env)
-FULFILLMENT_POLICY_ID = os.getenv('fulfillment_policy_id')
-PAYMENT_POLICY_ID = os.getenv('payment_policy_id')
-RETURN_POLICY_ID = os.getenv('return_policy_id')
-
 # Import constants and test data from combine_data module
+# Handle import when loaded via importlib (add directory to path)
+import sys
+import os
+copy_scripts_dir = os.path.dirname(os.path.abspath(__file__))
+if copy_scripts_dir not in sys.path:
+    sys.path.insert(0, copy_scripts_dir)
+
 from combine_data import (
     EBAY_INVENTORY_API_BASE,
     MERCHANT_LOCATION_KEY,
@@ -50,20 +52,10 @@ from combine_data import (
     DEFAULT_WEIGHT,
     TEST_SKU,
     TEST_INVENTORY_ITEM_DATA,
-    TEST_OFFER_DATA
+    TEST_OFFER_DATA,
+    load_listing_data,
+    get_listing_policies
 )
-
-# Helper function to get listing policies dict (uses .env values)
-def get_listing_policies():
-    """Get listing policies from environment variables."""
-    policies = {}
-    if FULFILLMENT_POLICY_ID:
-        policies["fulfillmentPolicyId"] = FULFILLMENT_POLICY_ID
-    if PAYMENT_POLICY_ID:
-        policies["paymentPolicyId"] = PAYMENT_POLICY_ID
-    if RETURN_POLICY_ID:
-        policies["returnPolicyId"] = RETURN_POLICY_ID
-    return policies if policies else None
 
 
 def create_ebay_listing(sku, inventory_item_data, locale="en-US", use_user_token=True):
@@ -525,26 +517,43 @@ def upload_complete_listing(sku, inventory_item_data, offer_data, locale="en-US"
     return publish_result
 
 
-def create_test_listing(locale="en-US", use_user_token=True):
+def create_test_listing(locale="en-US", use_user_token=True, sku=None, listing_filename=None):
     """
-    Create a test listing using centralized test data constants.
+    Create a test listing using data loaded from JSON files in Generated_Listings folder.
     
-    This function uses test data imported from combine_data module (TEST_INVENTORY_ITEM_DATA, etc.)
+    This function loads test data from the Generated_Listings folder (created by combine command)
     and loads listing policies from environment variables.
     
     Args:
         locale (str): Locale code. Default: "en-US"
         use_user_token (bool): If True, use user_token. Default: True
+        sku (str, optional): SKU to load. If None, uses TEST_SKU.
+        listing_filename (str, optional): Specific listing filename to load. If None, finds most recent for SKU.
     
     Returns:
         dict: Final result with listing ID, or None on failure
     """
-    print(f"🚀 Publishing complete listing to eBay with SKU: {TEST_SKU}")
+    # Use provided SKU or default
+    listing_sku = sku if sku else TEST_SKU
+    print(f"🚀 Publishing complete listing to eBay with SKU: {listing_sku}")
     
-    # Use centralized test data (defined at top of file)
-    test_inventory_item_data = TEST_INVENTORY_ITEM_DATA.copy()
-    test_offer_data = TEST_OFFER_DATA.copy()
-    test_offer_data["merchantLocationKey"] = MERCHANT_LOCATION_KEY
+    # Load data from JSON file
+    listing_data = load_listing_data(sku=listing_sku, filename=listing_filename)
+    if not listing_data:
+        print(f"❌ Failed to load listing data for SKU: {listing_sku}")
+        print(f"💡 Make sure to create the listing data file first using: combine {listing_sku}")
+        return None
+    
+    # Extract inventory and offer data from loaded JSON
+    test_inventory_item_data = listing_data.get("inventoryItem", {}).copy()
+    test_offer_data = listing_data.get("offer", {}).copy()
+    
+    # Ensure merchant location key is set
+    if "merchantLocationKey" not in test_offer_data:
+        test_offer_data["merchantLocationKey"] = MERCHANT_LOCATION_KEY
+    
+    # Use SKU from loaded data or provided/default
+    actual_sku = listing_data.get("sku", listing_sku)
     
     # Add listing policies from .env if available
     policies = get_listing_policies()
@@ -553,7 +562,7 @@ def create_test_listing(locale="en-US", use_user_token=True):
     
     # Run the complete workflow (creates inventory item, creates offer, and publishes)
     result = upload_complete_listing(
-        sku=TEST_SKU,
+        sku=actual_sku,
         inventory_item_data=test_inventory_item_data,
         offer_data=test_offer_data,
         locale=locale,

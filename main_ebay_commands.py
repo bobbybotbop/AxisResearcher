@@ -53,6 +53,12 @@ decode_image_from_response = create_image_module.decode_image_from_response
 upload_image_to_ebay = create_image_module.upload_image_to_ebay
 ImageType = create_image_module.ImageType
 
+# Import combine_data module (from copyScripts folder)
+combine_data_spec = importlib.util.spec_from_file_location("combine_data", "copyScripts/combine_data.py")
+combine_data_module = importlib.util.module_from_spec(combine_data_spec)
+combine_data_spec.loader.exec_module(combine_data_module)
+create_inventory_and_offer_listing = combine_data_module.create_inventory_and_offer_listing
+
 
 load_dotenv()
 API_KEY = os.getenv('api_key')
@@ -1386,6 +1392,28 @@ def run_command(command, *args):
             # All test data is hardcoded in create_test_listing() function in upload_to_ebay.py
             create_test_listing(locale="en-US", use_user_token=True)
             
+        elif command == "combine":
+            # Optional arguments: sku and output_filename
+            sku = args[0] if args else None
+            output_filename = args[1] if len(args) > 1 else None
+            
+            print(f"📦 Creating inventory and offer listing...")
+            if sku:
+                print(f"🆔 SKU: {sku}")
+            if output_filename:
+                print(f"📁 Output filename: {output_filename}")
+            
+            result = create_inventory_and_offer_listing(
+                sku=sku,
+                output_filename=output_filename
+            )
+            
+            if result:
+                print(f"\n✅ Listing data created successfully!")
+                print(f"📁 File: {result}")
+            else:
+                print(f"\n❌ Failed to create listing data")
+            
         elif command == "image":
             if len(args) < 2:
                 raise ValueError("Usage: image <image_url> <image_type>")
@@ -1441,7 +1469,7 @@ def run_command(command, *args):
                 print(f"\n❌ Failed to upload image to eBay")
             
         else:
-            print("❌ Available commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, image <url> <type>, decode, upload [picture_name]")
+            print("❌ Available commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, combine [sku] [output_filename], image <url> <type>, decode, upload [picture_name]")
             
     except ValueError as e:
         print(f"❌ {e}")
@@ -1452,7 +1480,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         print("❌ Usage: python main_ebay_commands.py <command> [args...]")
-        print("Commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, image <url> <type>, decode, upload [picture_name]")
+        print("Commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, combine [sku] [output_filename], image <url> <type>, decode, upload [picture_name]")
         sys.exit(1)
     
     run_command(sys.argv[1], *sys.argv[2:])
