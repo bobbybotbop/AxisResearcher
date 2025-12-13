@@ -18,23 +18,139 @@ RETURN_POLICY_ID = os.getenv('return_policy_id')
 # eBay API base URL
 EBAY_INVENTORY_API_BASE = "https://api.ebay.com/sell/inventory/v1"
 
-# Item Data Preferences
-MERCHANT_LOCATION_KEY = "PlasticLoveShopLocation"
-DEFAULT_QUANTITY = 15
-DEFAULT_DIMESIONS = {
-    "length": "9",
-    "width": "6",
-    "height": "3",
-    "unit": "INCH"
-}
-# Might change later
-DEFAULT_WEIGHT = {
-    "value": "0.4",
-    "unit": "POUND"
-}
+# Config file path
+CONFIG_FILE = "listingPreferences.json"
 
-# Test Data Constants (organized at top for easy modification)
-TEST_SKU = "TEST_007"
+def load_config():
+    """
+    Load configuration from listingPreferences.json file.
+    
+    Returns:
+        dict: Configuration dictionary
+        
+    Raises:
+        FileNotFoundError: If listingPreferences.json does not exist
+        ValueError: If listingPreferences.json is missing required keys, has invalid structure, or contains invalid JSON
+    """
+    if not os.path.exists(CONFIG_FILE):
+        raise FileNotFoundError(
+            f"Config file '{CONFIG_FILE}' not found. "
+            f"Please create {CONFIG_FILE} with required configuration."
+        )
+    
+    try:
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"Invalid JSON in config file '{CONFIG_FILE}': {e.msg}"
+        ) from e
+    
+    # Validate required keys
+    required_keys = [
+        "counter",
+        "merchant_location_key",
+        "default_quantity",
+        "default_dimensions",
+        "default_weight"
+    ]
+    missing_keys = [key for key in required_keys if key not in config]
+    if missing_keys:
+        raise ValueError(
+            f"Config file '{CONFIG_FILE}' is missing required keys: {', '.join(missing_keys)}"
+        )
+    
+    # Validate default_dimensions structure
+    if not isinstance(config["default_dimensions"], dict):
+        raise ValueError("'default_dimensions' must be a dictionary")
+    required_dimension_keys = ["length", "width", "height", "unit"]
+    missing_dim_keys = [key for key in required_dimension_keys if key not in config["default_dimensions"]]
+    if missing_dim_keys:
+        raise ValueError(
+            f"'default_dimensions' is missing required keys: {', '.join(missing_dim_keys)}"
+        )
+    
+    # Validate default_weight structure
+    if not isinstance(config["default_weight"], dict):
+        raise ValueError("'default_weight' must be a dictionary")
+    required_weight_keys = ["value", "unit"]
+    missing_weight_keys = [key for key in required_weight_keys if key not in config["default_weight"]]
+    if missing_weight_keys:
+        raise ValueError(
+            f"'default_weight' is missing required keys: {', '.join(missing_weight_keys)}"
+        )
+    
+    return config
+
+def save_config(config):
+    """
+    Save configuration to listingPreferences.json file.
+    
+    Args:
+        config (dict): Configuration dictionary to save
+    """
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"❌ Error saving config: {e}")
+
+def get_counter():
+    """
+    Get the current counter value from config.
+    
+    Returns:
+        int: Current counter value
+    """
+    config = load_config()
+    return config["counter"]
+
+def get_sku():
+    """
+    Get the current SKU based on the counter value.
+    Format: AXIS_[counter]
+    
+    Returns:
+        str: Current SKU in format AXIS_[counter]
+    """
+    counter = get_counter()
+    return f"AXIS_{counter}"
+
+def increment_counter():
+    """
+    Increment the counter and save it to config.
+    
+    Returns:
+        int: New counter value
+    """
+    config = load_config()
+    config["counter"] = config["counter"] + 1
+    save_config(config)
+    return config["counter"]
+
+def get_next_sku():
+    """
+    Increment the counter and return the new SKU.
+    Format: AXIS_[counter]
+    
+    Returns:
+        str: New SKU in format AXIS_[counter] after incrementing
+    """
+    increment_counter()
+    return get_sku()
+
+# Load configuration on import
+_config = load_config()
+
+# Item Data Preferences (loaded from config)
+MERCHANT_LOCATION_KEY = _config["merchant_location_key"]
+DEFAULT_QUANTITY = _config["default_quantity"]
+DEFAULT_DIMESIONS = _config["default_dimensions"]
+DEFAULT_WEIGHT = _config["default_weight"]
+
+# Test Data Constants (loaded from config)
+# SKU is generated from counter: AXIS_[counter]
+TEST_SKU = get_sku()
 
 # Test Inventory Item Data
 TEST_INVENTORY_ITEM_DATA = {
@@ -100,7 +216,7 @@ def get_listing_policies():
     return policies if policies else None
 
 
-def create_inventory_and_offer_listing(
+def create_listing_with_metadata(
     sku=None,
     inventory_item_data=None,
     offer_data=None,
