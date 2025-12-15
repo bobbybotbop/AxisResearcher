@@ -29,19 +29,522 @@ class ImageType(Enum):
     """Enum for image generation types."""
     PROFESSIONAL = "PROFESSIONAL"
     REAL_WORLD = "REAL_WORLD"
+    EXPERIMENTAL = "EXPERIMENTAL"
+
+
+def extract_and_save_images_from_response(result, image_type):
+    """
+    Extract all images from API response and save them to files.
+    
+    Args:
+        result (dict): The API response JSON as a dictionary
+        image_type (ImageType): Enum value indicating PROFESSIONAL, REAL_WORLD, or EXPERIMENTAL
+    
+    Returns:
+        list[dict]: List of dictionaries with keys: image_bytes, mime_type, file_path, image_url (if applicable)
+                    Returns empty list if no images found or on error
+    """
+    extracted_images = []
+    
+    try:
+        # Parse response to extract all images
+        if 'choices' in result and len(result['choices']) > 0:
+            choice = result['choices'][0]
+            message = choice.get('message', {})
+            
+            # Check for images array in message (Gemini API format)
+            if 'images' in message and isinstance(message['images'], list) and len(message['images']) > 0:
+                for img_obj in message['images']:
+                    if isinstance(img_obj, dict):
+                        image_data = None
+                        image_url = None
+                        is_base64 = False
+                        mime_type = None
+                        
+                        # Check for image_url format
+                        if img_obj.get('type') == 'image_url':
+                            image_url_data = img_obj.get('image_url', {})
+                            if isinstance(image_url_data, dict):
+                                extracted_url = image_url_data.get('url', '')
+                                if extracted_url:
+                                    if extracted_url.startswith('data:image'):
+                                        is_base64 = True
+                                        # Extract mime type from data URI
+                                        if 'image/png' in extracted_url:
+                                            mime_type = 'image/png'
+                                        elif 'image/jpeg' in extracted_url or 'image/jpg' in extracted_url:
+                                            mime_type = 'image/jpeg'
+                                        elif 'image/webp' in extracted_url:
+                                            mime_type = 'image/webp'
+                                        else:
+                                            mime_type = 'image/png'
+                                        
+                                        if ',' in extracted_url:
+                                            image_data = extracted_url.split(',', 1)[1]
+                                        else:
+                                            image_data = extracted_url
+                                    elif extracted_url.startswith('http://') or extracted_url.startswith('https://'):
+                                        image_url = extracted_url
+                            elif isinstance(image_url_data, str):
+                                if image_url_data.startswith('data:image'):
+                                    is_base64 = True
+                                    if ',' in image_url_data:
+                                        image_data = image_url_data.split(',', 1)[1]
+                                        if 'image/png' in image_url_data:
+                                            mime_type = 'image/png'
+                                        elif 'image/jpeg' in image_url_data or 'image/jpg' in image_url_data:
+                                            mime_type = 'image/jpeg'
+                                        elif 'image/webp' in image_url_data:
+                                            mime_type = 'image/webp'
+                                        else:
+                                            mime_type = 'image/png'
+                                    else:
+                                        image_data = image_url_data
+                                elif image_url_data.startswith('http'):
+                                    image_url = image_url_data
+                            
+                            # Process this image if we found data
+                            if image_data or image_url:
+                                img_result = _process_single_image(image_data, image_url, is_base64, mime_type, image_type, len(extracted_images))
+                                if img_result:
+                                    extracted_images.append(img_result)
+            
+            # Fallback: Check content field if images array not found or empty
+            if not extracted_images:
+                message_content = message.get('content', '')
+                
+                if isinstance(message_content, list):
+                    # Content might be an array of content parts (most common format)
+                    for part in message_content:
+                        if isinstance(part, dict):
+                            image_data = None
+                            image_url = None
+                            is_base64 = False
+                            mime_type = None
+                            
+                            # Check for inline_data structure (Gemini API format)
+                            if 'inline_data' in part:
+                                inline_data = part.get('inline_data', {})
+                                if isinstance(inline_data, dict) and 'data' in inline_data:
+                                    image_data = inline_data.get('data')
+                                    mime_type = inline_data.get('mime_type', 'image/png')
+                                    is_base64 = True
+                                    
+                                    img_result = _process_single_image(image_data, image_url, is_base64, mime_type, image_type, len(extracted_images))
+                                    if img_result:
+                                        extracted_images.append(img_result)
+                                    continue
+                            
+                            # Legacy format: type == 'image_url'
+                            if part.get('type') == 'image_url':
+                                image_url_data = part.get('image_url', {})
+                                if isinstance(image_url_data, dict):
+                                    extracted_url = image_url_data.get('url')
+                                    if extracted_url:
+                                        if extracted_url.startswith('http://') or extracted_url.startswith('https://'):
+                                            image_url = extracted_url
+                                        elif extracted_url.startswith('data:image'):
+                                            is_base64 = True
+                                            image_data = extracted_url.split(',', 1)[1] if ',' in extracted_url else extracted_url
+                                            if 'image/png' in extracted_url:
+                                                mime_type = 'image/png'
+                                            elif 'image/jpeg' in extracted_url or 'image/jpg' in extracted_url:
+                                                mime_type = 'image/jpeg'
+                                            elif 'image/webp' in extracted_url:
+                                                mime_type = 'image/webp'
+                                        else:
+                                            try:
+                                                base64.b64decode(extracted_url)
+                                                is_base64 = True
+                                                image_data = extracted_url
+                                            except:
+                                                image_url = extracted_url
+                                elif isinstance(image_url_data, str):
+                                    if image_url_data.startswith('http'):
+                                        image_url = image_url_data
+                                    else:
+                                        try:
+                                            base64.b64decode(image_url_data)
+                                            is_base64 = True
+                                            image_data = image_url_data
+                                        except:
+                                            image_url = image_url_data
+                                
+                                if image_data or image_url:
+                                    img_result = _process_single_image(image_data, image_url, is_base64, mime_type, image_type, len(extracted_images))
+                                    if img_result:
+                                        extracted_images.append(img_result)
+                            elif part.get('type') == 'text' and part.get('text', '').startswith('http'):
+                                image_url = part.get('text', '').strip()
+                                img_result = _process_single_image(None, image_url, False, None, image_type, len(extracted_images))
+                                if img_result:
+                                    extracted_images.append(img_result)
+                            elif part.get('type') == 'image_data':
+                                image_data = part.get('image_data')
+                                is_base64 = True
+                                img_result = _process_single_image(image_data, None, is_base64, None, image_type, len(extracted_images))
+                                if img_result:
+                                    extracted_images.append(img_result)
+        
+        # Check alternative response formats if no images found yet
+        if not extracted_images:
+            image_data = None
+            image_url = None
+            is_base64 = False
+            mime_type = None
+            
+            if 'image' in result:
+                image_data = result['image']
+                is_base64 = True
+            elif 'data' in result:
+                if isinstance(result['data'], list) and len(result['data']) > 0:
+                    item = result['data'][0]
+                    image_url = item.get('url')
+                    image_data = item.get('b64_json') or item.get('base64_image')
+                elif isinstance(result['data'], dict):
+                    image_url = result['data'].get('url')
+                    image_data = result['data'].get('b64_json') or result['data'].get('base64_image')
+            elif 'url' in result:
+                image_url = result['url']
+            elif 'b64_json' in result:
+                image_data = result['b64_json']
+                is_base64 = True
+            
+            if image_data or image_url:
+                img_result = _process_single_image(image_data, image_url, is_base64, mime_type, image_type, 0)
+                if img_result:
+                    extracted_images.append(img_result)
+        
+        if not extracted_images:
+            print("❌ Could not find any images in API response.")
+            return []
+        
+        print(f"✅ Extracted and saved {len(extracted_images)} image(s)")
+        return extracted_images
+        
+    except Exception as e:
+        print(f"❌ Error extracting images from response: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+
+def _process_single_image(image_data, image_url, is_base64, mime_type, image_type, index):
+    """
+    Helper function to process a single image: decode, save, and return metadata.
+    
+    Args:
+        image_data (str): Base64 image data or None
+        image_url (str): Image URL or None
+        is_base64 (bool): Whether image_data is base64
+        mime_type (str): MIME type or None
+        image_type (ImageType): Image type enum
+        index (int): Index of image in the list
+    
+    Returns:
+        dict: Dictionary with image_bytes, mime_type, file_path, image_url (if applicable) or None on error
+    """
+    try:
+        image_bytes = None
+        
+        # Handle base64 encoded image
+        if is_base64 and image_data:
+            print(f"📥 Decoding base64 image data (image {index + 1})...")
+            try:
+                # Clean the base64 data
+                image_data_cleaned = image_data.strip().replace('\n', '').replace('\r', '').replace(' ', '').replace('\t', '')
+                image_bytes = base64.b64decode(image_data_cleaned, validate=True)
+                
+                # Determine mime type if not provided
+                if not mime_type:
+                    mime_type = 'image/png'  # Default
+            except Exception as e:
+                print(f"❌ Error decoding base64 data: {e}")
+                return None
+        elif image_url:
+            # Download image from URL
+            print(f"📥 Downloading image from URL (image {index + 1})...")
+            try:
+                img_response = requests.get(image_url, timeout=30)
+                img_response.raise_for_status()
+                image_bytes = img_response.content
+                
+                # Determine mime type from content type or URL
+                if not mime_type:
+                    content_type = img_response.headers.get('content-type', '')
+                    if 'jpeg' in content_type or 'jpg' in content_type:
+                        mime_type = 'image/jpeg'
+                    elif 'png' in content_type:
+                        mime_type = 'image/png'
+                    elif 'webp' in content_type:
+                        mime_type = 'image/webp'
+                    else:
+                        # Try to infer from URL
+                        if '.jpg' in image_url.lower() or '.jpeg' in image_url.lower():
+                            mime_type = 'image/jpeg'
+                        elif '.png' in image_url.lower():
+                            mime_type = 'image/png'
+                        elif '.webp' in image_url.lower():
+                            mime_type = 'image/webp'
+                        else:
+                            mime_type = 'image/jpeg'  # Default
+            except Exception as e:
+                print(f"❌ Error downloading image: {e}")
+                return None
+        
+        if not image_bytes:
+            print(f"❌ No image data available for image {index + 1}")
+            return None
+        
+        # Determine file extension from mime_type
+        if mime_type:
+            if 'jpeg' in mime_type or 'jpg' in mime_type:
+                ext = '.jpg'
+            elif 'png' in mime_type:
+                ext = '.png'
+            elif 'webp' in mime_type:
+                ext = '.webp'
+            else:
+                ext = '.png'  # Default
+        else:
+            ext = '.png'  # Default
+        
+        # Create output directory if it doesn't exist
+        output_dir = Path("generated-images")
+        output_dir.mkdir(exist_ok=True)
+        
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        image_type_str = image_type.value.lower() if isinstance(image_type, ImageType) else 'generated'
+        
+        # Add index to filename if multiple images
+        if index > 0:
+            filename = f"generated_{image_type_str}_{timestamp}_{index}{ext}"
+        else:
+            filename = f"generated_{image_type_str}_{timestamp}{ext}"
+        
+        file_path = output_dir / filename
+        
+        # Save the image
+        with open(file_path, 'wb') as f:
+            f.write(image_bytes)
+        
+        print(f"✅ Image {index + 1} saved to: {file_path}")
+        
+        return {
+            'image_bytes': image_bytes,
+            'mime_type': mime_type or 'image/png',
+            'file_path': str(file_path),
+            'image_url': image_url  # May be None if image was base64
+        }
+        
+    except Exception as e:
+        print(f"❌ Error processing image {index + 1}: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def upload_image_bytes_to_ebay(image_bytes, mime_type, picture_name="Uploaded Image"):
+    """
+    Upload image bytes directly to eBay Picture Services.
+    
+    Args:
+        image_bytes (bytes): Binary image data
+        mime_type (str): MIME type of the image (e.g., 'image/png', 'image/jpeg')
+        picture_name (str): Optional name for the picture (default: "Uploaded Image")
+    
+    Returns:
+        str: Full URL of the uploaded image, or None on failure
+    """
+    # Validate eBay credentials
+    if not CLIENT_ID:
+        print("⚠️ Warning: CLIENT_ID not found, but trying OAuth-only authentication")
+    
+    # Get user token from environment
+    valid_token = USER_TOKEN
+    if not valid_token:
+        print("❌ Error: Could not get valid user token")
+        print("💡 Make sure user_token is set in your .env file")
+        return None
+    
+    # Determine content type from mime_type or default
+    content_type = mime_type or "image/jpeg"
+    
+    # Determine file extension and filename from mime type
+    if 'jpeg' in content_type or 'jpg' in content_type:
+        file_ext = '.jpg'
+    elif 'png' in content_type:
+        file_ext = '.png'
+    elif 'webp' in content_type:
+        file_ext = '.webp'
+    else:
+        file_ext = '.jpg'  # Default
+    
+    # Create a safe filename from picture_name
+    safe_filename = "".join(c for c in picture_name if c.isalnum() or c in (' ', '-', '_')).strip()
+    if not safe_filename:
+        safe_filename = "uploaded_image"
+    safe_filename = safe_filename.replace(' ', '_') + file_ext
+    
+    # Construct XML request payload
+    xml_payload = f"""<?xml version="1.0" encoding="utf-8"?>
+<UploadSiteHostedPicturesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+    <RequesterCredentials>
+        <eBayAuthToken>{valid_token}</eBayAuthToken>
+    </RequesterCredentials>
+    <PictureName><![CDATA[{picture_name}]]></PictureName>
+    <PictureSet>Standard</PictureSet>
+</UploadSiteHostedPicturesRequest>"""
+    
+    # Set headers for eBay Trading API
+    headers = {
+        "X-EBAY-API-SITEID": "0",  # US Production
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+        "X-EBAY-API-CALL-NAME": "UploadSiteHostedPictures",
+        "X-EBAY-API-RESPONSE-ENCODING": "XML"
+    }
+    
+    # eBay API endpoint
+    url = "https://api.ebay.com/ws/api.dll"
+    
+    try:
+        print(f"📤 Uploading image to eBay Picture Services...")
+        print(f"📝 Picture name: {picture_name}")
+        print(f"📦 Using multipart/form-data with binary attachment ({len(image_bytes)} bytes)")
+        
+        # Manually construct multipart/form-data
+        import uuid
+        
+        # Generate a unique boundary
+        boundary = f"----FormBoundary{uuid.uuid4().hex[:16]}"
+        
+        # Build multipart body
+        body_parts = []
+        
+        # First part: XML Payload
+        body_parts.append(f"--{boundary}\r\n".encode('utf-8'))
+        body_parts.append(f'Content-Disposition: form-data; name="XML Payload"\r\n'.encode('utf-8'))
+        body_parts.append(f'\r\n'.encode('utf-8'))
+        body_parts.append(xml_payload.encode('utf-8'))
+        body_parts.append(f'\r\n'.encode('utf-8'))
+        
+        # Second part: Binary image
+        escaped_picture_name = picture_name.replace('"', '\\"')
+        escaped_filename = safe_filename.replace('"', '\\"')
+        
+        body_parts.append(f"--{boundary}\r\n".encode('utf-8'))
+        body_parts.append(f'Content-Disposition: form-data; name="{escaped_picture_name}"; filename="{escaped_filename}"\r\n'.encode('utf-8'))
+        body_parts.append(f'Content-Type: {content_type}\r\n'.encode('utf-8'))
+        body_parts.append(f'\r\n'.encode('utf-8'))
+        body_parts.append(image_bytes)
+        body_parts.append(f'\r\n'.encode('utf-8'))
+        
+        # Closing boundary
+        body_parts.append(f"--{boundary}--\r\n".encode('utf-8'))
+        
+        # Combine all parts
+        multipart_body = b''.join(body_parts)
+        
+        # Update headers with multipart content type
+        headers['Content-Type'] = f'multipart/form-data; boundary={boundary}'
+        
+        response = requests.post(url, data=multipart_body, headers=headers, timeout=60)
+        
+        if response.status_code != 200:
+            print(f"❌ HTTP Error {response.status_code}")
+            print(f"Response: {response.text[:500]}")
+            return None
+        
+        # Check if response is valid XML before parsing
+        response_text = response.text.strip()
+        
+        if not response_text.startswith('<?xml') and not response_text.startswith('<'):
+            print(f"❌ eBay API returned non-XML error response:")
+            print(f"Response: {response_text}")
+            
+            if "ErrorId=" in response_text:
+                import urllib.parse
+                try:
+                    if "Error from PES" in response_text:
+                        error_part = response_text.split("Error from PES, ")[-1]
+                        error_params = urllib.parse.parse_qs(error_part)
+                        error_id = error_params.get('ErrorId', ['Unknown'])[0]
+                        error_msg = error_params.get('ErrorMessage', ['Unknown error'])[0]
+                        print(f"Error ID: {error_id}")
+                        print(f"Error Message: {error_msg}")
+                    else:
+                        print(f"Full error: {response_text}")
+                except:
+                    print(f"Full error: {response_text}")
+            
+            return None
+        
+        # Parse XML response
+        try:
+            root = ET.fromstring(response.content)
+            
+            # Check for errors
+            ack = root.find(".//{urn:ebay:apis:eBLBaseComponents}Ack")
+            if ack is not None and ack.text != "Success":
+                print(f"❌ eBay API returned error: {ack.text}")
+                
+                errors = root.findall(".//{urn:ebay:apis:eBLBaseComponents}Errors")
+                for error in errors:
+                    short_message = error.find(".//{urn:ebay:apis:eBLBaseComponents}ShortMessage")
+                    long_message = error.find(".//{urn:ebay:apis:eBLBaseComponents}LongMessage")
+                    error_code = error.find(".//{urn:ebay:apis:eBLBaseComponents}ErrorCode")
+                    
+                    if short_message is not None:
+                        print(f"Error: {short_message.text}")
+                    if long_message is not None:
+                        print(f"Details: {long_message.text}")
+                    if error_code is not None:
+                        print(f"Error Code: {error_code.text}")
+                
+                return None
+            
+            # Extract FullURL from SiteHostedPictureDetails
+            full_url_elem = root.find(".//{urn:ebay:apis:eBLBaseComponents}FullURL")
+            
+            if full_url_elem is not None and full_url_elem.text:
+                image_url = full_url_elem.text
+                print(f"✅ Image uploaded successfully!")
+                print(f"🔗 Image URL: {image_url}")
+                return image_url
+            else:
+                print("❌ Could not find FullURL in response")
+                print(f"Response XML: {response.text[:1000]}")
+                return None
+                
+        except ET.ParseError as e:
+            print(f"❌ Error parsing XML response: {e}")
+            print(f"Response: {response.text[:500]}")
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Error calling eBay API: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"Response: {e.response.text[:500]}")
+        return None
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 
 def generate_image_from_urls(image_urls, image_type):
     """
     Generate an image using OpenRouter's Gemini 2.5 Flash Image API from input image URLs.
-    Saves the API response as JSON to api-responses/ directory.
+    Extracts images from response, saves them to files, uploads to eBay, and returns eBay URLs.
     
     Args:
         image_urls (list[str]): Array of image URLs to use as input
-        image_type (ImageType): Enum value indicating PROFESSIONAL or REAL_WORLD
+        image_type (ImageType): Enum value indicating PROFESSIONAL, REAL_WORLD, or EXPERIMENTAL
     
     Returns:
-        str: Path to the saved JSON response file, or None on failure
+        list[str]: Array of eBay image URLs, or None on failure
     """
     # Load API key
     openrouter_api_key = os.getenv('openrouter_api_key')
@@ -51,7 +554,7 @@ def generate_image_from_urls(image_urls, image_type):
     
     # Validate image_type
     if not isinstance(image_type, ImageType):
-        print(f"❌ Invalid image_type. Must be ImageType.PROFESSIONAL or ImageType.REAL_WORLD")
+        print(f"❌ Invalid image_type. Must be ImageType.PROFESSIONAL, ImageType.REAL_WORLD, or ImageType.EXPERIMENTAL")
         return None
     
     # Validate image_urls
@@ -62,8 +565,10 @@ def generate_image_from_urls(image_urls, image_type):
     # Load the appropriate prompt file based on image_type
     if image_type == ImageType.PROFESSIONAL:
         prompt_file_path = "prompts/generateImageFromProfessional"
-    else:  # ImageType.REAL_WORLD
+    elif image_type == ImageType.REAL_WORLD:
         prompt_file_path = "prompts/generateImageFromWorld"
+    else:  # ImageType.EXPERIMENTAL
+        prompt_file_path = "prompts/experimental.txt"
     
     try:
         with open(prompt_file_path, 'r', encoding='utf-8') as f:
@@ -119,29 +624,42 @@ def generate_image_from_urls(image_urls, image_type):
         
         print("✅ Received response from OpenRouter API")
         
-        # Save the JSON response to a file
-        try:
-            # Create api-responses directory if it doesn't exist
-            output_dir = Path("api-responses")
-            output_dir.mkdir(exist_ok=True)
-            
-            # Generate filename with timestamp
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"response_{image_type.value}_{timestamp}.json"
-            file_path = output_dir / filename
-            
-            # Save the JSON response
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(result, f, indent=2, ensure_ascii=False)
-            
-            print(f"✅ API response saved to: {file_path}")
-            return str(file_path)
-            
-        except Exception as e:
-            print(f"❌ Error saving API response: {e}")
-            import traceback
-            traceback.print_exc()
+        # Extract all images from response and save them to files
+        extracted_images = extract_and_save_images_from_response(result, image_type)
+        
+        if not extracted_images:
+            print("❌ No images found in API response")
             return None
+        
+        # Upload each image to eBay and collect URLs
+        ebay_urls = []
+        
+        for idx, img_info in enumerate(extracted_images):
+            image_bytes = img_info['image_bytes']
+            mime_type = img_info['mime_type']
+            
+            # Generate picture name for eBay
+            image_type_str = image_type.value.lower() if isinstance(image_type, ImageType) else 'generated'
+            if len(extracted_images) > 1:
+                picture_name = f"Generated {image_type_str} image {idx + 1}"
+            else:
+                picture_name = f"Generated {image_type_str} image"
+            
+            # Upload to eBay
+            ebay_url = upload_image_bytes_to_ebay(image_bytes, mime_type, picture_name)
+            
+            if ebay_url:
+                ebay_urls.append(ebay_url)
+                print(f"✅ Image {idx + 1} uploaded to eBay: {ebay_url}")
+            else:
+                print(f"⚠️ Failed to upload image {idx + 1} to eBay, but file saved: {img_info['file_path']}")
+        
+        if not ebay_urls:
+            print("❌ Failed to upload any images to eBay")
+            return None
+        
+        print(f"✅ Successfully uploaded {len(ebay_urls)} image(s) to eBay")
+        return ebay_urls
             
     except requests.exceptions.RequestException as e:
         print(f"❌ Error calling OpenRouter API: {e}")
@@ -481,6 +999,8 @@ def decode_image_from_response():
                 image_type_str = 'professional'
             elif 'REAL_WORLD' in json_filename.upper() or 'REALWORLD' in json_filename.upper():
                 image_type_str = 'real_world'
+            elif 'EXPERIMENTAL' in json_filename.upper():
+                image_type_str = 'experimental'
             else:
                 image_type_str = 'generated'
             

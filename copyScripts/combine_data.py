@@ -4,6 +4,7 @@ Module for creating eBay inventory and offer objects and saving them to JSON fil
 
 import os
 import json
+import requests
 from dotenv import load_dotenv
 from datetime import datetime
 
@@ -163,21 +164,10 @@ TEST_INVENTORY_ITEM_DATA = {
         "dimensions": DEFAULT_DIMESIONS
     },
     "product": {
-        "title": "GoPro Hero4 Helmet Cam", # need to change
-        "description": "New GoPro Hero4 Helmet Cam. Unopened box. Perfect for capturing your adventures in stunning HD quality.",  # need to change
-        "aspects": {
-            "Brand": ["GoPro"],
-            "Type": ["Helmet/Action"],
-            "Storage Type": ["Removable"],
-            "Recording Definition": ["High Definition"],
-            "Media Format": ["Flash Drive (SSD)"],
-            "Optical Zoom": ["10x"]
-        },
-        "imageUrls": [
-            "http://i.ebayimg.com/images/i/182196556219-0-1/s-l1000.jpg",
-            "http://i.ebayimg.com/images/i/182196556219-0-1/s-l1001.jpg",
-            "http://i.ebayimg.com/images/i/182196556219-0-1/s-l1002.jpg"
-        ]  # need to change
+        "title": "[need to change]",
+        "description": "[need to change]", 
+        "aspects": {}, #[need to change]
+        "imageUrls": []  # need to change
     }
 }
 
@@ -214,7 +204,7 @@ def get_listing_policies():
     return policies if policies else None
 
 
-def create_listing_with_metadata(
+def create_listing_with_preferences(
     sku=None,
     inventory_item_data=None,
     offer_data=None,
@@ -285,7 +275,9 @@ def create_listing_with_metadata(
     print(f"Created listing file: {output_path}")
     print(f"   SKU: {sku}")
     
-    return output_path
+    return sku
+
+
 
 
 def load_listing_data(sku=None, filename=None):
@@ -329,3 +321,316 @@ def load_listing_data(sku=None, filename=None):
     except Exception as e:
         print(f"❌ Error loading listing data file: {e}")
         return None
+
+
+def listing_file_exists(sku):
+    """
+    Check if a JSON file named {sku}.json exists in the Generated_Listings folder.
+    
+    Args:
+        sku (str): The SKU to check
+    
+    Returns:
+        bool: True if the file exists, False otherwise
+    """
+    output_dir = "Generated_Listings"
+    filepath = os.path.join(output_dir, f"{sku}.json")
+    return os.path.exists(filepath)
+
+
+def update_listing_title_description(sku, new_text):
+    """
+    Update the title and description in an existing listing JSON file.
+    
+    Args:
+        sku (str): The SKU of the listing to update
+        new_text (dict): Dictionary containing optimized content with 'edited_title' and 'edited_description' keys
+    
+    Returns:
+        bool: True if update was successful, False otherwise
+    """
+    # Check if file exists using helper function
+    if not listing_file_exists(sku):
+        print(f"⚠️  Listing file not found for SKU: {sku}")
+        return False
+    
+    # Extract edited_title and edited_description from new_text dict
+    new_title = new_text.get('edited_title', '')
+    new_description = new_text.get('edited_description', '')
+    
+    if not new_title or not new_description:
+        print(f"❌ Error: new_text dict must contain 'edited_title' and 'edited_description' keys")
+        return False
+    
+    output_dir = "Generated_Listings"
+    filepath = os.path.join(output_dir, f"{sku}.json")
+    
+    try:
+        # Load the existing listing data
+        with open(filepath, 'r', encoding='utf-8') as f:
+            listing_data = json.load(f)
+        
+        # Update title and description
+        listing_data["inventoryItem"]["product"]["title"] = new_title
+        listing_data["inventoryItem"]["product"]["description"] = new_description
+        
+        # Save the updated data back to the file
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(listing_data, f, indent=2, ensure_ascii=False)
+        
+        print(f"✅ Updated listing file: {os.path.basename(filepath)}")
+        print(f"   SKU: {sku}")
+        print(f"   Title: {new_title}")
+        print(f"   Description: {new_description[:50]}..." if len(new_description) > 50 else f"   Description: {new_description}")
+        
+        return True
+    except KeyError as e:
+        print(f"❌ Error: Missing required key in listing data: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ Error updating listing data file: {e}")
+        return False
+
+
+def update_listing_meta_data(sku, new_price, new_category_id):
+    """
+    Update the price and categoryId in an existing listing JSON file.
+    
+    Args:
+        sku (str): The SKU of the listing to update
+        new_price (str): New price value to set (as string, e.g., "199.99")
+        new_category_id (str): New categoryId to set (as string, e.g., "181415")
+    
+    Returns:
+        bool: True if update was successful, False otherwise
+    """
+    # Check if file exists using helper function
+    if not listing_file_exists(sku):
+        print(f"⚠️  Listing file not found for SKU: {sku}")
+        return False
+    
+    output_dir = "Generated_Listings"
+    filepath = os.path.join(output_dir, f"{sku}.json")
+    
+    try:
+        # Load the existing listing data
+        with open(filepath, 'r', encoding='utf-8') as f:
+            listing_data = json.load(f)
+        
+        # Update price and categoryId
+        listing_data["offer"]["pricingSummary"]["price"]["value"] = new_price
+        listing_data["offer"]["categoryId"] = new_category_id
+        
+        # Save the updated data back to the file
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(listing_data, f, indent=2, ensure_ascii=False)
+        
+        print(f"✅ Updated listing file: {os.path.basename(filepath)}")
+        print(f"   SKU: {sku}")
+        print(f"   Price: {new_price}")
+        print(f"   Category ID: {new_category_id}")
+        
+        return True
+    except KeyError as e:
+        print(f"❌ Error: Missing required key in listing data: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ Error updating listing data file: {e}")
+        return False
+
+
+def get_item_aspects_for_category(category_id, category_tree_id="0"):
+    """
+    Get item aspects for a specific eBay category using the Taxonomy API.
+    
+    Args:
+        category_id (str): The unique identifier of the leaf category for which aspects are being requested
+        category_tree_id (str): The unique identifier of the eBay category tree. Default is "0" for US marketplace.
+    
+    Returns:
+        dict: Response data containing aspects, or None on failure
+    """
+    # Import here to avoid circular import issues
+    from helper_functions import helper_get_valid_token, handle_http_error
+    
+    # Get a valid token
+    valid_token = helper_get_valid_token()
+    if not valid_token:
+        print("❌ Error: Could not get valid access token")
+        return None
+    
+    # Build the API URL
+    url = f"https://api.ebay.com/commerce/taxonomy/v1/category_tree/{category_tree_id}/get_item_aspects_for_category"
+    params = {
+        "category_id": category_id
+    }
+    
+    headers = {
+        'Authorization': f'Bearer {valid_token}',
+        'Content-Type': 'application/json'
+    }
+    
+    try:
+        print(f"🔍 Fetching aspects for category {category_id}...")
+        response = requests.get(url, headers=headers, params=params)
+        
+        if response.status_code == 200:
+            data = response.json()
+            aspects = data.get('aspects', [])
+            
+            print(f"\n📋 Aspects for category {category_id}:")
+            print("=" * 80)
+            
+            for aspect in aspects:
+                aspect_name = aspect.get('localizedAspectName', 'N/A')
+                constraint = aspect.get('aspectConstraint', {})
+                usage = constraint.get('aspectUsage', 'N/A')
+                
+                print(f"{aspect_name}: {usage}")
+            
+            print("=" * 80)
+            return data
+        else:
+            handle_http_error(response, "get_item_aspects_for_category")
+            return None
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Error calling Taxonomy API: {e}")
+        return None
+    except Exception as e:
+        print(f"❌ Unexpected error: {e}")
+        return None
+
+
+def update_listing_with_aspects(sku, localizedAspects=None):
+    """
+    Update a listing JSON file to add aspect values. Applies localized aspects first,
+    then hardcoded aspects (which override localized aspects if there's a conflict).
+    
+    Hardcoded aspects (override localized aspects):
+    - "Country of Origin": ["United States"]
+    - "Brand": ["Plastic Love Shop"]
+    - "Material": ["PETG"]
+    - "Color": ["Black"]
+    
+    Args:
+        sku (str): The SKU of the listing to update
+        localizedAspects (list[dict], optional): List of aspect dictionaries with structure:
+            {
+                "type": "STRING",
+                "name": "Brand",
+                "value": "Speedway"
+            }
+            Defaults to None (empty list).
+    
+    Returns:
+        bool: True if update was successful, False otherwise
+    """
+    # Define hardcoded aspect values (these override localized aspects)
+    hardcoded_aspects = {
+        "Country of Origin": ["United States"],
+        "Brand": ["Plastic Love Shop"],
+        "Material": ["PETG"],
+        "Color": ["Black"]
+    }
+    
+    # Normalize localizedAspects parameter
+    if localizedAspects is None:
+        localizedAspects = []
+    
+    # Check if file exists
+    if not listing_file_exists(sku):
+        print(f"⚠️  Listing file not found for SKU: {sku}")
+        return False
+    
+    # Load the listing data
+    listing_data = load_listing_data(sku=sku)
+    if not listing_data:
+        return False
+    
+    # Get category ID from the listing
+    category_id = listing_data.get('offer', {}).get('categoryId')
+    if not category_id:
+        print(f"❌ Error: No categoryId found in listing data")
+        return False
+    
+    # Get aspects for this category
+    aspects_data = get_item_aspects_for_category(category_id)
+    if not aspects_data:
+        print(f"❌ Error: Could not get aspects for category {category_id}")
+        return False
+    
+    # Get list of available aspects from API response
+    aspects_list = aspects_data.get('aspects', [])
+    
+    # Create a mapping of category aspect names (case-insensitive) to their actual names
+    category_aspect_map = {}
+    for aspect in aspects_list:
+        aspect_name = aspect.get('localizedAspectName', '')
+        if aspect_name:
+            category_aspect_map[aspect_name.lower()] = aspect_name
+    
+    # Start with matched aspects dictionary
+    matched_aspects = {}
+    
+    # Step 1: Apply localized aspects first (if provided)
+    if localizedAspects:
+        for localized_aspect in localizedAspects:
+            if not isinstance(localized_aspect, dict):
+                continue
+            
+            aspect_name = localized_aspect.get('name', '')
+            aspect_value = localized_aspect.get('value', '')
+            
+            if not aspect_name or not aspect_value:
+                continue
+            
+            # Check if this aspect name exists in category aspects (case-insensitive match)
+            aspect_name_lower = aspect_name.lower()
+            if aspect_name_lower in category_aspect_map:
+                # Use the actual category aspect name (preserves case from API)
+                actual_aspect_name = category_aspect_map[aspect_name_lower]
+                # Convert value to array format to match eBay format
+                matched_aspects[actual_aspect_name] = [aspect_value]
+    
+    # Step 2: Apply hardcoded aspects (these override localized aspects)
+    for hardcoded_name, hardcoded_value in hardcoded_aspects.items():
+        hardcoded_name_lower = hardcoded_name.lower()
+        if hardcoded_name_lower in category_aspect_map:
+            # Use the actual category aspect name (preserves case from API)
+            actual_aspect_name = category_aspect_map[hardcoded_name_lower]
+            # Override with hardcoded value
+            matched_aspects[actual_aspect_name] = hardcoded_value
+    
+    if not matched_aspects:
+        print(f"ℹ️  No matching aspects found for category {category_id}")
+        return False
+    
+    # Update the listing JSON file
+    output_dir = "Generated_Listings"
+    filepath = os.path.join(output_dir, f"{sku}.json")
+    
+    try:
+        # Ensure aspects dictionary exists
+        if "aspects" not in listing_data["inventoryItem"]["product"]:
+            listing_data["inventoryItem"]["product"]["aspects"] = {}
+        
+        # Add or update the matched aspects
+        for aspect_name, aspect_value in matched_aspects.items():
+            listing_data["inventoryItem"]["product"]["aspects"][aspect_name] = aspect_value
+        
+        # Save the updated data back to the file
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(listing_data, f, indent=2, ensure_ascii=False)
+        
+        print(f"✅ Updated listing file: {os.path.basename(filepath)}")
+        print(f"   SKU: {sku}")
+        for aspect_name, aspect_value in matched_aspects.items():
+            print(f"   Added aspect: {aspect_name} = {aspect_value}")
+        
+        return True
+    except KeyError as e:
+        print(f"❌ Error: Missing required key in listing data: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ Error updating listing data file: {e}")
+        return False

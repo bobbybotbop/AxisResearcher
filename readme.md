@@ -20,15 +20,12 @@ Core Features
 Item Collection
 <img width="1061" height="522" alt="image" src="https://github.com/user-attachments/assets/9f53fb9d-e637-4f83-8940-b72abcfa4d10" />
 
-
 Collect all item IDs from a seller's inventory with automatic pagination.
 
 Usage: e.bat collect <seller_username> [query] [limit]
 Example: e.bat collect ebaySeller "phone" 200
 
-Saves to: <seller_username>/<seller_username>_YYYYMMDD_HHMMSS.json
-
-
+Saves to: <seller_username>/<seller_username>\_YYYYMMDD_HHMMSS.json
 
 Sales Data Processing
 
@@ -41,12 +38,11 @@ Usage: e.bat process <seller_username> [limit] [output_filename]
 Example: e.bat process ebaySeller 100
 
 Generates:
-  Items sorted by estimated sold quantity
-  Sales statistics (total, average, highest)
-  Top 10 preview
+Items sorted by estimated sold quantity
+Sales statistics (total, average, highest)
+Top 10 preview
 
-Saves to: <seller_username>/processed-sales-data/PROCESSED_*.json
-
+Saves to: <seller*username>/processed-sales-data/PROCESSED*\*.json
 
 AI Powered Listing Copy
 Copy and optimize listings using AI. Generates SEO optimized titles (80 chars) and keyword rich descriptions.
@@ -55,26 +51,26 @@ Usage: e.bat copy <item_id_or_url>
 Example: e.bat copy 123456789012
 
 Optimizations include:
-  Keyword rich SEO titles
-  Material and color specifications
-  Clean HTML formatting
-  Removed manufacturer references
+Keyword rich SEO titles
+Material and color specifications
+Clean HTML formatting
+Removed manufacturer references
 
 [SCREENSHOT: Listing copy and optimization output]
 
 Additional Features
 
 Search
-  e.bat search <query> - Search eBay items
+e.bat search <query> - Search eBay items
 
 Seller Search
-  e.bat seller <username> [query] [limit] - Browse seller inventory
+e.bat seller <username> [query] [limit] - Browse seller inventory
 
 Item Details
-  e.bat item <item_id> - Get complete item information
+e.bat item <item_id> - Get complete item information
 
 Token Management
-  e.bat refresh - Refresh OAuth tokens
+e.bat refresh - Refresh OAuth tokens
 
 [SCREENSHOT: Additional features examples]
 
@@ -97,70 +93,75 @@ Quick Start Workflow
 Configuration
 
 Required Environment Variables (.env file):
-  client_id - eBay Client ID
-  client_secret - eBay Client Secret
-  api_key - eBay API Key
-  application_token - OAuth application token
-  refresh_token - OAuth refresh token
+client_id - eBay Client ID
+client_secret - eBay Client Secret
+api_key - eBay API Key
+application_token - OAuth application token
+refresh_token - OAuth refresh token
 
 Optional:
-  openrouter_api_key - For AI listing optimization
+openrouter_api_key - For AI listing optimization
 
 Command Reference
 
 collect <seller_username> [query] [limit]
-  Collect item IDs from seller inventory
+Collect item IDs from seller inventory
 
 process <seller_username> [limit] [output_filename]
-  Process collected items and generate sales data
+Process collected items and generate sales data
 
 top [input_file] [top_n] [output_file]
-  Extract top selling items
+Extract top selling items
 
 copy <item_id_or_url>
-  Copy and optimize listing with AI
+Copy and optimize listing with AI
 
 search <query>
-  Search eBay for items
+Search eBay for items
 
 seller <username> [query] [limit]
-  Search items from specific seller
+Search items from specific seller
 
 item <item_id>
-  Get detailed item information
+Get detailed item information
 
 refresh
-  Refresh OAuth tokens
+Refresh OAuth tokens
 
 Troubleshooting
 
 Authentication Errors (401)
-  Run: e.bat refresh and update .env with new tokens
+Run: e.bat refresh and update .env with new tokens
 
 Rate Limiting
-  Wait between retries (built in delays included)
+Wait between retries (built in delays included)
 
 Missing Sales Data
-  Normal for some items, appears in "without sales data" section
+Normal for some items, appears in "without sales data" section
 
 File Not Found
-  Ensure you run "collect" before "process"
-  Verify seller username matches folder names
+Ensure you run "collect" before "process"
+Verify seller username matches folder names
 
 [SCREENSHOT: Error handling examples]
 
 Technical Notes
 
-  Automatic pagination and rate limiting
-  JSON exports with timestamped filenames
-  Token refresh on expiration
-  Progress tracking for batch operations
+Automatic pagination and rate limiting
+JSON exports with timestamped filenames
+Token refresh on expiration
+Progress tracking for batch operations
 
 File Structure
 
-<seller_username>/
-  <seller_username>_YYYYMMDD_HHMMSS.json
-  processed-sales-data/
-    PROCESSED_<seller_username>_YYYYMMDD_HHMMSS.json
+<seller*username>/
+<seller_username>\_YYYYMMDD_HHMMSS.json
+processed-sales-data/
+PROCESSED*<seller_username>\_YYYYMMDD_HHMMSS.json
 
 [SCREENSHOT: File structure diagram]
+
+limitations:
+
+- cannot do currency conversions yet
+-

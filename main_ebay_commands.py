@@ -22,42 +22,24 @@ import sys
 import re
 import importlib.util
 
-# Import single_functions module (handles unused folder)
+# Import single_functions module (handles unused folder - keeping dynamic import for now)
 single_functions_spec = importlib.util.spec_from_file_location("single_functions", "unused/single_functions.py")
 single_functions_module = importlib.util.module_from_spec(single_functions_spec)
 single_functions_spec.loader.exec_module(single_functions_module)
 singleSearch = single_functions_module.singleSearch
 single_search_by_seller = single_functions_module.single_search_by_seller
+
 from helper_functions import remove_html_tags, helper_get_valid_token, handle_http_error, refreshToken
 
-# Import upload_to_ebay module (from copyScripts folder)
-upload_to_ebay_spec = importlib.util.spec_from_file_location("upload_to_ebay", "copyScripts/upload_to_ebay.py")
-upload_to_ebay_module = importlib.util.module_from_spec(upload_to_ebay_spec)
-upload_to_ebay_spec.loader.exec_module(upload_to_ebay_module)
-upload_complete_listing = upload_to_ebay_module.upload_complete_listing
-create_inventory_location = upload_to_ebay_module.create_inventory_location
-create_test_listing = upload_to_ebay_module.create_test_listing
+# Import from copyScripts package
+from copyScripts.upload_to_ebay import upload_complete_listing, create_inventory_location, create_test_listing
+from copyScripts.create_text import create_text
+from copyScripts.CopyListingMain import copy_listing_main
+from copyScripts.create_image import generate_image_from_urls, decode_image_from_response, upload_image_to_ebay, ImageType
+from copyScripts.combine_data import create_listing_with_preferences, get_item_aspects_for_category
 
-# Import create_text module (from copyScripts folder)
-create_text_spec = importlib.util.spec_from_file_location("create_text", "copyScripts/create_text.py")
-create_text_module = importlib.util.module_from_spec(create_text_spec)
-create_text_spec.loader.exec_module(create_text_module)
-singleCopyListing = create_text_module.singleCopyListing
-
-# Import create-image module (handles hyphenated filename)
-spec = importlib.util.spec_from_file_location("create_image", "copyScripts/create-image.py")
-create_image_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(create_image_module)
-generate_image_from_urls = create_image_module.generate_image_from_urls
-decode_image_from_response = create_image_module.decode_image_from_response
-upload_image_to_ebay = create_image_module.upload_image_to_ebay
-ImageType = create_image_module.ImageType
-
-# Import combine_data module (from copyScripts folder)
-combine_data_spec = importlib.util.spec_from_file_location("combine_data", "copyScripts/combine_data.py")
-combine_data_module = importlib.util.module_from_spec(combine_data_spec)
-combine_data_spec.loader.exec_module(combine_data_module)
-create_inventory_and_offer_listing = combine_data_module.create_inventory_and_offer_listing
+# Keep alias for backward compatibility
+create_inventory_and_offer_listing = create_listing_with_preferences
 
 
 load_dotenv()
@@ -1370,7 +1352,7 @@ def run_command(command, *args):
         elif command == "copy":
             if not args: raise ValueError("Usage: copy <item_id_or_link>")
             print(f"�� Copying: {args[0]}")
-            singleCopyListing(args[0])
+            copy_listing_main(args[0])
             
         elif command == "refresh":
             refreshToken()
@@ -1467,9 +1449,20 @@ def run_command(command, *args):
                 print(f"🔗 Image URL: {result}")
             else:
                 print(f"\n❌ Failed to upload image to eBay")
+        
+        elif command == "aspects":
+            if not args: raise ValueError("Usage: aspects <category_id> [category_tree_id]")
+            category_id = args[0]
+            category_tree_id = args[1] if len(args) > 1 else "0"
+            print(f"📋 Getting aspects for category: {category_id}")
+            if category_tree_id != "0":
+                print(f"🌳 Category tree ID: {category_tree_id}")
+            result = get_item_aspects_for_category(category_id, category_tree_id)
+            if not result:
+                print(f"\n❌ Failed to get aspects for category {category_id}")
             
         else:
-            print("❌ Available commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, combine [sku] [output_filename], image <url> <type>, decode, upload [picture_name]")
+            print("❌ Available commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, combine [sku] [output_filename], image <url> <type>, decode, upload [picture_name], aspects <category_id> [category_tree_id]")
             
     except ValueError as e:
         print(f"❌ {e}")
@@ -1480,7 +1473,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         print("❌ Usage: python main_ebay_commands.py <command> [args...]")
-        print("Commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, combine [sku] [output_filename], image <url> <type>, decode, upload [picture_name]")
+        print("Commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, combine [sku] [output_filename], image <url> <type>, decode, upload [picture_name], aspects <category_id> [category_tree_id]")
         sys.exit(1)
     
     run_command(sys.argv[1], *sys.argv[2:])

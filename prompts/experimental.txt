@@ -1,0 +1,19 @@
+Create a new product photo showing the exact same product from a different angle optimized for eBay listings:
+What to change:
+
+Camera angle: 45-degree angle from front-right corner (shows depth and multiple sides)
+Product positioning: Positioned at slight diagonal to camera for dimensional view
+Distance/framing: Medium-close crop with small margin around product edges
+Slight downward camera tilt for natural browsing perspective
+
+What to preserve:
+
+The EXACT same product with identical design, colors, materials, and features
+Clean, well-lit studio lighting with soft shadows for professional appearance
+Plain white or light neutral background (eBay standard)
+All existing product details, textures, logos, and branding unchanged
+DO NOT add any props, objects, lifestyle elements, or decorative items
+DO NOT modify the product's design, add features, or remove components
+Maintain sharp focus on all visible product surfaces
+
+Goal: Generate a professional eBay-style product photo from a different angle that shows product dimension and detail—as if photographed again for a multi-angle listing. The image should look trustworthy, clear, and encourage buyer confidence.

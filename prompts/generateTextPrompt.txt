@@ -47,8 +47,9 @@ Original Description:
    - No seller references
    - No promotional language ("best ever")
    - No mentions of 3D Printing
+   - No warrenties
 
-# FORMAT YOUR RESPONSE AS A VALID JSON MATCHING THIS STRUCTURE:
+# FORMAT YOUR RESPONSE AS A VALID JSON MATCHING THIS EXACT STRUCTURE WITHOUT EXPLANATION OR ANY OTHER TEXT BESIDES THIS:
 {{
   "edited_title": "[SEO-optimized title]",
   "edited_description": "[HTML-formatted description]"
