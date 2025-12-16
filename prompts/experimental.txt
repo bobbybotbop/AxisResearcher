@@ -1,19 +1,66 @@
-Create a new product photo showing the exact same product from a different angle optimized for eBay listings:
-What to change:
+PROFESSIONAL PRODUCT PHOTOGRAPHY TRANSFORMATION SPECIFICATIONS
+Format & Composition:
 
-Camera angle: 45-degree angle from front-right corner (shows depth and multiple sides)
-Product positioning: Positioned at slight diagonal to camera for dimensional view
-Distance/framing: Medium-close crop with small margin around product edges
-Slight downward camera tilt for natural browsing perspective
+Aspect ratio: Square (1:1)
+Primary focus: Main product should dominate the frame, taking up most of the image
+Zoom in on the main product for clear visibility and detail
+Framing: Tight composition with minimal whitespace, leaving only necessary margins for clean presentation
+Simplification: Eliminate secondary/background objects that distract from the main product
+Center the main subject within the frame
+Perspective: Correct all lens and camera distortion; straighten lines and edges
+Camera angle: Adjust viewpoint by approximately 10 degrees for improved presentation
 
-What to preserve:
+Object Handling:
 
-The EXACT same product with identical design, colors, materials, and features
-Clean, well-lit studio lighting with soft shadows for professional appearance
-Plain white or light neutral background (eBay standard)
-All existing product details, textures, logos, and branding unchanged
-DO NOT add any props, objects, lifestyle elements, or decorative items
-DO NOT modify the product's design, add features, or remove components
-Maintain sharp focus on all visible product surfaces
+Identify and isolate the main product and any supporting objects from the background
+Object recognition: Identical objects with similar shading but different scales should be treated as the same object (sizes may not be accurately proportioned in source)
+Scale normalization: Rescale duplicate/identical objects to consistent, uniform sizes when necessary
+Prioritize the main product—remove distracting secondary objects to enhance focus
+Mandatory reorientation for retained objects:
 
-Goal: Generate a professional eBay-style product photo from a different angle that shows product dimension and detail—as if photographed again for a multi-angle listing. The image should look trustworthy, clear, and encourage buyer confidence.
+Transform diagonal placements → vertical or horizontal orientations
+Realign all objects to optimal viewing angles
+Rotate and reposition each object for structured, intentional composition
+Maintain proper scale and proportions during reorientation (after normalization)
+
+
+
+Background:
+
+Pure white studio backdrop (seamless infinity background)
+Eliminate visible horizon line
+Clean edge separation between product and background
+Preserve natural drop shadows beneath objects for grounding and depth
+
+Lighting Optimization:
+
+Primary: Soft, diffused overhead lighting with even distribution
+Secondary: Natural sunlight beams directed onto products
+Balance overall illumination across the entire product
+Eliminate harsh shadows and reduce hotspots
+Adjust exposure for optimal brightness without overexposure
+Create subtle tonal variations to enhance depth and dimensionality
+
+Image Quality Enhancement:
+
+Sharpen details and enhance definition
+Reduce noise and grain
+Optimize contrast for clarity
+Accurate color reproduction
+Do not fabricate or hallucinate product details—preserve original features as they appear
+
+Content Cleanup:
+
+Remove text and labels from the product and surrounding area
+Preserve all brand logos and branding elements that are part of the product design
+
+Product Integrity (Critical):
+
+Maintain the complete physical structure and form of the product
+Do NOT add, remove, or modify any parts, features, openings, or design elements of the actual product itself
+Work only with existing details—avoid making up or inventing new product features
+
+Output Standard:
+
+Professional e-commerce quality
+Monochromatic, high-end commercial product photography style

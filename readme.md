@@ -164,4 +164,4 @@ PROCESSED*<seller_username>\_YYYYMMDD_HHMMSS.json
 limitations:
 
 - cannot do currency conversions yet
--
+- images do not generate square formats, later on I will fix by cropping the original image to fit in a square, as nano banana only outputs the same format the input is.
