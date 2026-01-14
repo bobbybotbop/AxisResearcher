@@ -439,6 +439,64 @@ def update_listing_meta_data(sku, new_price, new_category_id):
         return False
 
 
+def update_listing_images(sku, image_urls):
+    """
+    Update the imageUrls in an existing listing JSON file.
+    
+    Args:
+        sku (str): The SKU of the listing to update
+        image_urls (list[str]): List of image URLs to set
+    
+    Returns:
+        bool: True if update was successful, False otherwise
+    """
+    # Check if file exists using helper function
+    if not listing_file_exists(sku):
+        print(f"⚠️  Listing file not found for SKU: {sku}")
+        return False
+    
+    if not image_urls or not isinstance(image_urls, list):
+        print(f"❌ Error: image_urls must be a non-empty list")
+        return False
+    
+    output_dir = "Generated_Listings"
+    filepath = os.path.join(output_dir, f"{sku}.json")
+    
+    try:
+        # Load the existing listing data
+        with open(filepath, 'r', encoding='utf-8') as f:
+            listing_data = json.load(f)
+        
+        # Ensure product structure exists
+        if "inventoryItem" not in listing_data:
+            listing_data["inventoryItem"] = {}
+        if "product" not in listing_data["inventoryItem"]:
+            listing_data["inventoryItem"]["product"] = {}
+        
+        # Update imageUrls
+        listing_data["inventoryItem"]["product"]["imageUrls"] = image_urls
+        
+        # Save the updated data back to the file
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(listing_data, f, indent=2, ensure_ascii=False)
+        
+        print(f"✅ Updated listing file: {os.path.basename(filepath)}")
+        print(f"   SKU: {sku}")
+        print(f"   Images: {len(image_urls)} image URL(s) added")
+        for idx, url in enumerate(image_urls[:5], 1):  # Show first 5
+            print(f"      {idx}. {url}")
+        if len(image_urls) > 5:
+            print(f"      ... and {len(image_urls) - 5} more")
+        
+        return True
+    except KeyError as e:
+        print(f"❌ Error: Missing required key in listing data: {e}")
+        return False
+    except Exception as e:
+        print(f"❌ Error updating listing data file: {e}")
+        return False
+
+
 def get_item_aspects_for_category(category_id, category_tree_id="0"):
     """
     Get item aspects for a specific eBay category using the Taxonomy API.

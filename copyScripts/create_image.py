@@ -534,7 +534,7 @@ def upload_image_bytes_to_ebay(image_bytes, mime_type, picture_name="Uploaded Im
         return None
 
 
-def generate_image_from_urls(image_urls, image_type):
+def generate_image_from_urls(image_urls, image_type, custom_prompt=None):
     """
     Generate an image using OpenRouter's Gemini 2.5 Flash Image API from input image URLs.
     Extracts images from response, saves them to files, uploads to eBay, and returns eBay URLs.
@@ -542,6 +542,7 @@ def generate_image_from_urls(image_urls, image_type):
     Args:
         image_urls (list[str]): Array of image URLs to use as input
         image_type (ImageType): Enum value indicating PROFESSIONAL, REAL_WORLD, or EXPERIMENTAL
+        custom_prompt (str, optional): Custom prompt text to use instead of default prompt file
     
     Returns:
         list[str]: Array of eBay image URLs, or None on failure
@@ -562,23 +563,35 @@ def generate_image_from_urls(image_urls, image_type):
         print("❌ image_urls must be a non-empty list of image URLs")
         return None
     
-    # Load the appropriate prompt file based on image_type
-    if image_type == ImageType.PROFESSIONAL:
-        prompt_file_path = "prompts/generateImageFromProfessional"
-    elif image_type == ImageType.REAL_WORLD:
-        prompt_file_path = "prompts/generateImageFromWorld"
-    else:  # ImageType.EXPERIMENTAL
-        prompt_file_path = "prompts/experimental.txt"
-    
-    try:
-        with open(prompt_file_path, 'r', encoding='utf-8') as f:
-            prompt_text = f.read().strip()
-    except FileNotFoundError:
-        print(f"❌ Prompt file not found: {prompt_file_path}")
-        return None
-    except Exception as e:
-        print(f"❌ Error loading prompt file: {e}")
-        return None
+    # Use custom prompt if provided, otherwise load from file
+    if custom_prompt:
+        prompt_text = custom_prompt.strip()
+        print(f"📝 Using custom prompt (length: {len(prompt_text)} chars)")
+    else:
+        # Load the appropriate prompt file based on image_type
+        # Resolve path relative to project root (same directory as this script's parent)
+        script_dir = Path(__file__).parent.parent
+        
+        if image_type == ImageType.PROFESSIONAL:
+            prompt_file_path = script_dir / "prompts" / "generateImageFromProfessional"
+        elif image_type == ImageType.REAL_WORLD:
+            prompt_file_path = script_dir / "prompts" / "generateImageFromWorld.txt"
+        else:  # ImageType.EXPERIMENTAL
+            prompt_file_path = script_dir / "prompts" / "experimental.txt"
+        
+        try:
+            with open(prompt_file_path, 'r', encoding='utf-8') as f:
+                prompt_text = f.read().strip()
+        except FileNotFoundError:
+            print(f"❌ Prompt file not found: {prompt_file_path}")
+            print(f"Current working directory: {os.getcwd()}")
+            print(f"Script directory: {script_dir}")
+            return None
+        except Exception as e:
+            print(f"❌ Error loading prompt file: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     # Construct the content array for the API request
     content = [

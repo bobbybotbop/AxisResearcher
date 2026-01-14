@@ -29,20 +29,21 @@ Original Description:
    - 5% connectors/prepositions
 
 # UNIVERSAL DESCRIPTION RULES
-1. Required elements:
+1. Remove formatting and clean up text to be readable
+2. Required elements:
    - First paragraph: Core functionality + primary benefit
    - Bullet points: Key features + specifications
    - Final paragraph: Usage scenarios + emotional benefits
    - Include: Made in USA, Made with black and durable PETG Plastic
-2. HTML formatting:
+3. HTML formatting:
    - Wrap paragraphs in <p>
    - Format features as <ul> with <li>
-3. Keyword integration:
+4. Keyword integration:
    - Include semantic variations of title keywords
    - Use multiple words synonymous to the core product
    - Embed question-based keywords ("how to", "solution for")
    - Include top 10 buyer search terms
-4. Strict prohibitions:
+5. Strict prohibitions:
    - No shipping/price information
    - No seller references
    - No promotional language ("best ever")

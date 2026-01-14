@@ -127,3 +127,29 @@ def copy_listing_main(id):
     else:
         print("ERROR: No listing data available")
         return None
+
+
+def testing_function(id=None):
+    """
+    Testing function for development and debugging.
+    Add your test code here.
+    
+    Args:
+        id (str, optional): ID parameter for testing
+    
+    Returns:
+        Any: Result of testing function
+    """
+     from main_ebay_commands import single_get_detailed_item_data
+    
+    # Handle URL parsing if needed
+    if (id[0] == 'h' or id[0] == 'e'):
+        id = id.split('/itm/')[1].split('?')[0]
+
+    # Get listing data from eBay API
+    listing = single_get_detailed_item_data(id, verbose=True)
+
+    if listing:
+        
+    # Add your test code here
+    pass
