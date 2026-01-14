@@ -166,13 +166,6 @@ limitations:
 - cannot do currency conversions yet
 - images do not generate square formats, later on I will fix by cropping the original image to fit in a square, as nano banana only outputs the same format the input is.
 
-
 plans:
-use bytedance seed 1.6 flash to analyze photo:
-- simply understand if its a professional photo or nah:
-   reply only with true or false. 
-   return false if it is not a standalone product photo, meaning but not limited to:
-
-   there is text
-   other images collaged on
-   not a fully white background
+edited image edgecase: https://i.ebayimg.com/images/g/VKAAAOSwHpZf2Bj4/s-l1600.jpg
+professional image edgecase: bad image but white background: catagorize images with shadow, uneven lighting, bad framing, and multicolor backgrounds that arnt solid white to be bad images instead. (bad images have to have a distinct and easily recognizable product in the shot)

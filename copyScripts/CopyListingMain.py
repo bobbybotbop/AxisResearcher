@@ -8,7 +8,7 @@ and generating optimized text content.
 from helper_functions import remove_html_tags
 from copyScripts.create_text import create_text
 from copyScripts.combine_data import create_listing_with_preferences, update_listing_title_description, update_listing_meta_data,update_listing_with_aspects
-from copyScripts.create_image import generate_image_from_urls, ImageType
+from copyScripts.create_image import generate_image_from_urls, ImageType, categorize_images
 
 
 
@@ -101,9 +101,18 @@ def copy_listing_main(id):
         # old_photo_list = [listing.get("image",{}).get("imageUrl")].extend([])
         # print(generate_image_from_urls(old_photo_list, ImageType.EXPERIMENTAL))
 
+        # Categorize images
+        categories = {}
+        if old_photo_list:
+            print("Categorizing images...")
+            categories = categorize_images(old_photo_list)
+            if categories is None:
+                categories = {}
+
         # Return photos and listing data for API consumption
         return {
             "photos": old_photo_list,
+            "categories": categories,
             "listing": {
                 "itemId": listing.get('itemId', 'N/A'),
                 "title": listing.get('title', 'N/A'),

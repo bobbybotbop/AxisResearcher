@@ -1516,3 +1516,195 @@ def upload_image_to_ebay(picture_name="Uploaded Image"):
         traceback.print_exc()
         return None
 
+def categorize_image(image_url):
+    """
+    Categorize a single image using OpenRouter's ByteDance Seed 1.6 Flash API.
+    
+    Args:
+        image_url (str): URL of the image to categorize
+        
+    Returns:
+        str: Category name ("edited_image", "bad_image", "real_world_image", or "professional_image"), or None on failure
+    """
+    print(f"[DEBUG] categorize_image called with URL: {image_url[:50]}...")
+    
+    # Load API key
+    openrouter_api_key = os.getenv('openrouter_api_key')
+    if not openrouter_api_key:
+        print("ERROR: OpenRouter API key not found. Please set openrouter_api_key in your .env file")
+        return None
+    
+    print(f"[DEBUG] OpenRouter API key found: {openrouter_api_key[:10]}...")
+    
+    # Validate image_url
+    if not image_url or not isinstance(image_url, str):
+        print("ERROR: image_url must be a non-empty string")
+        return None
+    
+    # Load the prompt file - resolve path relative to project root
+    # Get the directory of this script, go up one level to project root
+    script_dir = Path(__file__).parent.parent
+    prompt_file_path = script_dir / "prompts" / "categorizeImage.txt"
+    
+    try:
+        with open(prompt_file_path, 'r', encoding='utf-8') as f:
+            prompt_text = f.read().strip()
+    except FileNotFoundError:
+        print(f"ERROR: Prompt file not found: {prompt_file_path}")
+        print(f"Current working directory: {os.getcwd()}")
+        print(f"Script directory: {script_dir}")
+        return None
+    except Exception as e:
+        print(f"ERROR: Error loading prompt file: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+    
+    # Construct the content array for the API request
+    content = [
+        {
+            "type": "text",
+            "text": prompt_text
+        },
+        {
+            "type": "image_url",
+            "image_url": {
+                "url": image_url
+            }
+        }
+    ]
+    
+    # Prepare API request
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    
+    headers = {
+        "Authorization": f"Bearer {openrouter_api_key}",
+        "Content-Type": "application/json",
+    }
+    
+    data = {
+        "model": "bytedance-seed/seed-1.6-flash",
+        "messages": [
+            {
+                "role": "user",
+                "content": content
+            }
+        ]
+    }
+    
+    try:
+        print(f"[DEBUG] Making API request to OpenRouter with model: bytedance-seed/seed-1.6-flash")
+        print(f"[DEBUG] Request URL: {url}")
+        print(f"[DEBUG] Image URL being sent: {image_url[:50]}...")
+        
+        response = requests.post(url, headers=headers, data=json.dumps(data), timeout=60)
+        response.raise_for_status()
+        
+        print(f"[DEBUG] API response status: {response.status_code}")
+        result = response.json()
+        print(f"[DEBUG] API response received successfully")
+        
+        # Extract category from response
+        if 'choices' in result and len(result['choices']) > 0:
+            choice = result['choices'][0]
+            message = choice.get('message', {})
+            content_text = message.get('content', '')
+            
+            if isinstance(content_text, str):
+                # Clean and parse the response
+                category = content_text.strip().lower()
+                
+                # Remove any extra whitespace or punctuation
+                category = category.replace(' ', '_')
+                
+                # Validate category
+                valid_categories = ['edited_image', 'bad_image', 'real_world_image', 'professional_image']
+                
+                # Try to match the category
+                for valid_cat in valid_categories:
+                    if valid_cat in category or category == valid_cat:
+                        return valid_cat
+                
+                # If exact match not found, try partial match
+                if 'edited' in category:
+                    return 'edited_image'
+                elif 'professional' in category:
+                    return 'professional_image'
+                elif 'bad' in category:
+                    return 'bad_image'
+                elif 'real_world' in category or 'realworld' in category:
+                    return 'real_world_image'
+                else:
+                    print(f"WARNING: Unexpected category response: {category}")
+                    return None
+            else:
+                print("ERROR: Unexpected response format - content is not a string")
+                return None
+        else:
+            print("ERROR: No choices found in API response")
+            return None
+            
+    except requests.exceptions.RequestException as e:
+        print(f"ERROR: Error calling OpenRouter API: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            try:
+                error_detail = e.response.json()
+                print(f"Error details: {json.dumps(error_detail, indent=2)}")
+            except:
+                print(f"Error response: {e.response.text[:200]}")
+        return None
+    except json.JSONDecodeError as e:
+        print(f"ERROR: Error parsing OpenRouter response: {e}")
+        return None
+    except Exception as e:
+        print(f"ERROR: Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def categorize_images(image_urls):
+    """
+    Categorize multiple images using OpenRouter's ByteDance Seed 1.6 Flash API.
+    
+    Args:
+        image_urls (list[str]): List of image URL strings to categorize
+        
+    Returns:
+        dict: Dictionary mapping image URLs to their categories, or None on failure
+              Format: {"image_url": "category_name", ...}
+    """
+    print(f"[DEBUG] categorize_images called with {len(image_urls) if image_urls else 0} image URLs")
+    
+    # Validate input
+    if not image_urls or not isinstance(image_urls, list) or len(image_urls) == 0:
+        print("ERROR: image_urls must be a non-empty list of image URLs")
+        return None
+    
+    print(f"[DEBUG] Starting categorization of {len(image_urls)} images...")
+    
+    # Categorize each image
+    categories = {}
+    
+    for idx, image_url in enumerate(image_urls):
+        if not image_url or not isinstance(image_url, str):
+            print(f"WARNING: Skipping invalid image URL at index {idx}")
+            continue
+        
+        print(f"Categorizing image {idx + 1}/{len(image_urls)}: {image_url[:50]}...")
+        category = categorize_image(image_url)
+        
+        if category:
+            categories[image_url] = category
+            print(f"  -> {category}")
+        else:
+            print(f"  -> Failed to categorize")
+            # Still add to dict with None to indicate failure
+            categories[image_url] = None
+    
+    if not categories:
+        print("ERROR: Failed to categorize any images")
+        return None
+    
+    print(f"Successfully categorized {len([c for c in categories.values() if c])}/{len(image_urls)} images")
+    return categories

@@ -6,6 +6,7 @@ import './styles/App.css'
 
 function App() {
   const [photos, setPhotos] = useState([])
+  const [categories, setCategories] = useState({})
   const [listing, setListing] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
@@ -22,6 +23,7 @@ function App() {
     setLoading(true)
     setError(null)
     setPhotos([])
+    setCategories({})
     setListing(null)
 
     try {
@@ -37,10 +39,12 @@ function App() {
       }
 
       setPhotos(data.photos || [])
+      setCategories(data.categories || {})
       setListing(data.listing || null)
     } catch (err) {
       setError(err.message || 'An error occurred while fetching the listing')
       setPhotos([])
+      setCategories({})
       setListing(null)
     } finally {
       setLoading(false)
@@ -105,7 +109,7 @@ function App() {
         )}
 
         {photos.length > 0 && (
-          <PhotoGallery photos={photos} onPhotoClick={openLightbox} />
+          <PhotoGallery photos={photos} categories={categories} onPhotoClick={openLightbox} />
         )}
 
         {listing && <ListingDetails listing={listing} />}

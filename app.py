@@ -39,11 +39,13 @@ def get_listing_photos(listing_id):
             return jsonify({
                 "error": "Failed to fetch listing data. The listing may not exist or the ID is invalid.",
                 "photos": [],
+                "categories": {},
                 "listing": None
             }), 404
         
         return jsonify({
             "photos": result.get("photos", []),
+            "categories": result.get("categories", {}),
             "listing": result.get("listing", {}),
             "error": None
         }), 200
@@ -58,6 +60,7 @@ def get_listing_photos(listing_id):
         return jsonify({
             "error": f"An error occurred while fetching listing data: {error_msg}",
             "photos": [],
+            "categories": {},
             "listing": None
         }), 500
 
