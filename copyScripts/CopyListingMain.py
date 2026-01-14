@@ -90,10 +90,16 @@ def copy_listing_main(id):
         # old_aspects = listing.get('localizedAspects', [])
         # update_listing_with_aspects(new_sku, old_aspects)
 
-        # Update Photos
-        old_photo_list = [listing.get("image",{}).get("imageUrl")]
+        # Update Photos - extract all image URLs into a flat list
+        old_photo_list = [
+            url for url in 
+            [listing.get("image", {}).get("imageUrl")] + 
+            [img.get("imageUrl") for img in listing.get("additionalImages", []) if isinstance(img, dict)]
+            if url
+        ]
+        print(f"Found {len(old_photo_list)} photo(s): {old_photo_list}")
         # old_photo_list = [listing.get("image",{}).get("imageUrl")].extend([])
-        print(generate_image_from_urls(old_photo_list, ImageType.EXPERIMENTAL))
+        # print(generate_image_from_urls(old_photo_list, ImageType.EXPERIMENTAL))
 
         return None
     else:
