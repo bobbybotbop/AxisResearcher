@@ -5,3 +5,4 @@ __pycache__/
 *.pyo
 *.pyd
 /generated-images
+node_modules

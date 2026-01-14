@@ -6,9 +6,9 @@ and generating optimized text content.
 """
 
 from helper_functions import remove_html_tags
-from create_text import create_text
-from combine_data import create_listing_with_preferences, update_listing_title_description, update_listing_meta_data,update_listing_with_aspects
-from create_image import generate_image_from_urls, ImageType
+from copyScripts.create_text import create_text
+from copyScripts.combine_data import create_listing_with_preferences, update_listing_title_description, update_listing_meta_data,update_listing_with_aspects
+from copyScripts.create_image import generate_image_from_urls, ImageType
 
 
 
@@ -101,7 +101,20 @@ def copy_listing_main(id):
         # old_photo_list = [listing.get("image",{}).get("imageUrl")].extend([])
         # print(generate_image_from_urls(old_photo_list, ImageType.EXPERIMENTAL))
 
-        return None
+        # Return photos and listing data for API consumption
+        return {
+            "photos": old_photo_list,
+            "listing": {
+                "itemId": listing.get('itemId', 'N/A'),
+                "title": listing.get('title', 'N/A'),
+                "description": remove_html_tags(listing.get('description', 'No description available')),
+                "price": listing.get('price', {}).get('value', 'N/A'),
+                "currency": listing.get('price', {}).get('currency', 'USD'),
+                "itemCreationDate": listing.get('itemCreationDate', 'N/A'),
+                "categoryId": listing.get('categoryId', 'N/A'),
+                "estimatedSoldQuantity": listing.get('estimatedAvailabilities', [{}])[0].get('estimatedSoldQuantity') if listing.get('estimatedAvailabilities') else None
+            }
+        }
     else:
-        print("❌ No listing data available")
+        print("ERROR: No listing data available")
         return None
