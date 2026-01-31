@@ -140,16 +140,109 @@ def testing_function(id=None):
     Returns:
         Any: Result of testing function
     """
-     from main_ebay_commands import single_get_detailed_item_data
+    from main_ebay_commands import single_get_detailed_item_data
+    
+    if not id:
+        return {"error": "No ID provided"}
     
     # Handle URL parsing if needed
-    if (id[0] == 'h' or id[0] == 'e'):
+    if id and (id[0] == 'h' or id[0] == 'e'):
         id = id.split('/itm/')[1].split('?')[0]
 
     # Get listing data from eBay API
     listing = single_get_detailed_item_data(id, verbose=True)
 
     if listing:
+        # Extract image URLs
+        image_urls = [
+            url for url in 
+            [listing.get("image", {}).get("imageUrl")] + 
+            [img.get("imageUrl") for img in listing.get("additionalImages", []) if isinstance(img, dict)]
+            if url
+        ]
         
-    # Add your test code here
-    pass
+        # Extract title and description
+        title = listing.get('title', '')
+        description = remove_html_tags(listing.get('description', 'No description available'))
+        
+        # Extract price and category
+        price_value = listing.get('price', {}).get('value', '0')
+        category_id = listing.get('categoryId', '')
+        
+        # Get quantity (if available, otherwise use default)
+        estimated_availabilities = listing.get('estimatedAvailabilities', [])
+        quantity = estimated_availabilities[0].get('estimatedSoldQuantity') if estimated_availabilities else 1
+        
+        # Create inventory item data structure
+        from copyScripts.combine_data import (
+            DEFAULT_QUANTITY, DEFAULT_WEIGHT, DEFAULT_DIMESIONS,
+            MERCHANT_LOCATION_KEY, get_listing_policies
+        )
+        
+        inventory_item_data = {
+            "availability": {
+                "shipToLocationAvailability": {
+                    "quantity": DEFAULT_QUANTITY
+                }
+            },
+            "condition": "NEW",  # Default to NEW, can be updated based on listing condition
+            "packageWeightAndSize": {
+                "weight": DEFAULT_WEIGHT,
+                "dimensions": DEFAULT_DIMESIONS
+            },
+            "product": {
+                "title": title,
+                "description": description,
+                "aspects": {},  # Can be populated from listing.get('localizedAspects', [])
+                "imageUrls": image_urls
+            }
+        }
+        
+        # Create offer data structure
+        offer_data = {
+            "marketplaceId": "EBAY_US",
+            "format": "FIXED_PRICE",
+            "quantity": DEFAULT_QUANTITY,
+            "pricingSummary": {
+                "price": {
+                    "value": str(price_value),
+                    "currency": listing.get('price', {}).get('currency', 'USD')
+                }
+            },
+            "listingDuration": "GTC",
+            "categoryId": str(category_id),
+            "merchantLocationKey": MERCHANT_LOCATION_KEY
+        }
+        
+        # Add listing policies if available
+        policies = get_listing_policies()
+        if policies:
+            offer_data["listingPolicies"] = policies
+        
+        # Create listing JSON file
+        from copyScripts.combine_data import get_next_sku, create_listing_with_preferences
+        
+        sku = get_next_sku()
+        create_listing_with_preferences(
+            sku=sku,
+            inventory_item_data=inventory_item_data,
+            offer_data=offer_data
+        )
+        
+        # Return formatted data
+        result = {
+            "sku": sku,
+            "inventoryItem": inventory_item_data,
+            "offer": offer_data,
+            "message": f"Successfully formatted listing data and saved to Generated_Listings/{sku}.json"
+        }
+        
+        print(f"✅ Formatted listing data for SKU: {sku}")
+        print(f"   Title: {title}")
+        print(f"   Price: ${price_value}")
+        print(f"   Category: {category_id}")
+        print(f"   Images: {len(image_urls)}")
+        
+        return result
+    else:
+        return {"error": "Failed to fetch listing data"}

@@ -454,8 +454,8 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>eBay Photo Gallery</h1>
-        <p>Enter an eBay listing ID or URL to view photos</p>
+        <h1>Axis Researcher</h1>
+        <p>Automatically create listings with AI</p>
       </header>
 
       <main className="app-main">
