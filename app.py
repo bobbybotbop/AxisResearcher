@@ -416,9 +416,12 @@ def list_all_listings():
     """
     try:
         print("[API] /api/listings endpoint called")
-        output_dir = "Generated_Listings"
+        # Use absolute path to ensure we're looking in the right directory
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        output_dir = os.path.join(base_dir, "Generated_Listings")
         
         if not os.path.exists(output_dir):
+            print(f"[API] Generated_Listings directory does not exist at: {output_dir}")
             return jsonify({
                 "listings": [],
                 "error": None
@@ -437,29 +440,39 @@ def list_all_listings():
                     # Extract summary information
                     sku = listing_data.get('sku', filename.replace('.json', ''))
                     title = listing_data.get('inventoryItem', {}).get('product', {}).get('title', 'No title')
+                    description = listing_data.get('inventoryItem', {}).get('product', {}).get('description', '')
                     price = listing_data.get('offer', {}).get('pricingSummary', {}).get('price', {}).get('value', 'N/A')
+                    currency = listing_data.get('offer', {}).get('pricingSummary', {}).get('price', {}).get('currency', 'USD')
                     category_id = listing_data.get('offer', {}).get('categoryId', 'N/A')
                     created_date = listing_data.get('createdDateTime', '')
-                    image_count = len(listing_data.get('inventoryItem', {}).get('product', {}).get('imageUrls', []))
+                    image_urls = listing_data.get('inventoryItem', {}).get('product', {}).get('imageUrls', [])
+                    image_count = len(image_urls)
+                    quantity = listing_data.get('offer', {}).get('quantity', 0)
                     
                     listings.append({
                         'sku': sku,
                         'title': title,
+                        'description': description[:200] + "..." if len(description) > 200 else description,
                         'price': price,
+                        'currency': currency,
                         'categoryId': category_id,
                         'createdDateTime': created_date,
                         'imageCount': image_count,
+                        'imageUrls': image_urls[:3],  # First 3 images for preview
+                        'quantity': quantity,
                         'filename': filename,
                         'fileSku': filename.replace('.json', '')  # SKU derived from filename
                     })
                 except Exception as e:
                     print(f"[API] Error reading {filename}: {e}")
+                    import traceback
+                    traceback.print_exc()
                     continue
         
         # Sort by created date (newest first)
         listings.sort(key=lambda x: x.get('createdDateTime', ''), reverse=True)
         
-        print(f"[API] Found {len(listings)} listing(s)")
+        print(f"[API] Found {len(listings)} listing(s) in {output_dir}")
         
         return jsonify({
             "listings": listings,
@@ -659,85 +672,6 @@ def upload_listing():
             "upload_result": None
         }), 500
 
-@app.route('/api/listings', methods=['GET'])
-def get_all_listings():
-    """
-    Get all generated listings from the Generated_Listings folder.
-    
-    Returns:
-        JSON response with list of all listings with summary data
-    """
-    try:
-        print("[API] /api/listings endpoint called")
-        output_dir = "Generated_Listings"
-        
-        if not os.path.exists(output_dir):
-            return jsonify({
-                "listings": [],
-                "error": None
-            }), 200
-        
-        # Get all JSON files in the directory
-        pattern = os.path.join(output_dir, "*.json")
-        json_files = glob.glob(pattern)
-        
-        listings = []
-        
-        for filepath in json_files:
-            try:
-                with open(filepath, 'r', encoding='utf-8') as f:
-                    listing_data = json.load(f)
-                
-                # Extract summary information
-                sku = listing_data.get("sku", "")
-                title = listing_data.get("inventoryItem", {}).get("product", {}).get("title", "[No Title]")
-                description = listing_data.get("inventoryItem", {}).get("product", {}).get("description", "")
-                price = listing_data.get("offer", {}).get("pricingSummary", {}).get("price", {}).get("value", "0")
-                currency = listing_data.get("offer", {}).get("pricingSummary", {}).get("price", {}).get("currency", "USD")
-                category_id = listing_data.get("offer", {}).get("categoryId", "")
-                image_urls = listing_data.get("inventoryItem", {}).get("product", {}).get("imageUrls", [])
-                created_date = listing_data.get("createdDateTime", "")
-                quantity = listing_data.get("offer", {}).get("quantity", 0)
-                
-                listings.append({
-                    "sku": sku,
-                    "title": title,
-                    "description": description[:200] + "..." if len(description) > 200 else description,
-                    "price": price,
-                    "currency": currency,
-                    "categoryId": category_id,
-                    "imageCount": len(image_urls),
-                    "imageUrls": image_urls[:3],  # First 3 images for preview
-                    "createdDateTime": created_date,
-                    "quantity": quantity
-                })
-            except Exception as e:
-                print(f"[API] Error loading listing file {filepath}: {e}")
-                continue
-        
-        # Sort by created date (newest first)
-        listings.sort(key=lambda x: x.get("createdDateTime", ""), reverse=True)
-        
-        print(f"[API] Found {len(listings)} listing(s)")
-        
-        return jsonify({
-            "listings": listings,
-            "error": None
-        }), 200
-        
-    except Exception as e:
-        try:
-            error_msg = str(e)
-        except UnicodeEncodeError:
-            error_msg = "An error occurred while fetching listings (encoding error)"
-        
-        import traceback
-        traceback.print_exc()
-        
-        return jsonify({
-            "listings": [],
-            "error": f"An error occurred while fetching listings: {error_msg}"
-        }), 500
 
 @app.route('/api/testing', methods=['POST'])
 def run_testing_function():

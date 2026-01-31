@@ -270,6 +270,11 @@ function App() {
 
       setListingData(data.listing_data)
       setUploadResult(null) // Reset upload result when new listing is created
+      
+      // Refresh listings if we're on the upload tab
+      if (activeTab === 'upload') {
+        fetchAllListings()
+      }
     } catch (err) {
       console.error('Error creating listing:', err)
       setError(err.message || 'An error occurred while creating listing')

@@ -258,7 +258,9 @@ def create_listing_with_preferences(
     }
     
     # Create Generated_Listings directory if it doesn't exist
-    output_dir = "Generated_Listings"
+    # Use absolute path to ensure we're saving in the right directory
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    output_dir = os.path.join(base_dir, "Generated_Listings")
     os.makedirs(output_dir, exist_ok=True)
     
     # Generate filename if not provided (simply use SKU)
@@ -296,7 +298,9 @@ def load_listing_data(sku=None, filename=None):
     Returns:
         dict: Dictionary with "sku", "inventoryItem", and "offer" keys, or None if file doesn't exist
     """
-    output_dir = "Generated_Listings"
+    # Use absolute path to ensure we're looking in the right directory
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    output_dir = os.path.join(base_dir, "Generated_Listings")
     
     # If specific filename provided, use it
     if filename:
@@ -337,7 +341,9 @@ def listing_file_exists(sku):
     Returns:
         bool: True if the file exists, False otherwise
     """
-    output_dir = "Generated_Listings"
+    # Use absolute path to ensure we're looking in the right directory
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    output_dir = os.path.join(base_dir, "Generated_Listings")
     filepath = os.path.join(output_dir, f"{sku}.json")
     return os.path.exists(filepath)
 
@@ -366,7 +372,9 @@ def update_listing_title_description(sku, new_text):
         print(f"❌ Error: new_text dict must contain 'edited_title' and 'edited_description' keys")
         return False
     
-    output_dir = "Generated_Listings"
+    # Use absolute path to ensure we're looking in the right directory
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    output_dir = os.path.join(base_dir, "Generated_Listings")
     filepath = os.path.join(output_dir, f"{sku}.json")
     
     try:
@@ -413,7 +421,9 @@ def update_listing_meta_data(sku, new_price, new_category_id):
         print(f"⚠️  Listing file not found for SKU: {sku}")
         return False
     
-    output_dir = "Generated_Listings"
+    # Use absolute path to ensure we're looking in the right directory
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    output_dir = os.path.join(base_dir, "Generated_Listings")
     filepath = os.path.join(output_dir, f"{sku}.json")
     
     try:
@@ -463,7 +473,9 @@ def update_listing_images(sku, image_urls):
         print(f"❌ Error: image_urls must be a non-empty list")
         return False
     
-    output_dir = "Generated_Listings"
+    # Use absolute path to ensure we're looking in the right directory
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    output_dir = os.path.join(base_dir, "Generated_Listings")
     filepath = os.path.join(output_dir, f"{sku}.json")
     
     try:
@@ -668,7 +680,9 @@ def update_listing_with_aspects(sku, localizedAspects=None):
         return False
     
     # Update the listing JSON file
-    output_dir = "Generated_Listings"
+    # Use absolute path to ensure we're looking in the right directory
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    output_dir = os.path.join(base_dir, "Generated_Listings")
     filepath = os.path.join(output_dir, f"{sku}.json")
     
     try:
