@@ -98,7 +98,7 @@ def save_config(config):
 
 def get_sku(return_counter=False):
     """
-    Get the current counter and/or SKU based on the counter value.
+    Get the current counter and/or SKU based on the counter value, then increment the counter.
     Format: AXIS_[counter]
     
     Args:
@@ -110,6 +110,10 @@ def get_sku(return_counter=False):
     config = load_config()
     counter = config["counter"]
     sku = f"AXIS_{counter}"
+    
+    # Increment the counter for next time using get_next_sku logic
+    config["counter"] = config["counter"] + 1
+    save_config(config)
     
     if return_counter:
         return counter, sku
