@@ -17,17 +17,26 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from copyScripts.CopyListingMain import copy_listing_main, testing_function
 from copyScripts.create_image import generate_image_from_urls, ImageType
-from copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data
+from copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects
 import os
 import json
 import os
 import glob
+import time
+import uuid
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from copyScripts.create_text import create_text
 from copyScripts.upload_to_ebay import upload_complete_listing
 
 app = Flask(__name__)
 # Enable CORS for all routes to allow React frontend to make requests
 CORS(app, origins=["http://localhost:3000", "http://localhost:5173", "http://localhost:5174"])
+
+# In-memory storage for image generation task progress
+# Structure: {task_id: {"status": "running|completed|failed", "total": N, "completed": M, "results": [], "errors": []}}
+image_generation_tasks = {}
+image_generation_lock = threading.Lock()
 
 @app.route('/api/photos/<path:listing_id>', methods=['GET'])
 def get_listing_photos(listing_id):
@@ -48,13 +57,15 @@ def get_listing_photos(listing_id):
                 "error": "Failed to fetch listing data. The listing may not exist or the ID is invalid.",
                 "photos": [],
                 "categories": {},
-                "listing": None
+                "listing": None,
+                "sku": None
             }), 404
         
         return jsonify({
             "photos": result.get("photos", []),
             "categories": result.get("categories", {}),
             "listing": result.get("listing", {}),
+            "sku": result.get("sku"),  # Return SKU so frontend can track it
             "error": None
         }), 200
         
@@ -69,13 +80,111 @@ def get_listing_photos(listing_id):
             "error": f"An error occurred while fetching listing data: {error_msg}",
             "photos": [],
             "categories": {},
-            "listing": None
+            "listing": None,
+            "sku": None
         }), 500
+
+@app.route('/api/generate-images-status/<task_id>', methods=['GET'])
+def get_generation_status(task_id):
+    """
+    Get status of image generation task.
+    
+    Returns:
+        JSON response with task status, progress, and results if completed
+    """
+    try:
+        with image_generation_lock:
+            if task_id not in image_generation_tasks:
+                return jsonify({
+                    "error": f"Task {task_id} not found",
+                    "status": None
+                }), 404
+            
+            task = image_generation_tasks[task_id]
+            
+            response_data = {
+                "status": task["status"],
+                "total": task["total"],
+                "completed": task["completed"],
+                "errors": task["errors"]
+            }
+            
+            # Include results if completed
+            if task["status"] == "completed":
+                response_data["generated_images"] = task["results"]
+            elif task["status"] == "failed":
+                response_data["generated_images"] = task["results"]  # Return partial results if any
+            
+            return jsonify(response_data), 200
+            
+    except Exception as e:
+        return jsonify({
+            "error": f"An error occurred while checking status: {str(e)}",
+            "status": None
+        }), 500
+
+def generate_image_with_delay(photo_url, image_type, index, delay_ms=500, task_id=None):
+    """
+    Generate image with rate limiting delay. Used for parallel execution.
+    
+    Args:
+        photo_url: URL of photo to generate from
+        image_type: ImageType enum value
+        index: Index of this image (for ordering and delay calculation)
+        delay_ms: Delay in milliseconds before starting generation
+        task_id: Task ID for progress tracking
+    
+    Returns:
+        tuple: (index, photo_url, result, error)
+    """
+    try:
+        # Stagger API calls to avoid rate limits
+        time.sleep(index * delay_ms / 1000)
+        
+        # Update progress: starting
+        if task_id:
+            with image_generation_lock:
+                if task_id in image_generation_tasks:
+                    image_generation_tasks[task_id]["status"] = "running"
+        
+        print(f"[API] Starting generation for image {index + 1} (photo: {photo_url[:50]}...)")
+        
+        # Generate image
+        result = generate_image_from_urls([photo_url], image_type)
+        
+        # Update progress: completed
+        if task_id:
+            with image_generation_lock:
+                if task_id in image_generation_tasks:
+                    if result:
+                        image_generation_tasks[task_id]["completed"] += 1
+                        if isinstance(result, list):
+                            image_generation_tasks[task_id]["results"].extend(result)
+                        else:
+                            image_generation_tasks[task_id]["results"].append(result)
+                    else:
+                        image_generation_tasks[task_id]["errors"].append(f"Failed to generate image for {photo_url[:50]}...")
+        
+        return (index, photo_url, result, None)
+    except Exception as e:
+        error_msg = f"Error generating image for {photo_url[:50]}...: {str(e)}"
+        print(f"[API] Exception: {error_msg}")
+        import traceback
+        traceback.print_exc()
+        
+        # Update progress: error
+        if task_id:
+            with image_generation_lock:
+                if task_id in image_generation_tasks:
+                    image_generation_tasks[task_id]["errors"].append(error_msg)
+                    image_generation_tasks[task_id]["completed"] += 1
+        
+        return (index, photo_url, None, error_msg)
 
 @app.route('/api/generate-images', methods=['POST'])
 def generate_images():
     """
-    Generate images based on confirmed categories.
+    Generate images based on confirmed categories using parallel async processing.
     
     Accepts JSON body:
     {
@@ -84,7 +193,7 @@ def generate_images():
     }
     
     Returns:
-        JSON response with generated image URLs, or error message
+        JSON response with task_id for progress tracking, or error message
     """
     try:
         print("[API] /api/generate-images endpoint called")
@@ -95,7 +204,7 @@ def generate_images():
             print("[API] Error: No data in request")
             return jsonify({
                 "error": "Request body must be JSON",
-                "generated_images": []
+                "task_id": None
             }), 400
         
         photos = data.get("photos", [])
@@ -107,14 +216,14 @@ def generate_images():
             print("[API] Error: Invalid photos array")
             return jsonify({
                 "error": "photos must be a non-empty array",
-                "generated_images": []
+                "task_id": None
             }), 400
         
         if not categories or not isinstance(categories, dict):
             print("[API] Error: Invalid categories dict")
             return jsonify({
                 "error": "categories must be a non-empty dictionary",
-                "generated_images": []
+                "task_id": None
             }), 400
         
         # Categories to skip
@@ -126,13 +235,10 @@ def generate_images():
             'professional_image': ImageType.PROFESSIONAL
         }
         
-        generated_images = []
-        errors = []
-        
-        # Process each photo
+        # Prepare tasks for parallel execution
+        tasks_to_generate = []
         for idx, photo_url in enumerate(photos):
             category = categories.get(photo_url)
-            print(f"[API] Processing photo {idx + 1}/{len(photos)}: category={category}")
             
             # Skip if category is None or in skip list
             if not category or category in skip_categories:
@@ -143,48 +249,79 @@ def generate_images():
             image_type = category_to_image_type.get(category)
             
             if not image_type:
-                error_msg = f"Unknown category '{category}' for photo {photo_url[:50]}..."
-                print(f"[API] {error_msg}")
-                errors.append(error_msg)
+                print(f"[API] Unknown category '{category}' for photo {photo_url[:50]}...")
                 continue
             
+            tasks_to_generate.append((idx, photo_url, image_type))
+        
+        if not tasks_to_generate:
+            return jsonify({
+                "error": "No photos to generate (all skipped or invalid categories)",
+                "task_id": None
+            }), 400
+        
+        # Create task ID for progress tracking
+        task_id = str(uuid.uuid4())
+        
+        # Initialize task progress
+        with image_generation_lock:
+            image_generation_tasks[task_id] = {
+                "status": "running",
+                "total": len(tasks_to_generate),
+                "completed": 0,
+                "results": [],
+                "errors": []
+            }
+        
+        print(f"[API] Created task {task_id} for {len(tasks_to_generate)} image(s)")
+        
+        # Start parallel generation in background thread
+        def run_generation():
             try:
-                print(f"[API] Generating image {idx + 1} with type {image_type.value}...")
-                # Generate image using the appropriate prompt
-                result = generate_image_from_urls([photo_url], image_type)
+                with ThreadPoolExecutor(max_workers=5) as executor:
+                    # Submit all tasks
+                    futures = {}
+                    for idx, photo_url, image_type in tasks_to_generate:
+                        future = executor.submit(
+                            generate_image_with_delay,
+                            photo_url, image_type, idx, delay_ms=500, task_id=task_id
+                        )
+                        futures[future] = (idx, photo_url)
+                    
+                    # Wait for all to complete
+                    for future in as_completed(futures):
+                        idx, photo_url = futures[future]
+                        try:
+                            result = future.result()
+                            # Result already processed in generate_image_with_delay
+                        except Exception as e:
+                            print(f"[API] Future exception for image {idx + 1}: {e}")
                 
-                if result and isinstance(result, list):
-                    generated_images.extend(result)
-                    print(f"[API] Successfully generated {len(result)} image(s) for photo {idx + 1}")
-                elif result:
-                    # In case result is not a list, wrap it
-                    generated_images.append(result)
-                    print(f"[API] Successfully generated 1 image for photo {idx + 1}")
-                else:
-                    error_msg = f"Failed to generate image for {photo_url[:50]}..."
-                    print(f"[API] {error_msg}")
-                    errors.append(error_msg)
+                # Mark task as completed
+                with image_generation_lock:
+                    if task_id in image_generation_tasks:
+                        image_generation_tasks[task_id]["status"] = "completed"
+                
+                print(f"[API] Task {task_id} completed: {len(image_generation_tasks[task_id]['results'])} images generated")
             except Exception as e:
-                error_msg = f"Error generating image for {photo_url[:50]}...: {str(e)}"
-                print(f"[API] Exception: {error_msg}")
+                print(f"[API] Error in background generation thread: {e}")
                 import traceback
                 traceback.print_exc()
-                errors.append(error_msg)
+                with image_generation_lock:
+                    if task_id in image_generation_tasks:
+                        image_generation_tasks[task_id]["status"] = "failed"
+                        image_generation_tasks[task_id]["errors"].append(str(e))
         
-        print(f"[API] Generation complete: {len(generated_images)} images generated, {len(errors)} errors")
-        print(f"[API] Generated image URLs: {generated_images}")
+        # Start background thread
+        thread = threading.Thread(target=run_generation, daemon=True)
+        thread.start()
         
-        # Return results
-        response_data = {
-            "generated_images": generated_images,
+        # Return task ID immediately
+        return jsonify({
+            "task_id": task_id,
+            "total_images": len(tasks_to_generate),
             "error": None
-        }
-        
-        if errors:
-            response_data["warnings"] = errors
-            print(f"[API] Warnings: {errors}")
-        
-        return jsonify(response_data), 200
+        }), 200
         
     except Exception as e:
         # Safely convert exception to string, handling encoding issues
@@ -193,9 +330,12 @@ def generate_images():
         except UnicodeEncodeError:
             error_msg = "An error occurred while generating images (encoding error)"
         
+        import traceback
+        traceback.print_exc()
+        
         return jsonify({
             "error": f"An error occurred while generating images: {error_msg}",
-            "generated_images": []
+            "task_id": None
         }), 500
 
 @app.route('/api/regenerate-images', methods=['POST'])
@@ -290,10 +430,11 @@ def regenerate_images():
 @app.route('/api/create-listing', methods=['POST'])
 def create_listing():
     """
-    Create a new listing JSON file with generated images, generate optimized text, and update listing.
+    Update an existing listing JSON file with generated images, generate optimized text, and update listing.
     
     Accepts JSON body:
     {
+        "sku": "AXIS_5",  # Required: SKU of the listing to update
         "generated_images": ["url1", "url2", ...],
         "listing": {
             "title": "...",
@@ -319,6 +460,7 @@ def create_listing():
         
         generated_images = data.get("generated_images", [])
         listing = data.get("listing", {})
+        sku = data.get("sku")  # Get SKU from request
         
         if not generated_images or not isinstance(generated_images, list):
             return jsonify({
@@ -332,15 +474,23 @@ def create_listing():
                 "listing_data": None
             }), 400
         
-        print(f"[API] Creating listing with {len(generated_images)} image(s)")
+        if not sku:
+            return jsonify({
+                "error": "sku is required in request body",
+                "listing_data": None
+            }), 400
         
-        # Generate new SKU
-        sku = get_next_sku()
-        print(f"[API] Generated SKU: {sku}")
+        print(f"[API] Updating listing with {len(generated_images)} image(s)")
+        print(f"[API] Using SKU: {sku}")
         
-        # Create listing with default structure
-        create_listing_with_preferences(sku=sku)
-        print(f"[API] Created listing JSON file for SKU: {sku}")
+        # Check if file exists, if not create it (backward compatibility)
+        from copyScripts.combine_data import listing_file_exists
+        if not listing_file_exists(sku):
+            print(f"[API] File doesn't exist for SKU {sku}, creating it...")
+            create_listing_with_preferences(sku=sku)
+            print(f"[API] Created listing JSON file for SKU: {sku}")
+        else:
+            print(f"[API] File exists for SKU {sku}, updating existing file")
         
         # Add images to listing
         update_listing_images(sku, generated_images)
@@ -375,6 +525,13 @@ def create_listing():
         if price and category_id:
             update_listing_meta_data(sku, str(price), str(category_id))
             print(f"[API] Updated listing metadata: price={price}, categoryId={category_id}")
+        
+        # Update aspects (get localized aspects from original listing if available)
+        localized_aspects = listing.get("localizedAspects")
+        if localized_aspects is None:
+            localized_aspects = []
+        update_listing_with_aspects(sku, localized_aspects)
+        print(f"[API] Updated listing with aspects")
         
         # Load and return the complete listing data
         listing_data = load_listing_data(sku=sku)

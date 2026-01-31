@@ -5,6 +5,8 @@ function PhotoGallery({
   onConfirm,
   isConfirming,
   onPhotoClick,
+  skippedPhotos = new Set(),
+  onSkipPhoto,
 }) {
   if (!photos || photos.length === 0) {
     return null;
@@ -38,18 +40,58 @@ function PhotoGallery({
     }
   };
 
+  const handleSkipClick = (e, photoUrl) => {
+    e.stopPropagation(); // Prevent triggering photo click
+    if (onSkipPhoto) {
+      onSkipPhoto(photoUrl);
+    }
+  };
+
   return (
     <div className="photo-gallery">
       <h2 className="gallery-title">Photos ({photos.length})</h2>
       <div className="gallery-grid">
         {photos.map((photoUrl, index) => {
           const category = editableCategories[photoUrl];
+          const isSkipped = skippedPhotos.has(photoUrl);
           return (
             <div
               key={index}
-              className="gallery-item"
+              className={`gallery-item ${isSkipped ? 'skipped' : ''}`}
               onClick={() => onPhotoClick && onPhotoClick(index)}
+              style={{
+                opacity: isSkipped ? 0.5 : 1,
+                position: 'relative'
+              }}
             >
+              {onSkipPhoto && (
+                <button
+                  className="skip-photo-button"
+                  onClick={(e) => handleSkipClick(e, photoUrl)}
+                  style={{
+                    position: 'absolute',
+                    top: '5px',
+                    right: '5px',
+                    background: isSkipped ? '#4CAF50' : '#f44336',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '50%',
+                    width: '30px',
+                    height: '30px',
+                    cursor: 'pointer',
+                    fontSize: '18px',
+                    fontWeight: 'bold',
+                    zIndex: 10,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                  }}
+                  title={isSkipped ? 'Include this photo' : 'Skip this photo'}
+                >
+                  {isSkipped ? '✓' : '×'}
+                </button>
+              )}
               <img
                 src={photoUrl}
                 alt={`Photo ${index + 1}`}
@@ -63,12 +105,29 @@ function PhotoGallery({
               <div className="gallery-overlay">
                 <span className="gallery-index">{index + 1}</span>
               </div>
+              {isSkipped && (
+                <div style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  background: 'rgba(0, 0, 0, 0.7)',
+                  color: 'white',
+                  padding: '5px 10px',
+                  borderRadius: '5px',
+                  fontWeight: 'bold',
+                  zIndex: 5
+                }}>
+                  SKIPPED
+                </div>
+              )}
               <div className={`gallery-category ${getCategoryClass(category)}`}>
                 <select
                   className="category-select"
                   value={category || ""}
                   onChange={(e) => handleCategorySelect(e, photoUrl)}
                   onClick={(e) => e.stopPropagation()}
+                  disabled={isSkipped}
                 >
                   <option value="">Select Category</option>
                   {categoryOptions.map((option) => (

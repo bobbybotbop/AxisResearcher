@@ -19,6 +19,7 @@ Original Description:
    - Made In USA
    - ALL CAPS/emojis/quotes
    - Seller/manufacturer names
+   - "New" or "FAST SHIPPING" (remove any mention of these)
 4. Optimization techniques:
    - Front-load primary keywords
    - Use benefit-driven terms ("reusable", "easy", "pro")

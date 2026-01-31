@@ -124,6 +124,9 @@ def get_next_sku(return_counter=False):
     Increment the counter and return the new counter and/or SKU.
     Format: AXIS_[counter]
     
+    This is the ONLY function that should increment the counter.
+    Use get_current_sku() for reading the current SKU without incrementing.
+    
     Args:
         return_counter (bool): If True, returns both counter and SKU as a tuple
     
@@ -142,6 +145,29 @@ def get_next_sku(return_counter=False):
         return counter, sku
     return sku
 
+def get_current_sku(return_counter=False):
+    """
+    Get the current counter and/or SKU WITHOUT incrementing.
+    Format: AXIS_[counter]
+    
+    Use this function for reading/displaying the current SKU.
+    Use get_next_sku() only when creating a new listing.
+    
+    Args:
+        return_counter (bool): If True, returns both counter and SKU as a tuple
+    
+    Returns:
+        str or tuple: Current SKU in format AXIS_[counter], 
+                     or (counter, SKU) if return_counter is True
+    """
+    config = load_config()
+    counter = config["counter"]
+    sku = f"AXIS_{counter}"
+    
+    if return_counter:
+        return counter, sku
+    return sku
+
 # Load configuration on import
 _config = load_config()
 
@@ -151,9 +177,8 @@ DEFAULT_QUANTITY = _config["default_quantity"]
 DEFAULT_DIMESIONS = _config["default_dimensions"]
 DEFAULT_WEIGHT = _config["default_weight"]
 
-# Test Data Constants (loaded from config)
-# SKU is generated from counter: AXIS_[counter]
-TEST_SKU = get_sku()
+# Note: TEST_SKU is no longer set at module level to prevent counter increments on import
+# Use get_current_sku() for reading, or get_next_sku() when creating a new listing
 
 # Test Inventory Item Data
 TEST_INVENTORY_ITEM_DATA = {
@@ -218,17 +243,17 @@ def create_listing_with_preferences(
     Create an inventory and offer object and save it to a JSON file in Generated_Listings folder.
     
     Args:
-        sku (str, optional): SKU for the listing. If None, uses TEST_SKU.
+        sku (str, optional): SKU for the listing. If None, generates a new SKU using get_next_sku().
         inventory_item_data (dict, optional): Inventory item data. If None, uses TEST_INVENTORY_ITEM_DATA.
         offer_data (dict, optional): Offer data. If None, uses TEST_OFFER_DATA.
         output_filename (str, optional): Output filename. If None, generates timestamped filename.
     
     Returns:
-        str: Path to the created JSON file
+        str: The SKU that was used/created
     """
-    # Use defaults if not provided
+    # Generate SKU if not provided (only when actually creating a listing)
     if sku is None:
-        sku = TEST_SKU
+        sku = get_next_sku()
     
     if inventory_item_data is None:
         inventory_item_data = TEST_INVENTORY_ITEM_DATA.copy()
@@ -291,7 +316,7 @@ def load_listing_data(sku=None, filename=None):
     Load inventory and offer data from a JSON file in Generated_Listings folder.
     
     Args:
-        sku (str, optional): SKU for the listing to load. If None, uses TEST_SKU.
+        sku (str, optional): SKU for the listing to load. If None, uses current SKU.
                              If filename is provided, sku is ignored.
         filename (str, optional): Specific filename to load. If None, finds most recent file for SKU.
     
@@ -310,7 +335,8 @@ def load_listing_data(sku=None, filename=None):
     else:
         # Use SKU to find the file (simply {sku}.json)
         if sku is None:
-            sku = TEST_SKU
+            # If no SKU provided, use current SKU (for reading existing files)
+            sku = get_current_sku()
         
         # File is simply {sku}.json
         filepath = os.path.join(output_dir, f"{sku}.json")

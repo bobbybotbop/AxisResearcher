@@ -50,7 +50,7 @@ from combine_data import (
     DEFAULT_QUANTITY,
     DEFAULT_DIMESIONS,
     DEFAULT_WEIGHT,
-    TEST_SKU,
+    get_current_sku,
     TEST_INVENTORY_ITEM_DATA,
     TEST_OFFER_DATA,
     load_listing_data,
@@ -527,14 +527,14 @@ def create_test_listing(locale="en-US", use_user_token=True, sku=None, listing_f
     Args:
         locale (str): Locale code. Default: "en-US"
         use_user_token (bool): If True, use user_token. Default: True
-        sku (str, optional): SKU to load. If None, uses TEST_SKU.
+        sku (str, optional): SKU to load. If None, uses current SKU.
         listing_filename (str, optional): Specific listing filename to load. If None, finds most recent for SKU.
     
     Returns:
         dict: Final result with listing ID, or None on failure
     """
-    # Use provided SKU or default
-    listing_sku = sku if sku else TEST_SKU
+    # Use provided SKU or default to current SKU
+    listing_sku = sku if sku else get_current_sku()
     print(f"🚀 Publishing complete listing to eBay with SKU: {listing_sku}")
     
     # Load data from JSON file

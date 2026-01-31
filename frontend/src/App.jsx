@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import PhotoGallery from './components/PhotoGallery'
 import Lightbox from './components/Lightbox'
 import ListingDetails from './components/ListingDetails'
+import ProgressIndicator from './components/ProgressIndicator'
 import './styles/App.css'
 
 function App() {
@@ -34,6 +35,35 @@ function App() {
   const [lightboxOpen, setLightboxOpen] = useState(false)
   const [lightboxIndex, setLightboxIndex] = useState(0)
   const [listingId, setListingId] = useState('')
+  const [currentSku, setCurrentSku] = useState(null)
+  const [skippedPhotos, setSkippedPhotos] = useState(new Set())
+  
+  // Progress tracking states
+  const [fetchProgress, setFetchProgress] = useState({
+    isActive: false,
+    currentStep: null,
+    completedSteps: [],
+    totalSteps: []
+  })
+  const [imageGenProgress, setImageGenProgress] = useState({
+    isActive: false,
+    taskId: null,
+    total: 0,
+    completed: 0,
+    currentGenerating: []
+  })
+  const [createListingProgress, setCreateListingProgress] = useState({
+    isActive: false,
+    currentStep: null,
+    completedSteps: [],
+    totalSteps: []
+  })
+  const [uploadProgress, setUploadProgress] = useState({
+    isActive: false,
+    currentStep: null,
+    completedSteps: [],
+    totalSteps: []
+  })
 
   const fetchListingPhotos = async () => {
     if (!listingId.trim()) {
@@ -46,8 +76,20 @@ function App() {
     setPhotos([])
     setCategories({})
     setListing(null)
+    setCurrentSku(null)
+    setSkippedPhotos(new Set())
+    
+    // Initialize progress tracking
+    const steps = ['Fetching listing from eBay', 'Creating initial JSON file', 'Categorizing images']
+    setFetchProgress({
+      isActive: true,
+      currentStep: steps[0],
+      completedSteps: [],
+      totalSteps: steps
+    })
 
     try {
+      // Step 1: Fetching listing
       const response = await fetch(`/api/photos/${encodeURIComponent(listingId.trim())}`)
       const data = await response.json()
 
@@ -59,19 +101,43 @@ function App() {
         throw new Error(data.error)
       }
 
+      // Step 1 complete, step 2 complete (file created in backend)
+      setFetchProgress(prev => ({
+        ...prev,
+        completedSteps: [steps[0], steps[1]],
+        currentStep: steps[2]
+      }))
+
       setPhotos(data.photos || [])
       const initialCategories = data.categories || {}
       setCategories(initialCategories)
       setEditableCategories({ ...initialCategories })
       setListing(data.listing || null)
+      setCurrentSku(data.sku || null)  // Store SKU from API response
       setGeneratedImages([])
+      
+      // Step 3 complete (categorization done in backend)
+      setFetchProgress(prev => ({
+        ...prev,
+        completedSteps: steps,
+        currentStep: null,
+        isActive: false
+      }))
     } catch (err) {
       setError(err.message || 'An error occurred while fetching the listing')
       setPhotos([])
       setCategories({})
       setEditableCategories({})
       setListing(null)
+      setCurrentSku(null)
+      setSkippedPhotos(new Set())
       setGeneratedImages([])
+      setFetchProgress({
+        isActive: false,
+        currentStep: null,
+        completedSteps: [],
+        totalSteps: []
+      })
     } finally {
       setLoading(false)
     }
@@ -106,18 +172,40 @@ function App() {
     }))
   }
 
+  const handleSkipPhoto = (photoUrl) => {
+    setSkippedPhotos((prev) => {
+      const newSet = new Set(prev)
+      if (newSet.has(photoUrl)) {
+        newSet.delete(photoUrl)
+      } else {
+        newSet.add(photoUrl)
+      }
+      return newSet
+    })
+  }
+
   const handleConfirmCategories = async () => {
     console.log('Confirm categories button clicked')
     console.log('Photos:', photos)
     console.log('Editable categories:', editableCategories)
+    console.log('Skipped photos:', skippedPhotos)
     
     setIsConfirming(true)
     setError(null)
 
     try {
+      // Filter out skipped photos
+      const photosToProcess = photos.filter(photoUrl => !skippedPhotos.has(photoUrl))
+      const categoriesToProcess = {}
+      photosToProcess.forEach(photoUrl => {
+        if (editableCategories[photoUrl]) {
+          categoriesToProcess[photoUrl] = editableCategories[photoUrl]
+        }
+      })
+
       const requestBody = {
-        photos: photos,
-        categories: editableCategories
+        photos: photosToProcess,
+        categories: categoriesToProcess
       }
       console.log('Sending request to /api/generate-images:', requestBody)
       
@@ -134,26 +222,111 @@ function App() {
       console.log('Response data:', data)
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to generate images')
+        throw new Error(data.error || 'Failed to start image generation')
       }
 
       if (data.error) {
         throw new Error(data.error)
       }
 
-      const generatedImagesList = data.generated_images || []
-      console.log('Generated images:', generatedImagesList)
-      console.log(`Successfully generated ${generatedImagesList.length} image(s)`)
+      // Get task ID for progress tracking
+      const taskId = data.task_id
+      const totalImages = data.total_images || 0
       
-      setGeneratedImages(generatedImagesList)
-      setCategories(editableCategories) // Update confirmed categories
-      setSelectedImagesForRegen([]) // Reset selection
-      setCustomPrompt('') // Reset prompt
+      if (!taskId) {
+        throw new Error('No task ID returned from server')
+      }
+
+      // Initialize progress tracking
+      setImageGenProgress({
+        isActive: true,
+        taskId: taskId,
+        total: totalImages,
+        completed: 0,
+        currentGenerating: []
+      })
+
+      // Poll for progress updates
+      const pollInterval = setInterval(async () => {
+        try {
+          const statusResponse = await fetch(`/api/generate-images-status/${taskId}`)
+          const statusData = await statusResponse.json()
+
+          if (statusData.status === 'completed' || statusData.status === 'failed') {
+            clearInterval(pollInterval)
+            
+            if (statusData.status === 'completed') {
+              const generatedImagesList = statusData.generated_images || []
+              console.log('Generated images:', generatedImagesList)
+              console.log(`Successfully generated ${generatedImagesList.length} image(s)`)
+              
+              setGeneratedImages(generatedImagesList)
+              setCategories(editableCategories)
+              setSelectedImagesForRegen([])
+              setCustomPrompt('')
+              
+              setImageGenProgress({
+                isActive: false,
+                taskId: null,
+                total: totalImages,
+                completed: totalImages,
+                currentGenerating: []
+              })
+            } else {
+              // Failed - show errors but return partial results if any
+              const generatedImagesList = statusData.generated_images || []
+              setGeneratedImages(generatedImagesList)
+              
+              const errorMsg = statusData.errors && statusData.errors.length > 0
+                ? `Image generation completed with errors: ${statusData.errors.join('; ')}`
+                : 'Image generation failed'
+              setError(errorMsg)
+              
+              setImageGenProgress({
+                isActive: false,
+                taskId: null,
+                total: totalImages,
+                completed: statusData.completed || 0,
+                currentGenerating: []
+              })
+            }
+            
+            setIsConfirming(false)
+          } else {
+            // Update progress
+            setImageGenProgress(prev => ({
+              ...prev,
+              completed: statusData.completed || 0
+            }))
+          }
+        } catch (pollErr) {
+          console.error('Error polling status:', pollErr)
+          clearInterval(pollInterval)
+          setError('Error checking generation status')
+          setIsConfirming(false)
+          setImageGenProgress({
+            isActive: false,
+            taskId: null,
+            total: totalImages,
+            completed: 0,
+            currentGenerating: []
+          })
+        }
+      }, 500) // Poll every 500ms
+      
+      // Store interval ID for cleanup if component unmounts
+      // Note: In a real app, you'd use useEffect cleanup, but for now we rely on completion/error handling
     } catch (err) {
       console.error('Error generating images:', err)
       setError(err.message || 'An error occurred while generating images')
-    } finally {
       setIsConfirming(false)
+      setImageGenProgress({
+        isActive: false,
+        taskId: null,
+        total: 0,
+        completed: 0,
+        currentGenerating: []
+      })
     }
   }
 
@@ -238,13 +411,34 @@ function App() {
       setError('Original listing data is required')
       return
     }
+    if (!currentSku) {
+      setError('SKU is required. Please fetch photos first.')
+      return
+    }
 
     setIsCreatingListing(true)
     setError(null)
+    
+    // Initialize progress tracking
+    const steps = ['Updating images', 'Generating optimized text', 'Updating metadata', 'Updating aspects']
+    setCreateListingProgress({
+      isActive: true,
+      currentStep: steps[0],
+      completedSteps: [],
+      totalSteps: steps
+    })
 
     try {
-      console.log('Creating listing with images:', generatedImages)
+      console.log('Updating listing with images:', generatedImages)
       console.log('Listing data:', listing)
+      console.log('SKU:', currentSku)
+
+      // Step 1: Updating images (happens in backend)
+      setCreateListingProgress(prev => ({
+        ...prev,
+        completedSteps: [steps[0]],
+        currentStep: steps[1]
+      }))
 
       const response = await fetch('/api/create-listing', {
         method: 'POST',
@@ -252,6 +446,7 @@ function App() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
+          sku: currentSku,  // Pass SKU to use existing file
           generated_images: generatedImages,
           listing: listing
         })
@@ -268,6 +463,14 @@ function App() {
         throw new Error(data.error)
       }
 
+      // All steps complete (backend handles all steps sequentially)
+      setCreateListingProgress({
+        isActive: false,
+        currentStep: null,
+        completedSteps: steps,
+        totalSteps: steps
+      })
+
       setListingData(data.listing_data)
       setUploadResult(null) // Reset upload result when new listing is created
       
@@ -278,6 +481,12 @@ function App() {
     } catch (err) {
       console.error('Error creating listing:', err)
       setError(err.message || 'An error occurred while creating listing')
+      setCreateListingProgress({
+        isActive: false,
+        currentStep: null,
+        completedSteps: [],
+        totalSteps: steps
+      })
     } finally {
       setIsCreatingListing(false)
     }
@@ -317,11 +526,24 @@ function App() {
 
     setUploadingSkus(prev => new Set(prev).add(sku))
     setError(null)
+    
+    // Initialize progress tracking
+    const steps = ['Creating inventory item', 'Creating offer', 'Publishing listing']
+    setUploadProgress({
+      isActive: true,
+      currentStep: steps[0],
+      completedSteps: [],
+      totalSteps: steps
+    })
 
     try {
       console.log('Uploading listing to eBay with SKU:', sku)
       console.log('Listing data:', listingData)
 
+      // Note: Backend handles all steps sequentially, so we'll update progress
+      // based on typical flow. For more accurate progress, backend would need
+      // to send progress updates (future enhancement)
+      
       const response = await fetch('/api/upload-listing', {
         method: 'POST',
         headers: {
@@ -354,6 +576,14 @@ function App() {
         throw new Error('Upload completed but no result returned')
       }
 
+      // All steps complete
+      setUploadProgress({
+        isActive: false,
+        currentStep: null,
+        completedSteps: steps,
+        totalSteps: steps
+      })
+
       // Store result for this specific SKU
       setUploadResults(prev => ({
         ...prev,
@@ -369,6 +599,12 @@ function App() {
     } catch (err) {
       console.error('Error uploading listing:', err)
       setError(err.message || 'An error occurred while uploading listing')
+      setUploadProgress({
+        isActive: false,
+        currentStep: null,
+        completedSteps: [],
+        totalSteps: steps
+      })
     } finally {
       setUploadingSkus(prev => {
         const newSet = new Set(prev)
@@ -671,18 +907,57 @@ function App() {
           <div className="loading">
             <div className="spinner"></div>
             <p>Fetching listing data...</p>
+            {fetchProgress.isActive && fetchProgress.totalSteps.length > 0 && (
+              <ProgressIndicator
+                steps={fetchProgress.totalSteps}
+                currentStep={fetchProgress.currentStep}
+                completedSteps={fetchProgress.completedSteps}
+              />
+            )}
+          </div>
+        )}
+
+        {currentSku && (
+          <div className="sku-display" style={{ margin: '20px 0', padding: '10px', backgroundColor: '#f0f0f0', borderRadius: '5px' }}>
+            <strong>Current SKU:</strong> {currentSku}
           </div>
         )}
 
         {photos.length > 0 && (
-          <PhotoGallery
-            photos={photos}
-            editableCategories={editableCategories}
-            onCategoryChange={handleCategoryChange}
-            onConfirm={handleConfirmCategories}
-            isConfirming={isConfirming}
-            onPhotoClick={openLightbox}
-          />
+          <>
+            <PhotoGallery
+              photos={photos}
+              editableCategories={editableCategories}
+              onCategoryChange={handleCategoryChange}
+              onConfirm={handleConfirmCategories}
+              isConfirming={isConfirming}
+              onPhotoClick={openLightbox}
+              skippedPhotos={skippedPhotos}
+              onSkipPhoto={handleSkipPhoto}
+            />
+            {isConfirming && imageGenProgress.isActive && (
+              <div className="image-generation-progress" style={{ margin: '20px 0', padding: '15px', backgroundColor: '#f9f9f9', borderRadius: '5px' }}>
+                <h3>Generating Images</h3>
+                <div className="progress-info">
+                  <p>Progress: {imageGenProgress.completed} of {imageGenProgress.total} images complete</p>
+                  {imageGenProgress.total > 0 && (
+                    <div className="progress-bar-container" style={{ marginTop: '10px' }}>
+                      <div 
+                        className="progress-bar" 
+                        style={{ 
+                          width: `${(imageGenProgress.completed / imageGenProgress.total) * 100}%`,
+                          height: '20px',
+                          backgroundColor: '#4CAF50',
+                          borderRadius: '4px',
+                          transition: 'width 0.3s ease'
+                        }}
+                      ></div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {generatedImages.length > 0 && (
@@ -740,8 +1015,17 @@ function App() {
                 onClick={handleConfirmAndEditText}
                 disabled={isCreatingListing}
               >
-                {isCreatingListing ? 'Creating Listing...' : 'Confirm and Edit Text'}
+                {isCreatingListing ? 'Updating Listing...' : 'Confirm and Edit Text'}
               </button>
+              {isCreatingListing && createListingProgress.isActive && createListingProgress.totalSteps.length > 0 && (
+                <div style={{ marginTop: '15px' }}>
+                  <ProgressIndicator
+                    steps={createListingProgress.totalSteps}
+                    currentStep={createListingProgress.currentStep}
+                    completedSteps={createListingProgress.completedSteps}
+                  />
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -790,6 +1074,15 @@ function App() {
               >
                 {uploadingSkus.has(listingData?.sku) ? 'Uploading to eBay...' : 'Upload to eBay'}
               </button>
+              {uploadingSkus.has(listingData?.sku) && uploadProgress.isActive && uploadProgress.totalSteps.length > 0 && (
+                <div style={{ marginTop: '15px' }}>
+                  <ProgressIndicator
+                    steps={uploadProgress.totalSteps}
+                    currentStep={uploadProgress.currentStep}
+                    completedSteps={uploadProgress.completedSteps}
+                  />
+                </div>
+              )}
             </div>
 
             {uploadResult && (

@@ -68,7 +68,8 @@ def copy_listing_main(id):
         
         # Extract title and description
 
-        new_sku = create_listing_with_preferences();
+        # Create listing file prematurely (as desired) - this increments counter once
+        new_sku = create_listing_with_preferences()
 
         # old_title = listing.get('title', '')
         # old_description = remove_html_tags(listing.get('description', 'No description available'))
@@ -109,8 +110,9 @@ def copy_listing_main(id):
             if categories is None:
                 categories = {}
 
-        # Return photos and listing data for API consumption
+        # Return photos and listing data for API consumption, including the SKU
         return {
+            "sku": new_sku,  # Return the SKU so frontend can track it
             "photos": old_photo_list,
             "categories": categories,
             "listing": {
