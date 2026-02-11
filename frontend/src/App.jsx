@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import PhotoGallery from './components/PhotoGallery'
 import Lightbox from './components/Lightbox'
 import ListingDetails from './components/ListingDetails'
 import ProgressIndicator from './components/ProgressIndicator'
 import ImageCanvas from './components/ImageCanvas'
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd'
 import './styles/App.css'
 
 /**
@@ -97,6 +98,10 @@ function App() {
   const [skippedPhotos, setSkippedPhotos] = useState(new Set())
   const [useOriginalPhotos, setUseOriginalPhotos] = useState(new Set())
   const [promptModifier, setPromptModifier] = useState('')
+  const [isEditorOpen, setIsEditorOpen] = useState(false)
+  const [editableTitle, setEditableTitle] = useState('')
+  const [isTrimmingTitle, setIsTrimmingTitle] = useState(false)
+  const [isSavingTitle, setIsSavingTitle] = useState(false)
   
   // Progress tracking states
   const [fetchProgress, setFetchProgress] = useState({
@@ -176,6 +181,15 @@ function App() {
       setListing(data.listing || null)
       setCurrentSku(data.sku || null)
       setGeneratedImages([])
+
+      // Auto-skip images categorized as real_world_image or edited_image
+      const autoSkip = new Set()
+      for (const [url, cat] of Object.entries(initialCategories)) {
+        if (cat === 'real_world_image' || cat === 'edited_image') {
+          autoSkip.add(url)
+        }
+      }
+      setSkippedPhotos(autoSkip)
       
       // All steps complete
       setFetchProgress({
@@ -441,7 +455,34 @@ function App() {
     }
   }
 
+  const handleAddToListing = useCallback((ebayUrl) => {
+    setGeneratedImages(prev => [...prev, ebayUrl])
+  }, [])
+
+  const handleRemoveFromListing = useCallback((index) => {
+    setGeneratedImages(prev => prev.filter((_, i) => i !== index))
+    setSelectedImagesForRegen(prev => prev.filter(i => i !== index).map(i => i > index ? i - 1 : i))
+  }, [])
+
+  const handleDragEnd = useCallback((result) => {
+    if (!result.destination) return
+    const srcIdx = result.source.index
+    const destIdx = result.destination.index
+    if (srcIdx === destIdx) return
+    setGeneratedImages(prev => {
+      const updated = [...prev]
+      const [moved] = updated.splice(srcIdx, 1)
+      updated.splice(destIdx, 0, moved)
+      return updated
+    })
+    // Clear selection since indices changed
+    setSelectedImagesForRegen([])
+  }, [])
+
   const handleImageSelection = (index) => {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/02f918e9-918d-446f-84f2-b624a202fc2e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:handleImageSelection',message:'Checkbox clicked',data:{index,currentSelected:selectedImagesForRegen,generatedImagesLength:generatedImages.length},timestamp:Date.now(),hypothesisId:'checkbox'})}).catch(()=>{});
+    // #endregion
     setSelectedImagesForRegen((prev) => {
       if (prev.includes(index)) {
         return prev.filter(i => i !== index)
@@ -469,6 +510,10 @@ function App() {
       console.log('Regenerating images:', imagesToRegen)
       console.log('Custom prompt:', customPrompt)
 
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/02f918e9-918d-446f-84f2-b624a202fc2e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:handleRegenerateImages:entry',message:'Regenerate request starting',data:{selectedIndices:selectedImagesForRegen,imageUrls:imagesToRegen,promptLength:customPrompt.length,totalGeneratedImages:generatedImages.length},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
+
       const response = await fetch('/api/regenerate-images', {
         method: 'POST',
         headers: {
@@ -482,6 +527,10 @@ function App() {
 
       const data = await response.json()
       console.log('Regeneration response:', data)
+
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/02f918e9-918d-446f-84f2-b624a202fc2e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:handleRegenerateImages:response',message:'Regeneration API response received',data:{status:response.status,ok:response.ok,error:data.error,warnings:data.warnings,generatedImagesCount:(data.generated_images||[]).length,generatedImages:data.generated_images},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to regenerate images')
@@ -502,11 +551,18 @@ function App() {
         }
       })
 
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/02f918e9-918d-446f-84f2-b624a202fc2e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:handleRegenerateImages:replacement',message:'Image replacement result',data:{regeneratedUrlsCount:regeneratedUrls.length,replacementsAttempted:selectedImagesForRegen.length,newImagesLength:newImages.length},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
+
       setGeneratedImages(newImages)
       setSelectedImagesForRegen([])
       setCustomPrompt('')
     } catch (err) {
       console.error('Error regenerating images:', err)
+      // #region agent log
+      fetch('http://127.0.0.1:7243/ingest/02f918e9-918d-446f-84f2-b624a202fc2e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:handleRegenerateImages:error',message:'Regeneration error caught',data:{errorMessage:err.message,errorName:err.name},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       setError(err.message || 'An error occurred while regenerating images')
     } finally {
       setIsRegenerating(false)
@@ -584,6 +640,7 @@ function App() {
       })
 
       setListingData(data.listing_data)
+      setEditableTitle(data.listing_data?.inventoryItem?.product?.title || '')
       setUploadResult(null) // Reset upload result when new listing is created
       
       // Refresh listings if we're on the upload tab
@@ -601,6 +658,62 @@ function App() {
       })
     } finally {
       setIsCreatingListing(false)
+    }
+  }
+
+  const handleTrimTitle = async () => {
+    if (!editableTitle || !currentSku) return
+    setIsTrimmingTitle(true)
+    setError(null)
+    try {
+      const response = await fetch('/api/trim-title', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: editableTitle, sku: currentSku })
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Failed to trim title')
+      if (data.trimmed_title) {
+        setEditableTitle(data.trimmed_title)
+        // Update listingData in-place so the display stays in sync
+        setListingData(prev => {
+          if (!prev) return prev
+          const updated = JSON.parse(JSON.stringify(prev))
+          if (updated.inventoryItem?.product) {
+            updated.inventoryItem.product.title = data.trimmed_title
+          }
+          return updated
+        })
+      }
+    } catch (err) {
+      console.error('Error trimming title:', err)
+      setError(err.message || 'Failed to trim title')
+    } finally {
+      setIsTrimmingTitle(false)
+    }
+  }
+
+  const handleSaveTitle = async () => {
+    if (!editableTitle || !currentSku) return
+    setIsSavingTitle(true)
+    setError(null)
+    try {
+      const response = await fetch('/api/update-title', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sku: currentSku, title: editableTitle })
+      })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Failed to update title')
+      if (data.listing_data) {
+        setListingData(data.listing_data)
+        setEditableTitle(data.listing_data?.inventoryItem?.product?.title || editableTitle)
+      }
+    } catch (err) {
+      console.error('Error saving title:', err)
+      setError(err.message || 'Failed to save title')
+    } finally {
+      setIsSavingTitle(false)
     }
   }
 
@@ -989,8 +1102,6 @@ function App() {
                 </div>
               )}
             </div>
-
-            <ImageCanvas />
           </div>
         )}
 
@@ -1074,33 +1185,81 @@ function App() {
                 </div>
               </div>
             )}
+
+            {/* Collapsible Image Editor */}
+            <div className="editor-collapsible-panel">
+              <button
+                type="button"
+                className="editor-toggle-button"
+                onClick={() => setIsEditorOpen(prev => !prev)}
+              >
+                <span className={`editor-chevron ${isEditorOpen ? 'open' : ''}`}>&#9654;</span>
+                Image Editor
+              </button>
+              {isEditorOpen && (
+                <div className="editor-panel-body">
+                  <ImageCanvas onAddToListing={handleAddToListing} originalPhotos={photos} />
+                </div>
+              )}
+            </div>
           </>
         )}
 
         {generatedImages.length > 0 && (
-          <div className="generated-images-section">
-            <h2 className="gallery-title">Generated Images ({generatedImages.length})</h2>
-            <div className="gallery-grid">
-              {generatedImages.map((imageUrl, index) => (
-                <div key={index} className="gallery-item image-selectable">
-                  <label className="image-checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={selectedImagesForRegen.includes(index)}
-                      onChange={() => handleImageSelection(index)}
-                      className="image-checkbox"
-                    />
-                    <span className="checkbox-overlay">Select to regenerate</span>
-                  </label>
-                  <img
-                    src={imageUrl}
-                    alt={`Generated image ${index + 1}`}
-                    className="gallery-image"
-                    loading="lazy"
-                  />
-                </div>
-              ))}
-            </div>
+          <div className="generated-images-section section-container new-listing-container">
+            <h2 className="gallery-title">New Listing Photos</h2>
+            <DragDropContext onDragEnd={handleDragEnd}>
+              <Droppable droppableId="new-listing-photos" direction="horizontal">
+                {(provided) => (
+                  <div
+                    className="gallery-grid"
+                    ref={provided.innerRef}
+                    {...provided.droppableProps}
+                  >
+                    {generatedImages.map((imageUrl, index) => (
+                      <Draggable key={`img-${imageUrl}-${index}`} draggableId={`img-${imageUrl}-${index}`} index={index}>
+                        {(provided, snapshot) => (
+                          <div
+                            ref={provided.innerRef}
+                            {...provided.draggableProps}
+                            className={`gallery-item image-selectable ${snapshot.isDragging ? 'is-dragging' : ''}`}
+                          >
+                            <div className="drag-handle" {...provided.dragHandleProps} title="Drag to reorder">
+                              <span className="drag-handle-dots">&#x2630;</span>
+                            </div>
+                            <label className="image-checkbox-label">
+                              <input
+                                type="checkbox"
+                                checked={selectedImagesForRegen.includes(index)}
+                                onChange={() => handleImageSelection(index)}
+                                className="image-checkbox"
+                              />
+                              <span className="checkbox-overlay">Select to regenerate</span>
+                            </label>
+                            <div className="gallery-order-badge">{index + 1}</div>
+                            <button
+                              type="button"
+                              className="listing-photo-delete-btn"
+                              onClick={() => handleRemoveFromListing(index)}
+                              title="Remove from listing"
+                            >
+                              &times;
+                            </button>
+                            <img
+                              src={imageUrl}
+                              alt={`New listing photo ${index + 1}`}
+                              className="gallery-image"
+                              loading="lazy"
+                            />
+                          </div>
+                        )}
+                      </Draggable>
+                    ))}
+                    {provided.placeholder}
+                  </div>
+                )}
+              </Droppable>
+            </DragDropContext>
 
             <div className="prompt-section">
               <h3 className="prompt-title">Optional: Edit Images Further</h3>
@@ -1154,8 +1313,48 @@ function App() {
               <div className="listing-info-item">
                 <strong>SKU:</strong> {listingData.sku}
               </div>
-              <div className="listing-info-item">
-                <strong>Title:</strong> {listingData.inventoryItem?.product?.title || 'N/A'}
+              <div className="listing-info-item title-edit-section">
+                <div className="title-edit-header">
+                  <strong>Title:</strong>
+                  <span className={`title-char-count ${editableTitle.length > 80 ? 'over-limit' : editableTitle.length >= 73 && editableTitle.length <= 80 ? 'good' : 'under'}`}>
+                    {editableTitle.length} / 80
+                    {editableTitle.length > 80 && ` (${editableTitle.length - 80} over)`}
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  className={`title-edit-input ${editableTitle.length > 80 ? 'over-limit' : ''}`}
+                  value={editableTitle}
+                  onChange={(e) => setEditableTitle(e.target.value)}
+                  placeholder="Listing title..."
+                />
+                {editableTitle.length > 80 && (
+                  <div className="title-warning">
+                    Title exceeds 80 characters. Edit manually or use AI to trim it.
+                  </div>
+                )}
+                <div className="title-edit-actions">
+                  {editableTitle.length > 80 && (
+                    <button
+                      type="button"
+                      className="title-trim-button"
+                      onClick={handleTrimTitle}
+                      disabled={isTrimmingTitle}
+                    >
+                      {isTrimmingTitle ? 'Trimming...' : 'AI Trim Title'}
+                    </button>
+                  )}
+                  {editableTitle !== (listingData.inventoryItem?.product?.title || '') && (
+                    <button
+                      type="button"
+                      className="title-save-button"
+                      onClick={handleSaveTitle}
+                      disabled={isSavingTitle}
+                    >
+                      {isSavingTitle ? 'Saving...' : 'Save Title'}
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="listing-info-item">
                 <strong>Description:</strong>

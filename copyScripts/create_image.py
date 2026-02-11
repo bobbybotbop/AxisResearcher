@@ -637,6 +637,13 @@ def generate_image_from_urls(image_urls, image_type, custom_prompt=None, prompt_
     try:
         print(f"🤖 Calling OpenRouter Gemini 2.5 Flash Image API ({image_type.value})...")
         response = requests.post(url, headers=headers, data=json.dumps(data), timeout=60)
+        
+        # #region agent log
+        _log_path = r'c:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\.cursor\debug.log'
+        import time as _time_debug
+        with open(_log_path, 'a', encoding='utf-8') as _f: _f.write(json.dumps({"location":"create_image.py:generate_image_from_urls:api_response","message":"OpenRouter API raw response","data":{"status_code":response.status_code,"content_length":len(response.text),"response_preview":response.text[:500]},"timestamp":_time_debug.time()*1000,"hypothesisId":"B"})+'\n')
+        # #endregion
+        
         response.raise_for_status()
         
         result = response.json()
@@ -645,6 +652,10 @@ def generate_image_from_urls(image_urls, image_type, custom_prompt=None, prompt_
         
         # Extract all images from response and save them to files
         extracted_images = extract_and_save_images_from_response(result, image_type)
+        
+        # #region agent log
+        with open(_log_path, 'a', encoding='utf-8') as _f: _f.write(json.dumps({"location":"create_image.py:generate_image_from_urls:extraction","message":"Image extraction result","data":{"extracted_count":len(extracted_images) if extracted_images else 0,"extracted_is_none":extracted_images is None},"timestamp":_time_debug.time()*1000,"hypothesisId":"C"})+'\n')
+        # #endregion
         
         if not extracted_images:
             print("❌ No images found in API response")
@@ -666,6 +677,10 @@ def generate_image_from_urls(image_urls, image_type, custom_prompt=None, prompt_
             
             # Upload to eBay
             ebay_url = upload_image_bytes_to_ebay(image_bytes, mime_type, picture_name)
+            
+            # #region agent log
+            with open(_log_path, 'a', encoding='utf-8') as _f: _f.write(json.dumps({"location":"create_image.py:generate_image_from_urls:ebay_upload","message":f"eBay upload result for image {idx+1}","data":{"ebay_url":ebay_url,"upload_success":ebay_url is not None},"timestamp":_time_debug.time()*1000,"hypothesisId":"D"})+'\n')
+            # #endregion
             
             if ebay_url:
                 ebay_urls.append(ebay_url)

@@ -1,0 +1,16 @@
+You are an expert eBay SEO copywriter. The following title is too long for eBay's 80 character limit. Shorten it to strictly 73-77 characters while keeping the most important keywords and search terms.
+
+Current title ({current_length} characters):
+{current_title}
+
+Characters to trim: {chars_over}
+
+Rules:
+1. Output must be strictly 73-77 characters (verify with character count)
+2. Keep the primary product type and core keywords
+3. Remove less important modifiers, redundant synonyms, or filler words first
+4. Do NOT add new words that weren't in the original title
+5. Do NOT use ALL CAPS, emojis, or quotes
+6. Front-load the most important keywords
+
+Respond with ONLY the shortened title, nothing else.

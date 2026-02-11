@@ -442,6 +442,11 @@ def regenerate_images():
         
         print(f"[API] Regenerating {len(image_urls)} image(s) with custom prompt")
         
+        # #region agent log
+        import json as _json_debug; _log_path = r'c:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\.cursor\debug.log'
+        with open(_log_path, 'a', encoding='utf-8') as _f: _f.write(_json_debug.dumps({"location":"app.py:regenerate_images:entry","message":"Regen endpoint called","data":{"image_urls":image_urls,"prompt_length":len(prompt),"prompt_preview":prompt[:100]},"timestamp":__import__('time').time()*1000,"hypothesisId":"B"})+'\n')
+        # #endregion
+        
         generated_images = []
         errors = []
         
@@ -451,6 +456,10 @@ def regenerate_images():
             try:
                 print(f"[API] Regenerating image {idx + 1}/{len(image_urls)}...")
                 result = generate_image_from_urls([image_url], ImageType.EXPERIMENTAL, custom_prompt=prompt.strip())
+                
+                # #region agent log
+                with open(_log_path, 'a', encoding='utf-8') as _f: _f.write(_json_debug.dumps({"location":"app.py:regenerate_images:result","message":f"generate_image_from_urls result for image {idx+1}","data":{"result_type":str(type(result)),"result_value":result if result else None,"result_is_list":isinstance(result,list),"result_length":len(result) if isinstance(result,list) else 0},"timestamp":__import__('time').time()*1000,"hypothesisId":"C"})+'\n')
+                # #endregion
                 
                 if result and isinstance(result, list):
                     generated_images.extend(result)
@@ -466,6 +475,13 @@ def regenerate_images():
                 import traceback
                 traceback.print_exc()
                 errors.append(error_msg)
+                # #region agent log
+                with open(_log_path, 'a', encoding='utf-8') as _f: _f.write(_json_debug.dumps({"location":"app.py:regenerate_images:exception","message":f"Exception for image {idx+1}","data":{"error":str(e),"traceback":traceback.format_exc()},"timestamp":__import__('time').time()*1000,"hypothesisId":"C"})+'\n')
+                # #endregion
+        
+        # #region agent log
+        with open(_log_path, 'a', encoding='utf-8') as _f: _f.write(_json_debug.dumps({"location":"app.py:regenerate_images:complete","message":"Regen complete","data":{"generated_images_count":len(generated_images),"errors_count":len(errors),"errors":errors,"generated_images":generated_images},"timestamp":__import__('time').time()*1000,"hypothesisId":"A"})+'\n')
+        # #endregion
         
         print(f"[API] Regeneration complete: {len(generated_images)} images generated, {len(errors)} errors")
         
@@ -613,6 +629,150 @@ def create_listing():
             yield error_event(f"An error occurred while creating listing: {error_msg}")
 
     return streaming_response(generate())
+
+
+@app.route('/api/trim-title', methods=['POST'])
+def trim_title():
+    """
+    Use AI to shorten a listing title to within 80 characters.
+    Also updates the listing JSON file if sku is provided.
+    
+    Accepts JSON body:
+    {
+        "title": "current title text",
+        "sku": "AXIS_XX" (optional - if provided, updates the listing file)
+    }
+    
+    Returns:
+        JSON with trimmed_title
+    """
+    try:
+        print("[API] /api/trim-title endpoint called")
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "Request body must be JSON"}), 400
+
+        current_title = data.get("title", "")
+        sku = data.get("sku")
+
+        if not current_title:
+            return jsonify({"error": "title is required"}), 400
+
+        current_length = len(current_title)
+        if current_length <= 80:
+            return jsonify({"trimmed_title": current_title}), 200
+
+        chars_over = current_length - 77  # Target 77 chars
+
+        # Load the trim prompt template
+        try:
+            with open("prompts/trimTitlePrompt.txt", "r", encoding="utf-8") as f:
+                prompt_template = f.read()
+        except FileNotFoundError:
+            return jsonify({"error": "Trim prompt template not found"}), 500
+
+        prompt = prompt_template.format(
+            current_title=current_title,
+            current_length=current_length,
+            chars_over=chars_over
+        )
+
+        from main_ebay_commands import call_openrouter_llm
+        trimmed = call_openrouter_llm(prompt)
+
+        if not trimmed:
+            return jsonify({"error": "Failed to get response from AI"}), 502
+
+        # Clean up any quotes or whitespace the LLM might add
+        trimmed = trimmed.strip().strip('"').strip("'").strip()
+
+        print(f"[API] Trimmed title: '{trimmed}' ({len(trimmed)} chars)")
+
+        # Update listing file if sku provided
+        if sku:
+            try:
+                listing_data = load_listing_data(sku=sku)
+                if listing_data:
+                    update_listing_title_description(sku, {
+                        "edited_title": trimmed,
+                        "edited_description": listing_data.get("inventoryItem", {}).get("product", {}).get("description", "")
+                    })
+                    print(f"[API] Updated listing {sku} with trimmed title")
+            except Exception as e:
+                print(f"[API] Warning: Could not update listing file: {e}")
+
+        return jsonify({"trimmed_title": trimmed}), 200
+
+    except Exception as e:
+        try:
+            error_msg = str(e)
+        except UnicodeEncodeError:
+            error_msg = "An error occurred while trimming title (encoding error)"
+
+        import traceback
+        traceback.print_exc()
+
+        return jsonify({
+            "error": f"An error occurred while trimming title: {error_msg}"
+        }), 500
+
+
+@app.route('/api/update-title', methods=['POST'])
+def update_title():
+    """
+    Update just the title of an existing listing.
+    
+    Accepts JSON body:
+    {
+        "sku": "AXIS_XX",
+        "title": "new title text"
+    }
+    """
+    try:
+        print("[API] /api/update-title endpoint called")
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "Request body must be JSON"}), 400
+
+        sku = data.get("sku")
+        new_title = data.get("title", "")
+
+        if not sku:
+            return jsonify({"error": "sku is required"}), 400
+        if not new_title:
+            return jsonify({"error": "title is required"}), 400
+
+        listing_data = load_listing_data(sku=sku)
+        if not listing_data:
+            return jsonify({"error": f"Listing not found for SKU: {sku}"}), 404
+
+        current_desc = listing_data.get("inventoryItem", {}).get("product", {}).get("description", "")
+        update_listing_title_description(sku, {
+            "edited_title": new_title,
+            "edited_description": current_desc
+        })
+
+        print(f"[API] Updated title for {sku}: '{new_title}' ({len(new_title)} chars)")
+
+        # Reload to return updated data
+        updated_data = load_listing_data(sku=sku)
+        return jsonify({"listing_data": updated_data}), 200
+
+    except Exception as e:
+        try:
+            error_msg = str(e)
+        except UnicodeEncodeError:
+            error_msg = "An error occurred while updating title (encoding error)"
+
+        import traceback
+        traceback.print_exc()
+
+        return jsonify({
+            "error": f"An error occurred while updating title: {error_msg}"
+        }), 500
+
 
 @app.route('/api/listings', methods=['GET'])
 def list_all_listings():
@@ -938,6 +1098,138 @@ def api_remove_background():
 
         return jsonify({
             "error": f"An error occurred during background removal: {error_msg}"
+        }), 500
+
+
+@app.route('/api/upload-image', methods=['POST'])
+def api_upload_image():
+    """
+    Upload a PNG/JPEG image to eBay Picture Services.
+    
+    Accepts a multipart/form-data request with an 'image' file field.
+    
+    Returns:
+        JSON with the eBay-hosted image URL.
+    """
+    try:
+        file = request.files.get('image')
+        if not file:
+            return jsonify({"error": "No image file provided"}), 400
+
+        print(f"[API] /api/upload-image called with file: {file.filename}")
+        image_bytes = file.read()
+
+        if not image_bytes:
+            return jsonify({"error": "Empty image file"}), 400
+
+        import base64
+        import requests as http_requests
+        import xml.etree.ElementTree as ET
+
+        user_token = os.getenv('user_token')
+        if not user_token:
+            return jsonify({"error": "eBay user token not configured"}), 500
+
+        # Determine content type
+        content_type = file.content_type or 'image/png'
+        if 'jpeg' in content_type or 'jpg' in content_type:
+            file_ext = '.jpg'
+        elif 'png' in content_type:
+            file_ext = '.png'
+        elif 'webp' in content_type:
+            file_ext = '.webp'
+        else:
+            file_ext = '.png'
+            content_type = 'image/png'
+
+        safe_filename = f"canvas_image{file_ext}"
+        picture_name = "Canvas Compiled Image"
+
+        # Build eBay UploadSiteHostedPictures XML
+        xml_payload = f"""<?xml version="1.0" encoding="utf-8"?>
+<UploadSiteHostedPicturesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+    <RequesterCredentials>
+        <eBayAuthToken>{user_token}</eBayAuthToken>
+    </RequesterCredentials>
+    <PictureName><![CDATA[{picture_name}]]></PictureName>
+    <PictureSet>Standard</PictureSet>
+</UploadSiteHostedPicturesRequest>"""
+
+        headers = {
+            "X-EBAY-API-SITEID": "0",
+            "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+            "X-EBAY-API-CALL-NAME": "UploadSiteHostedPictures",
+            "X-EBAY-API-RESPONSE-ENCODING": "XML"
+        }
+
+        url = "https://api.ebay.com/ws/api.dll"
+
+        # Construct multipart/form-data
+        boundary = f"----FormBoundary{uuid.uuid4().hex[:16]}"
+        body_parts = []
+
+        # XML Payload part
+        body_parts.append(f"--{boundary}\r\n".encode('utf-8'))
+        body_parts.append(f'Content-Disposition: form-data; name="XML Payload"\r\n'.encode('utf-8'))
+        body_parts.append(f'\r\n'.encode('utf-8'))
+        body_parts.append(xml_payload.encode('utf-8'))
+        body_parts.append(f'\r\n'.encode('utf-8'))
+
+        # Binary image part
+        body_parts.append(f"--{boundary}\r\n".encode('utf-8'))
+        body_parts.append(f'Content-Disposition: form-data; name="{picture_name}"; filename="{safe_filename}"\r\n'.encode('utf-8'))
+        body_parts.append(f'Content-Type: {content_type}\r\n'.encode('utf-8'))
+        body_parts.append(f'\r\n'.encode('utf-8'))
+        body_parts.append(image_bytes)
+        body_parts.append(f'\r\n'.encode('utf-8'))
+
+        # Closing boundary
+        body_parts.append(f"--{boundary}--\r\n".encode('utf-8'))
+
+        multipart_body = b''.join(body_parts)
+        headers['Content-Type'] = f'multipart/form-data; boundary={boundary}'
+
+        print(f"[API] Uploading {len(image_bytes)} bytes to eBay Picture Services...")
+        resp = http_requests.post(url, data=multipart_body, headers=headers, timeout=60)
+
+        if resp.status_code != 200:
+            print(f"[API] eBay upload HTTP error: {resp.status_code}")
+            return jsonify({"error": f"eBay upload failed with status {resp.status_code}"}), 502
+
+        # Parse XML response
+        root = ET.fromstring(resp.content)
+        ack = root.find(".//{urn:ebay:apis:eBLBaseComponents}Ack")
+        if ack is not None and ack.text != "Success":
+            errors = root.findall(".//{urn:ebay:apis:eBLBaseComponents}Errors")
+            error_msgs = []
+            for error in errors:
+                short_msg = error.find(".//{urn:ebay:apis:eBLBaseComponents}ShortMessage")
+                if short_msg is not None:
+                    error_msgs.append(short_msg.text)
+            error_str = "; ".join(error_msgs) if error_msgs else "Unknown eBay error"
+            print(f"[API] eBay upload error: {error_str}")
+            return jsonify({"error": f"eBay upload failed: {error_str}"}), 502
+
+        full_url_elem = root.find(".//{urn:ebay:apis:eBLBaseComponents}FullURL")
+        if full_url_elem is not None and full_url_elem.text:
+            ebay_url = full_url_elem.text
+            print(f"[API] Image uploaded successfully: {ebay_url}")
+            return jsonify({"url": ebay_url}), 200
+        else:
+            print("[API] Could not find FullURL in eBay response")
+            return jsonify({"error": "eBay upload succeeded but no URL returned"}), 502
+
+    except Exception as e:
+        try:
+            error_msg = str(e)
+        except UnicodeEncodeError:
+            error_msg = "An error occurred during image upload (encoding error)"
+
+        import traceback
+        traceback.print_exc()
+
+        return jsonify({
+            "error": f"An error occurred during image upload: {error_msg}"
         }), 500
 
 

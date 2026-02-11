@@ -59,8 +59,8 @@ function PhotoGallery({
   };
 
   return (
-    <div className="photo-gallery">
-      <h2 className="gallery-title">Photos ({photos.length})</h2>
+    <div className="photo-gallery section-container original-photos-container">
+      <h2 className="gallery-title">Original Photos</h2>
       <div className="gallery-grid">
         {photos.map((photoUrl, index) => {
           const category = editableCategories[photoUrl];

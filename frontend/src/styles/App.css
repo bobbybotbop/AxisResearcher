@@ -347,6 +347,10 @@ body {
   margin-top: 2rem;
 }
 
+.photo-gallery.section-container {
+  padding-bottom: 1.5rem;
+}
+
 .gallery-title {
   font-size: 1.5rem;
   margin-bottom: 1.5rem;
@@ -503,6 +507,10 @@ body {
 
 .generated-images-section {
   margin-top: 2rem;
+}
+
+.generated-images-section.section-container {
+  padding-bottom: 2rem;
 }
 
 .image-selectable {
@@ -694,6 +702,127 @@ body {
   font-size: 0.9rem;
   color: #555;
   word-break: break-all;
+}
+
+/* Title Edit Section */
+.title-edit-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.title-edit-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.title-char-count {
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.2rem 0.6rem;
+  border-radius: 12px;
+}
+
+.title-char-count.good {
+  color: #059669;
+  background: #ecfdf5;
+}
+
+.title-char-count.under {
+  color: #667eea;
+  background: #eef2ff;
+}
+
+.title-char-count.over-limit {
+  color: #dc2626;
+  background: #fef2f2;
+}
+
+.title-edit-input {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  font-size: 1rem;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  font-family: inherit;
+  transition: border-color 0.2s ease;
+}
+
+.title-edit-input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.title-edit-input.over-limit {
+  border-color: #dc2626;
+  background: #fff5f5;
+}
+
+.title-edit-input.over-limit:focus {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+}
+
+.title-warning {
+  font-size: 0.85rem;
+  color: #dc2626;
+  padding: 0.5rem 0.75rem;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+}
+
+.title-edit-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.title-trim-button {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.title-trim-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(245, 158, 11, 0.4);
+}
+
+.title-trim-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.title-save-button {
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: white;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.title-save-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(16, 185, 129, 0.4);
+}
+
+.title-save-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .upload-section {
@@ -1372,6 +1501,21 @@ body {
   border-radius: 10px;
 }
 
+/* Original Listing Photos in Editor */
+.canvas-originals-section {
+  background: #eef2ff;
+  border-color: #c7d2fe;
+}
+
+.canvas-btn-add-originals {
+  background: linear-gradient(135deg, #8b5cf6, #7c3aed) !important;
+}
+
+.canvas-btn-add-originals:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .canvas-pool-header {
   display: flex;
   justify-content: space-between;
@@ -1532,6 +1676,163 @@ body {
   padding: 1.5rem;
   color: #999;
   font-size: 0.9rem;
+}
+
+/* Section Containers */
+.section-container {
+  background: #f8f9fc;
+  border: 1px solid #e2e5f1;
+  border-radius: 16px;
+  padding: 1.5rem;
+  margin-top: 2rem;
+}
+
+.original-photos-container {
+  background: #f8f9fc;
+}
+
+.new-listing-container {
+  background: #f5faf7;
+  border-color: #d4e8dc;
+}
+
+.section-container .gallery-title {
+  margin-bottom: 1.25rem;
+}
+
+/* Collapsible Image Editor Panel */
+.editor-collapsible-panel {
+  margin-top: 1.5rem;
+  border: 1px solid #e2e5f1;
+  border-radius: 12px;
+  background: white;
+  overflow: hidden;
+}
+
+.editor-toggle-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #333;
+  background: #fafbfe;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.editor-toggle-button:hover {
+  background: #f0f2fa;
+}
+
+.editor-chevron {
+  display: inline-block;
+  font-size: 0.8rem;
+  color: #667eea;
+  transition: transform 0.25s ease;
+}
+
+.editor-chevron.open {
+  transform: rotate(90deg);
+}
+
+.editor-panel-body {
+  padding: 0 1.25rem 1.25rem;
+  border-top: 1px solid #eee;
+}
+
+/* Drag Handle */
+.drag-handle {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  z-index: 11;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 6px;
+  cursor: grab;
+  transition: background 0.15s ease;
+}
+
+.drag-handle:hover {
+  background: rgba(0, 0, 0, 0.65);
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+.drag-handle-dots {
+  color: white;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+/* Order Badge (top-left number) */
+.gallery-order-badge {
+  position: absolute;
+  bottom: 2rem;
+  right: 0.5rem;
+  z-index: 9;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(102, 126, 234, 0.9);
+  color: white;
+  font-size: 0.8rem;
+  font-weight: 700;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Delete button on listing photos */
+.listing-photo-delete-btn {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  z-index: 10;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(220, 38, 38, 0.85);
+  color: white;
+  font-size: 1.1rem;
+  font-weight: 700;
+  line-height: 1;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease;
+  padding: 0;
+}
+
+.gallery-item:hover .listing-photo-delete-btn {
+  opacity: 1;
+}
+
+.listing-photo-delete-btn:hover {
+  background: rgba(185, 28, 28, 1);
+  transform: scale(1.15);
+}
+
+/* Dragging State */
+.gallery-item.is-dragging {
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.25);
+  transform: scale(1.05);
+  z-index: 999;
+  opacity: 0.92;
 }
 
 /* Responsive */
