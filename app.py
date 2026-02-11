@@ -28,6 +28,7 @@ import uuid
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from copyScripts.create_text import create_text
+from copyScripts.imageEditing import remove_background, compile_images
 from copyScripts.upload_to_ebay import upload_complete_listing
 
 app = Flask(__name__)
@@ -903,6 +904,103 @@ def run_testing_function():
             "error": f"An error occurred while running testing function: {error_msg}",
             "result": None
         }), 500
+
+@app.route('/api/remove-background', methods=['POST'])
+def api_remove_background():
+    """
+    Remove the background from an uploaded image using rembg.
+    
+    Accepts a multipart/form-data request with an 'image' file field.
+    
+    Returns:
+        PNG image with background removed (transparent).
+    """
+    try:
+        file = request.files.get('image')
+        if not file:
+            return jsonify({"error": "No image file provided"}), 400
+
+        print(f"[API] /api/remove-background called with file: {file.filename}")
+        image_bytes = file.read()
+        result_bytes = remove_background(image_bytes)
+        print("[API] Background removal completed successfully")
+
+        return Response(result_bytes, mimetype='image/png')
+
+    except Exception as e:
+        try:
+            error_msg = str(e)
+        except UnicodeEncodeError:
+            error_msg = "An error occurred during background removal (encoding error)"
+
+        import traceback
+        traceback.print_exc()
+
+        return jsonify({
+            "error": f"An error occurred during background removal: {error_msg}"
+        }), 500
+
+
+@app.route('/api/compile-canvas', methods=['POST'])
+def api_compile_canvas():
+    """
+    Compile multiple images onto a canvas with transforms.
+    
+    Accepts JSON body:
+    {
+        "layers": [
+            {
+                "image_base64": "base64-encoded image data",
+                "left": 0,
+                "top": 0,
+                "scaleX": 1,
+                "scaleY": 1,
+                "angle": 0
+            }
+        ],
+        "canvasWidth": 1080,
+        "canvasHeight": 1080,
+        "bgColor": "#FFFFFF"
+    }
+    
+    Returns:
+        PNG image of the composed canvas.
+    """
+    try:
+        data = request.get_json()
+        if not data or 'layers' not in data:
+            return jsonify({"error": "No layers provided"}), 400
+
+        print(f"[API] /api/compile-canvas called with {len(data['layers'])} layers")
+
+        layers = data['layers']
+        canvas_width = data.get('canvasWidth', 1080)
+        canvas_height = data.get('canvasHeight', 1080)
+        bg_color = data.get('bgColor', '#FFFFFF')
+
+        result_bytes = compile_images(
+            layers=layers,
+            canvas_width=canvas_width,
+            canvas_height=canvas_height,
+            bg_color=bg_color
+        )
+
+        print("[API] Canvas compilation completed successfully")
+        return Response(result_bytes, mimetype='image/png')
+
+    except Exception as e:
+        try:
+            error_msg = str(e)
+        except UnicodeEncodeError:
+            error_msg = "An error occurred during canvas compilation (encoding error)"
+
+        import traceback
+        traceback.print_exc()
+
+        return jsonify({
+            "error": f"An error occurred during canvas compilation: {error_msg}"
+        }), 500
+
 
 @app.route('/api/health', methods=['GET'])
 def health_check():

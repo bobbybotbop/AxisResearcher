@@ -3,6 +3,7 @@ import PhotoGallery from './components/PhotoGallery'
 import Lightbox from './components/Lightbox'
 import ListingDetails from './components/ListingDetails'
 import ProgressIndicator from './components/ProgressIndicator'
+import ImageCanvas from './components/ImageCanvas'
 import './styles/App.css'
 
 /**
@@ -988,6 +989,8 @@ function App() {
                 </div>
               )}
             </div>
+
+            <ImageCanvas />
           </div>
         )}
 
