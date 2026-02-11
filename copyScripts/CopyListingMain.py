@@ -123,7 +123,8 @@ def copy_listing_main(id):
                 "currency": listing.get('price', {}).get('currency', 'USD'),
                 "itemCreationDate": listing.get('itemCreationDate', 'N/A'),
                 "categoryId": listing.get('categoryId', 'N/A'),
-                "estimatedSoldQuantity": listing.get('estimatedAvailabilities', [{}])[0].get('estimatedSoldQuantity') if listing.get('estimatedAvailabilities') else None
+                "estimatedSoldQuantity": listing.get('estimatedAvailabilities', [{}])[0].get('estimatedSoldQuantity') if listing.get('estimatedAvailabilities') else None,
+                "localizedAspects": listing.get('localizedAspects', [])  # Include aspects from original listing
             }
         }
     else:
@@ -134,117 +135,155 @@ def copy_listing_main(id):
 def testing_function(id=None):
     """
     Testing function for development and debugging.
-    Add your test code here.
+    Tests update_listing_with_aspects() function with an eBay listing ID or URL.
     
     Args:
-        id (str, optional): ID parameter for testing
+        id (str, optional): eBay listing ID or URL
     
     Returns:
-        Any: Result of testing function
+        dict: Result of testing update_listing_with_aspects function
     """
     from main_ebay_commands import single_get_detailed_item_data
+    from copyScripts.combine_data import (
+        get_next_sku, create_listing_with_preferences, update_listing_with_aspects,
+        load_listing_data, DEFAULT_QUANTITY, DEFAULT_WEIGHT, DEFAULT_DIMESIONS,
+        MERCHANT_LOCATION_KEY, get_listing_policies
+    )
     
     if not id:
-        return {"error": "No ID provided"}
+        return {"error": "No eBay listing ID or URL provided"}
     
     # Handle URL parsing if needed
+    item_id = id
     if id and (id[0] == 'h' or id[0] == 'e'):
-        id = id.split('/itm/')[1].split('?')[0]
+        item_id = id.split('/itm/')[1].split('?')[0]
 
+    print(f"🔍 Testing update_listing_with_aspects() with eBay listing ID: {item_id}")
+    
     # Get listing data from eBay API
-    listing = single_get_detailed_item_data(id, verbose=True)
+    listing = single_get_detailed_item_data(item_id, verbose=True)
 
-    if listing:
-        # Extract image URLs
-        image_urls = [
-            url for url in 
-            [listing.get("image", {}).get("imageUrl")] + 
-            [img.get("imageUrl") for img in listing.get("additionalImages", []) if isinstance(img, dict)]
-            if url
-        ]
-        
-        # Extract title and description
-        title = listing.get('title', '')
-        description = remove_html_tags(listing.get('description', 'No description available'))
-        
-        # Extract price and category
-        price_value = listing.get('price', {}).get('value', '0')
-        category_id = listing.get('categoryId', '')
-        
-        # Get quantity (if available, otherwise use default)
-        estimated_availabilities = listing.get('estimatedAvailabilities', [])
-        quantity = estimated_availabilities[0].get('estimatedSoldQuantity') if estimated_availabilities else 1
-        
-        # Create inventory item data structure
-        from copyScripts.combine_data import (
-            DEFAULT_QUANTITY, DEFAULT_WEIGHT, DEFAULT_DIMESIONS,
-            MERCHANT_LOCATION_KEY, get_listing_policies
-        )
-        
-        inventory_item_data = {
-            "availability": {
-                "shipToLocationAvailability": {
-                    "quantity": DEFAULT_QUANTITY
-                }
-            },
-            "condition": "NEW",  # Default to NEW, can be updated based on listing condition
-            "packageWeightAndSize": {
-                "weight": DEFAULT_WEIGHT,
-                "dimensions": DEFAULT_DIMESIONS
-            },
-            "product": {
-                "title": title,
-                "description": description,
-                "aspects": {},  # Can be populated from listing.get('localizedAspects', [])
-                "imageUrls": image_urls
+    if not listing:
+        return {"error": "Failed to fetch listing data from eBay"}
+    
+    # Extract data from eBay listing
+    title = listing.get('title', '')
+    description = remove_html_tags(listing.get('description', 'No description available'))
+    price_value = listing.get('price', {}).get('value', '0')
+    category_id = listing.get('categoryId', '')
+    localized_aspects = listing.get('localizedAspects', [])
+    
+    image_urls = [
+        url for url in 
+        [listing.get("image", {}).get("imageUrl")] + 
+        [img.get("imageUrl") for img in listing.get("additionalImages", []) if isinstance(img, dict)]
+        if url
+    ]
+    
+    print(f"📋 eBay Listing Info:")
+    print(f"   Title: {title}")
+    print(f"   Category ID: {category_id}")
+    print(f"   Price: ${price_value}")
+    print(f"   Found {len(localized_aspects)} localized aspects from eBay listing")
+    
+    if localized_aspects:
+        print(f"   Localized aspects:")
+        for aspect in localized_aspects:
+            aspect_name = aspect.get('name', 'N/A')
+            aspect_value = aspect.get('value', 'N/A')
+            print(f"     - {aspect_name}: {aspect_value}")
+    
+    # Create a test listing file
+    sku = get_next_sku()
+    print(f"\n📝 Creating test listing file with SKU: {sku}")
+    
+    inventory_item_data = {
+        "availability": {
+            "shipToLocationAvailability": {
+                "quantity": DEFAULT_QUANTITY
             }
+        },
+        "condition": "NEW",
+        "packageWeightAndSize": {
+            "weight": DEFAULT_WEIGHT,
+            "dimensions": DEFAULT_DIMESIONS
+        },
+        "product": {
+            "title": title,
+            "description": description,
+            "aspects": {},
+            "imageUrls": image_urls
         }
-        
-        # Create offer data structure
-        offer_data = {
-            "marketplaceId": "EBAY_US",
-            "format": "FIXED_PRICE",
-            "quantity": DEFAULT_QUANTITY,
-            "pricingSummary": {
-                "price": {
-                    "value": str(price_value),
-                    "currency": listing.get('price', {}).get('currency', 'USD')
-                }
-            },
-            "listingDuration": "GTC",
-            "categoryId": str(category_id),
-            "merchantLocationKey": MERCHANT_LOCATION_KEY
-        }
-        
-        # Add listing policies if available
-        policies = get_listing_policies()
-        if policies:
-            offer_data["listingPolicies"] = policies
-        
-        # Create listing JSON file
-        from copyScripts.combine_data import get_next_sku, create_listing_with_preferences
-        
-        sku = get_next_sku()
-        create_listing_with_preferences(
-            sku=sku,
-            inventory_item_data=inventory_item_data,
-            offer_data=offer_data
-        )
-        
-        # Return formatted data
-        result = {
+    }
+    
+    offer_data = {
+        "marketplaceId": "EBAY_US",
+        "format": "FIXED_PRICE",
+        "quantity": DEFAULT_QUANTITY,
+        "pricingSummary": {
+            "price": {
+                "value": str(price_value),
+                "currency": listing.get('price', {}).get('currency', 'USD')
+            }
+        },
+        "listingDuration": "GTC",
+        "categoryId": str(category_id),
+        "merchantLocationKey": MERCHANT_LOCATION_KEY
+    }
+    
+    policies = get_listing_policies()
+    if policies:
+        offer_data["listingPolicies"] = policies
+    
+    create_listing_with_preferences(
+        sku=sku,
+        inventory_item_data=inventory_item_data,
+        offer_data=offer_data
+    )
+    
+    print(f"✅ Created listing file: {sku}.json")
+    
+    # Load listing before updating aspects
+    listing_before = load_listing_data(sku=sku)
+    aspects_before = listing_before.get('inventoryItem', {}).get('product', {}).get('aspects', {}) if listing_before else {}
+    
+    print(f"\n🔧 Before update_listing_with_aspects():")
+    print(f"   Aspects: {aspects_before}")
+    
+    # Test update_listing_with_aspects()
+    print(f"\n🔄 Calling update_listing_with_aspects(sku='{sku}', localizedAspects={len(localized_aspects)} aspects)...")
+    success = update_listing_with_aspects(sku, localized_aspects)
+    
+    if not success:
+        return {
+            "error": "update_listing_with_aspects() returned False",
             "sku": sku,
-            "inventoryItem": inventory_item_data,
-            "offer": offer_data,
-            "message": f"Successfully formatted listing data and saved to Generated_Listings/{sku}.json"
+            "localized_aspects_count": len(localized_aspects),
+            "category_id": category_id
         }
-        
-        print(f"✅ Formatted listing data for SKU: {sku}")
-        print(f"   Title: {title}")
-        print(f"   Price: ${price_value}")
-        print(f"   Category: {category_id}")
-        print(f"   Images: {len(image_urls)}")
-        
-        return result
-    else:
-        return {"error": "Failed to fetch listing data"}
+    
+    # Load listing after updating aspects
+    listing_after = load_listing_data(sku=sku)
+    aspects_after = listing_after.get('inventoryItem', {}).get('product', {}).get('aspects', {}) if listing_after else {}
+    
+    print(f"\n✅ After update_listing_with_aspects():")
+    print(f"   Aspects: {aspects_after}")
+    
+    # Return detailed result
+    result = {
+        "success": True,
+        "sku": sku,
+        "ebay_listing_id": item_id,
+        "category_id": category_id,
+        "localized_aspects_from_ebay": localized_aspects,
+        "localized_aspects_count": len(localized_aspects),
+        "aspects_before": aspects_before,
+        "aspects_after": aspects_after,
+        "aspects_added": {
+            key: value for key, value in aspects_after.items() 
+            if key not in aspects_before or aspects_before[key] != value
+        },
+        "message": f"Successfully tested update_listing_with_aspects() for SKU {sku}"
+    }
+    
+    return result

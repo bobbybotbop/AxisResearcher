@@ -7,6 +7,10 @@ function PhotoGallery({
   onPhotoClick,
   skippedPhotos = new Set(),
   onSkipPhoto,
+  useOriginalPhotos = new Set(),
+  onUseOriginalPhoto,
+  promptModifier = '',
+  onPromptModifierChange,
 }) {
   if (!photos || photos.length === 0) {
     return null;
@@ -47,6 +51,13 @@ function PhotoGallery({
     }
   };
 
+  const handleUseOriginalClick = (e, photoUrl) => {
+    e.stopPropagation(); // Prevent triggering photo click
+    if (onUseOriginalPhoto) {
+      onUseOriginalPhoto(photoUrl);
+    }
+  };
+
   return (
     <div className="photo-gallery">
       <h2 className="gallery-title">Photos ({photos.length})</h2>
@@ -54,10 +65,11 @@ function PhotoGallery({
         {photos.map((photoUrl, index) => {
           const category = editableCategories[photoUrl];
           const isSkipped = skippedPhotos.has(photoUrl);
+          const isUseOriginal = useOriginalPhotos.has(photoUrl);
           return (
             <div
               key={index}
-              className={`gallery-item ${isSkipped ? 'skipped' : ''}`}
+              className={`gallery-item ${isSkipped ? 'skipped' : ''} ${isUseOriginal ? 'use-original' : ''}`}
               onClick={() => onPhotoClick && onPhotoClick(index)}
               style={{
                 opacity: isSkipped ? 0.5 : 1,
@@ -92,6 +104,34 @@ function PhotoGallery({
                   {isSkipped ? '✓' : '×'}
                 </button>
               )}
+              {onUseOriginalPhoto && !isSkipped && (
+                <button
+                  className="use-original-button"
+                  onClick={(e) => handleUseOriginalClick(e, photoUrl)}
+                  style={{
+                    position: 'absolute',
+                    top: '5px',
+                    left: '5px',
+                    background: isUseOriginal ? '#2196F3' : 'rgba(0,0,0,0.4)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '50%',
+                    width: '30px',
+                    height: '30px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 'bold',
+                    zIndex: 10,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                  }}
+                  title={isUseOriginal ? 'Edit with AI' : 'Use original (no AI edit)'}
+                >
+                  {isUseOriginal ? '✓' : 'O'}
+                </button>
+              )}
               <img
                 src={photoUrl}
                 alt={`Photo ${index + 1}`}
@@ -121,6 +161,23 @@ function PhotoGallery({
                   SKIPPED
                 </div>
               )}
+              {isUseOriginal && !isSkipped && (
+                <div style={{
+                  position: 'absolute',
+                  bottom: '35px',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  background: 'rgba(33, 150, 243, 0.9)',
+                  color: 'white',
+                  padding: '3px 8px',
+                  borderRadius: '4px',
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  zIndex: 5
+                }}>
+                  USE ORIGINAL
+                </div>
+              )}
               <div className={`gallery-category ${getCategoryClass(category)}`}>
                 <select
                   className="category-select"
@@ -141,6 +198,35 @@ function PhotoGallery({
           );
         })}
       </div>
+      {onPromptModifierChange && (
+        <div className="prompt-modifier-section" style={{ margin: '15px 0' }}>
+          <label htmlFor="prompt-modifier" style={{ display: 'block', marginBottom: '6px', fontWeight: '600', fontSize: '14px' }}>
+            Prompt Modifier (optional)
+          </label>
+          <p style={{ margin: '0 0 8px 0', fontSize: '13px', color: '#666' }}>
+            Add instructions that apply to every generated image (e.g., "change the blue plastic to black")
+          </p>
+          <textarea
+            id="prompt-modifier"
+            className="prompt-modifier-input"
+            value={promptModifier}
+            onChange={(e) => onPromptModifierChange(e.target.value)}
+            placeholder="e.g., change the color of the blue plastic to black instead"
+            rows={2}
+            disabled={isConfirming}
+            style={{
+              width: '100%',
+              padding: '10px',
+              borderRadius: '6px',
+              border: '1px solid #ccc',
+              fontSize: '14px',
+              resize: 'vertical',
+              boxSizing: 'border-box',
+              fontFamily: 'inherit'
+            }}
+          />
+        </div>
+      )}
       <div className="gallery-actions">
         <button
           type="button"

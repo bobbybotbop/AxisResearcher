@@ -534,7 +534,7 @@ def upload_image_bytes_to_ebay(image_bytes, mime_type, picture_name="Uploaded Im
         return None
 
 
-def generate_image_from_urls(image_urls, image_type, custom_prompt=None):
+def generate_image_from_urls(image_urls, image_type, custom_prompt=None, prompt_modifier=None):
     """
     Generate an image using OpenRouter's Gemini 2.5 Flash Image API from input image URLs.
     Extracts images from response, saves them to files, uploads to eBay, and returns eBay URLs.
@@ -543,6 +543,7 @@ def generate_image_from_urls(image_urls, image_type, custom_prompt=None):
         image_urls (list[str]): Array of image URLs to use as input
         image_type (ImageType): Enum value indicating PROFESSIONAL, REAL_WORLD, or EXPERIMENTAL
         custom_prompt (str, optional): Custom prompt text to use instead of default prompt file
+        prompt_modifier (str, optional): Additional text to append to the prompt (e.g., "change blue plastic to black")
     
     Returns:
         list[str]: Array of eBay image URLs, or None on failure
@@ -592,6 +593,11 @@ def generate_image_from_urls(image_urls, image_type, custom_prompt=None):
             import traceback
             traceback.print_exc()
             return None
+    
+    # Append prompt modifier if provided
+    if prompt_modifier and isinstance(prompt_modifier, str) and prompt_modifier.strip():
+        prompt_text = prompt_text + "\n\nAdditional instructions: " + prompt_modifier.strip()
+        print(f"📝 Appended prompt modifier: {prompt_modifier.strip()}")
     
     # Construct the content array for the API request
     content = [

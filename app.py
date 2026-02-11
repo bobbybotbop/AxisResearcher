@@ -13,11 +13,12 @@ if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response, stream_with_context
 from flask_cors import CORS
 from copyScripts.CopyListingMain import copy_listing_main, testing_function
-from copyScripts.create_image import generate_image_from_urls, ImageType
+from copyScripts.create_image import generate_image_from_urls, ImageType, categorize_images
 from copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects
+from helper_functions import remove_html_tags
 import os
 import json
 import os
@@ -38,51 +39,107 @@ CORS(app, origins=["http://localhost:3000", "http://localhost:5173", "http://loc
 image_generation_tasks = {}
 image_generation_lock = threading.Lock()
 
+# --- Streaming progress helpers (NDJSON) ---
+def progress_event(step, status):
+    """Send a progress event as an NDJSON line."""
+    return json.dumps({"type": "progress", "step": step, "status": status}) + "\n"
+
+def result_event(data):
+    """Send a final result event as an NDJSON line."""
+    return json.dumps({"type": "result", "data": data}) + "\n"
+
+def error_event(error_msg):
+    """Send an error event as an NDJSON line."""
+    return json.dumps({"type": "error", "error": error_msg}) + "\n"
+
+def streaming_response(generator):
+    """Wrap a generator in a streaming Flask Response with proper headers."""
+    return Response(
+        stream_with_context(generator),
+        mimetype='application/x-ndjson',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no'
+        }
+    )
+
 @app.route('/api/photos/<path:listing_id>', methods=['GET'])
 def get_listing_photos(listing_id):
     """
     Fetch photos and listing details for a given eBay listing ID or URL.
-    
-    Args:
-        listing_id: eBay item ID or full URL
-        
-    Returns:
-        JSON response with photos array and listing details, or error message
+    Streams real-time progress events as NDJSON so the frontend can show accurate status.
     """
-    try:
-        result = copy_listing_main(listing_id)
-        
-        if result is None:
-            return jsonify({
-                "error": "Failed to fetch listing data. The listing may not exist or the ID is invalid.",
-                "photos": [],
-                "categories": {},
-                "listing": None,
-                "sku": None
-            }), 404
-        
-        return jsonify({
-            "photos": result.get("photos", []),
-            "categories": result.get("categories", {}),
-            "listing": result.get("listing", {}),
-            "sku": result.get("sku"),  # Return SKU so frontend can track it
-            "error": None
-        }), 200
-        
-    except Exception as e:
-        # Safely convert exception to string, handling encoding issues
+    def generate():
         try:
-            error_msg = str(e)
-        except UnicodeEncodeError:
-            error_msg = "An error occurred while fetching listing data (encoding error)"
-        
-        return jsonify({
-            "error": f"An error occurred while fetching listing data: {error_msg}",
-            "photos": [],
-            "categories": {},
-            "listing": None,
-            "sku": None
-        }), 500
+            from main_ebay_commands import single_get_detailed_item_data
+
+            # Parse ID from URL if needed
+            item_id = listing_id
+            if item_id and (item_id[0] == 'h' or item_id[0] == 'e'):
+                item_id = item_id.split('/itm/')[1].split('?')[0]
+
+            # Step 1: Fetch listing from eBay
+            yield progress_event('Fetching listing from eBay', 'in_progress')
+            listing = single_get_detailed_item_data(item_id, verbose=True)
+
+            if not listing:
+                yield error_event("Failed to fetch listing data. The listing may not exist or the ID is invalid.")
+                return
+
+            yield progress_event('Fetching listing from eBay', 'completed')
+
+            # Step 2: Create initial JSON file
+            yield progress_event('Creating initial JSON file', 'in_progress')
+            new_sku = create_listing_with_preferences()
+            yield progress_event('Creating initial JSON file', 'completed')
+
+            # Extract photo URLs
+            old_photo_list = [
+                url for url in
+                [listing.get("image", {}).get("imageUrl")] +
+                [img.get("imageUrl") for img in listing.get("additionalImages", []) if isinstance(img, dict)]
+                if url
+            ]
+            print(f"Found {len(old_photo_list)} photo(s): {old_photo_list}")
+
+            # Step 3: Categorize images
+            yield progress_event('Categorizing images', 'in_progress')
+            categories = {}
+            if old_photo_list:
+                print("Categorizing images...")
+                categories = categorize_images(old_photo_list)
+                if categories is None:
+                    categories = {}
+            yield progress_event('Categorizing images', 'completed')
+
+            # Send final result
+            result = {
+                "sku": new_sku,
+                "photos": old_photo_list,
+                "categories": categories,
+                "listing": {
+                    "itemId": listing.get('itemId', 'N/A'),
+                    "title": listing.get('title', 'N/A'),
+                    "description": remove_html_tags(listing.get('description', 'No description available')),
+                    "price": listing.get('price', {}).get('value', 'N/A'),
+                    "currency": listing.get('price', {}).get('currency', 'USD'),
+                    "itemCreationDate": listing.get('itemCreationDate', 'N/A'),
+                    "categoryId": listing.get('categoryId', 'N/A'),
+                    "estimatedSoldQuantity": listing.get('estimatedAvailabilities', [{}])[0].get('estimatedSoldQuantity') if listing.get('estimatedAvailabilities') else None,
+                    "localizedAspects": listing.get('localizedAspects', [])
+                },
+                "error": None
+            }
+            yield result_event(result)
+
+        except Exception as e:
+            try:
+                error_msg = str(e)
+            except UnicodeEncodeError:
+                error_msg = "An error occurred while fetching listing data (encoding error)"
+            yield error_event(f"An error occurred while fetching listing data: {error_msg}")
+
+    return streaming_response(generate())
 
 @app.route('/api/generate-images-status/<task_id>', methods=['GET'])
 def get_generation_status(task_id):
@@ -123,7 +180,7 @@ def get_generation_status(task_id):
             "status": None
         }), 500
 
-def generate_image_with_delay(photo_url, image_type, index, delay_ms=500, task_id=None):
+def generate_image_with_delay(photo_url, image_type, index, delay_ms=500, task_id=None, prompt_modifier=None):
     """
     Generate image with rate limiting delay. Used for parallel execution.
     
@@ -133,6 +190,7 @@ def generate_image_with_delay(photo_url, image_type, index, delay_ms=500, task_i
         index: Index of this image (for ordering and delay calculation)
         delay_ms: Delay in milliseconds before starting generation
         task_id: Task ID for progress tracking
+        prompt_modifier: Optional additional text to append to each image's prompt
     
     Returns:
         tuple: (index, photo_url, result, error)
@@ -150,7 +208,7 @@ def generate_image_with_delay(photo_url, image_type, index, delay_ms=500, task_i
         print(f"[API] Starting generation for image {index + 1} (photo: {photo_url[:50]}...)")
         
         # Generate image
-        result = generate_image_from_urls([photo_url], image_type)
+        result = generate_image_from_urls([photo_url], image_type, prompt_modifier=prompt_modifier)
         
         # Update progress: completed
         if task_id:
@@ -209,8 +267,11 @@ def generate_images():
         
         photos = data.get("photos", [])
         categories = data.get("categories", {})
+        prompt_modifier = data.get("prompt_modifier", "")
         
         print(f"[API] Processing {len(photos)} photos with {len(categories)} categories")
+        if prompt_modifier:
+            print(f"[API] Prompt modifier: {prompt_modifier}")
         
         if not photos or not isinstance(photos, list):
             print("[API] Error: Invalid photos array")
@@ -284,7 +345,8 @@ def generate_images():
                     for idx, photo_url, image_type in tasks_to_generate:
                         future = executor.submit(
                             generate_image_with_delay,
-                            photo_url, image_type, idx, delay_ms=500, task_id=task_id
+                            photo_url, image_type, idx, delay_ms=500, task_id=task_id,
+                            prompt_modifier=prompt_modifier if prompt_modifier else None
                         )
                         futures[future] = (idx, photo_url)
                     
@@ -431,137 +493,125 @@ def regenerate_images():
 def create_listing():
     """
     Update an existing listing JSON file with generated images, generate optimized text, and update listing.
-    
-    Accepts JSON body:
-    {
-        "sku": "AXIS_5",  # Required: SKU of the listing to update
-        "generated_images": ["url1", "url2", ...],
-        "listing": {
-            "title": "...",
-            "description": "...",
-            "price": "...",
-            "categoryId": "...",
-            ...
-        }
-    }
-    
-    Returns:
-        JSON response with complete listing data, or error message
+    Streams real-time progress events as NDJSON so the frontend can show accurate status.
     """
-    try:
-        print("[API] /api/create-listing endpoint called")
-        data = request.get_json()
-        
-        if not data:
-            return jsonify({
-                "error": "Request body must be JSON",
-                "listing_data": None
-            }), 400
-        
-        generated_images = data.get("generated_images", [])
-        listing = data.get("listing", {})
-        sku = data.get("sku")  # Get SKU from request
-        
-        if not generated_images or not isinstance(generated_images, list):
-            return jsonify({
-                "error": "generated_images must be a non-empty array",
-                "listing_data": None
-            }), 400
-        
-        if not listing:
-            return jsonify({
-                "error": "listing data is required",
-                "listing_data": None
-            }), 400
-        
-        if not sku:
-            return jsonify({
-                "error": "sku is required in request body",
-                "listing_data": None
-            }), 400
-        
-        print(f"[API] Updating listing with {len(generated_images)} image(s)")
-        print(f"[API] Using SKU: {sku}")
-        
-        # Check if file exists, if not create it (backward compatibility)
-        from copyScripts.combine_data import listing_file_exists
-        if not listing_file_exists(sku):
-            print(f"[API] File doesn't exist for SKU {sku}, creating it...")
-            create_listing_with_preferences(sku=sku)
-            print(f"[API] Created listing JSON file for SKU: {sku}")
-        else:
-            print(f"[API] File exists for SKU {sku}, updating existing file")
-        
-        # Add images to listing
-        update_listing_images(sku, generated_images)
-        print(f"[API] Added {len(generated_images)} image(s) to listing")
-        
-        # Generate optimized text
-        old_title = listing.get("title", "")
-        old_description = listing.get("description", "")
-        
-        if old_title and old_description:
-            print(f"[API] Generating optimized text...")
-            optimized_content = create_text(old_title, old_description)
-            
-            if optimized_content:
-                update_listing_title_description(sku, optimized_content)
-                print(f"[API] Updated listing with optimized text")
-            else:
-                print(f"[API] Warning: Failed to generate optimized text, using original")
-                # Use original text if optimization fails
-                optimized_content = {
-                    "edited_title": old_title,
-                    "edited_description": old_description
-                }
-                update_listing_title_description(sku, optimized_content)
-        else:
-            print(f"[API] Warning: No title/description provided, skipping text generation")
-        
-        # Update metadata (price and category)
-        price = listing.get("price", "0")
-        category_id = listing.get("categoryId", "")
-        
-        if price and category_id:
-            update_listing_meta_data(sku, str(price), str(category_id))
-            print(f"[API] Updated listing metadata: price={price}, categoryId={category_id}")
-        
-        # Update aspects (get localized aspects from original listing if available)
-        localized_aspects = listing.get("localizedAspects")
-        if localized_aspects is None:
-            localized_aspects = []
-        update_listing_with_aspects(sku, localized_aspects)
-        print(f"[API] Updated listing with aspects")
-        
-        # Load and return the complete listing data
-        listing_data = load_listing_data(sku=sku)
-        
-        if not listing_data:
-            return jsonify({
-                "error": "Failed to load created listing data",
-                "listing_data": None
-            }), 500
-        
-        print(f"[API] Successfully created listing: {sku}")
-        
-        return jsonify({
-            "listing_data": listing_data,
-            "error": None
-        }), 200
-        
-    except Exception as e:
+    # Parse request body before streaming (can't access request inside generator after response starts)
+    data = request.get_json()
+
+    def generate():
         try:
-            error_msg = str(e)
-        except UnicodeEncodeError:
-            error_msg = "An error occurred while creating listing (encoding error)"
-        
-        import traceback
-        traceback.print_exc()
-        
-        return jsonify({
-            "error": f"An error occurred while creating listing: {error_msg}",
-            "listing_data": None
-        }), 500
+            print("[API] /api/create-listing endpoint called")
+
+            if not data:
+                yield error_event("Request body must be JSON")
+                return
+
+            generated_images = data.get("generated_images", [])
+            listing = data.get("listing", {})
+            sku = data.get("sku")
+
+            if not generated_images or not isinstance(generated_images, list):
+                yield error_event("generated_images must be a non-empty array")
+                return
+            if not listing:
+                yield error_event("listing data is required")
+                return
+            if not sku:
+                yield error_event("sku is required in request body")
+                return
+
+            print(f"[API] Updating listing with {len(generated_images)} image(s)")
+            print(f"[API] Using SKU: {sku}")
+
+            # Step 1: Updating images
+            yield progress_event('Updating images', 'in_progress')
+
+            from copyScripts.combine_data import listing_file_exists
+            if not listing_file_exists(sku):
+                print(f"[API] File doesn't exist for SKU {sku}, creating it...")
+                create_listing_with_preferences(sku=sku)
+                print(f"[API] Created listing JSON file for SKU: {sku}")
+            else:
+                print(f"[API] File exists for SKU {sku}, updating existing file")
+
+            update_listing_images(sku, generated_images)
+            print(f"[API] Added {len(generated_images)} image(s) to listing")
+            yield progress_event('Updating images', 'completed')
+
+            # Step 2: Generating optimized text
+            yield progress_event('Generating optimized text', 'in_progress')
+
+            old_title = listing.get("title", "")
+            old_description = listing.get("description", "")
+
+            if old_title and old_description:
+                print(f"[API] Generating optimized text...")
+                optimized_content = create_text(old_title, old_description)
+
+                if optimized_content:
+                    update_listing_title_description(sku, optimized_content)
+                    print(f"[API] Updated listing with optimized text")
+                else:
+                    print(f"[API] Warning: Failed to generate optimized text, using original")
+                    optimized_content = {
+                        "edited_title": old_title,
+                        "edited_description": old_description
+                    }
+                    update_listing_title_description(sku, optimized_content)
+            else:
+                print(f"[API] Warning: No title/description provided, skipping text generation")
+
+            yield progress_event('Generating optimized text', 'completed')
+
+            # Step 3: Updating metadata
+            yield progress_event('Updating metadata', 'in_progress')
+
+            price = listing.get("price", "0")
+            category_id = listing.get("categoryId", "")
+
+            if price and category_id:
+                update_listing_meta_data(sku, str(price), str(category_id))
+                print(f"[API] Updated listing metadata: price={price}, categoryId={category_id}")
+
+            yield progress_event('Updating metadata', 'completed')
+
+            # Step 4: Updating aspects
+            yield progress_event('Updating aspects', 'in_progress')
+
+            localized_aspects = listing.get("localizedAspects")
+            if localized_aspects is None:
+                localized_aspects = []
+            update_listing_with_aspects(sku, localized_aspects)
+            print(f"[API] Updated listing with aspects")
+
+            yield progress_event('Updating aspects', 'completed')
+
+            # Load and return the complete listing data
+            listing_data = load_listing_data(sku=sku)
+
+            if not listing_data:
+                yield error_event("Failed to load created listing data")
+                return
+
+            print(f"[API] Successfully created listing: {sku}")
+
+            yield result_event({
+                "listing_data": listing_data,
+                "error": None
+            })
+
+        except Exception as e:
+            try:
+                error_msg = str(e)
+            except UnicodeEncodeError:
+                error_msg = "An error occurred while creating listing (encoding error)"
+
+            import traceback
+            traceback.print_exc()
+
+            yield error_event(f"An error occurred while creating listing: {error_msg}")
+
+    return streaming_response(generate())
 
 @app.route('/api/listings', methods=['GET'])
 def list_all_listings():
@@ -697,137 +747,117 @@ def get_listing_detail(sku):
 def upload_listing():
     """
     Upload a listing to eBay using upload_complete_listing.
-    
-    Accepts JSON body:
-    {
-        "sku": "AXIS_1"
-    }
-    
-    Returns:
-        JSON response with upload result including listing ID, or error message
+    Streams real-time progress events as NDJSON so the frontend can show accurate status.
     """
-    try:
-        print("[API] /api/upload-listing endpoint called")
-        data = request.get_json()
-        
-        if not data:
-            return jsonify({
-                "error": "Request body must be JSON",
-                "upload_result": None
-            }), 400
-        
-        sku = data.get("sku")
-        filename = data.get("filename")  # Optional: use filename if provided
-        
-        if not sku or not isinstance(sku, str):
-            return jsonify({
-                "error": "sku must be a non-empty string",
-                "upload_result": None
-            }), 400
-        
-        print(f"[API] Uploading listing to eBay with SKU: {sku}")
-        if filename:
-            print(f"[API] Using filename: {filename}")
-        
-        # Load listing data from JSON file
-        # Try filename first if provided, otherwise use SKU
-        if filename:
-            listing_data = load_listing_data(filename=filename)
-        else:
-            listing_data = load_listing_data(sku=sku)
-        
-        # If that fails, try using SKU as filename
-        if not listing_data:
-            print(f"[API] First attempt failed, trying SKU as filename: {sku}.json")
-            listing_data = load_listing_data(filename=f"{sku}.json")
-        
-        if not listing_data:
-            return jsonify({
-                "error": f"Failed to load listing data for SKU: {sku}",
-                "upload_result": None
-            }), 404
-        
-        # Extract inventory and offer data
-        inventory_item_data = listing_data.get("inventoryItem", {}).copy()
-        offer_data = listing_data.get("offer", {}).copy()
-        
-        if not inventory_item_data or not offer_data:
-            return jsonify({
-                "error": "Listing data is missing inventoryItem or offer",
-                "upload_result": None
-            }), 400
-        
-        # Validate required fields
-        product = inventory_item_data.get("product", {})
-        if not product.get("title") or product.get("title") == "[need to change]":
-            return jsonify({
-                "error": "Listing title is missing or not set. Please update the title before uploading.",
-                "upload_result": None
-            }), 400
-        
-        if not product.get("imageUrls") or len(product.get("imageUrls", [])) == 0:
-            return jsonify({
-                "error": "Listing has no images. Please add images before uploading.",
-                "upload_result": None
-            }), 400
-        
-        # Use SKU from loaded data
-        actual_sku = listing_data.get("sku", sku)
-        
-        print(f"[API] Calling upload_complete_listing for SKU: {actual_sku}")
-        print(f"[API] Title: {product.get('title', 'N/A')}")
-        print(f"[API] Image count: {len(product.get('imageUrls', []))}")
-        print(f"[API] Price: {offer_data.get('pricingSummary', {}).get('price', {}).get('value', 'N/A')}")
-        
-        # Upload to eBay using upload_complete_listing function
+    # Parse request body before streaming
+    data = request.get_json()
+
+    def generate():
         try:
-            upload_result = upload_complete_listing(
-                sku=actual_sku,
-                inventory_item_data=inventory_item_data,
-                offer_data=offer_data,
-                locale="en-US",
-                use_user_token=True
-            )
-        except Exception as upload_exception:
-            error_msg = str(upload_exception)
-            print(f"[API] Exception during upload_complete_listing: {error_msg}")
+            print("[API] /api/upload-listing endpoint called")
+
+            if not data:
+                yield error_event("Request body must be JSON")
+                return
+
+            sku = data.get("sku")
+            filename = data.get("filename")
+
+            if not sku or not isinstance(sku, str):
+                yield error_event("sku must be a non-empty string")
+                return
+
+            print(f"[API] Uploading listing to eBay with SKU: {sku}")
+            if filename:
+                print(f"[API] Using filename: {filename}")
+
+            # Step 1: Preparing listing data
+            yield progress_event('Preparing listing data', 'in_progress')
+
+            if filename:
+                listing_data = load_listing_data(filename=filename)
+            else:
+                listing_data = load_listing_data(sku=sku)
+
+            if not listing_data:
+                print(f"[API] First attempt failed, trying SKU as filename: {sku}.json")
+                listing_data = load_listing_data(filename=f"{sku}.json")
+
+            if not listing_data:
+                yield error_event(f"Failed to load listing data for SKU: {sku}")
+                return
+
+            inventory_item_data = listing_data.get("inventoryItem", {}).copy()
+            offer_data = listing_data.get("offer", {}).copy()
+
+            if not inventory_item_data or not offer_data:
+                yield error_event("Listing data is missing inventoryItem or offer")
+                return
+
+            product = inventory_item_data.get("product", {})
+            if not product.get("title") or product.get("title") == "[need to change]":
+                yield error_event("Listing title is missing or not set. Please update the title before uploading.")
+                return
+
+            if not product.get("imageUrls") or len(product.get("imageUrls", [])) == 0:
+                yield error_event("Listing has no images. Please add images before uploading.")
+                return
+
+            actual_sku = listing_data.get("sku", sku)
+
+            print(f"[API] Calling upload_complete_listing for SKU: {actual_sku}")
+            print(f"[API] Title: {product.get('title', 'N/A')}")
+            print(f"[API] Image count: {len(product.get('imageUrls', []))}")
+            print(f"[API] Price: {offer_data.get('pricingSummary', {}).get('price', {}).get('value', 'N/A')}")
+
+            yield progress_event('Preparing listing data', 'completed')
+
+            # Step 2: Uploading to eBay
+            yield progress_event('Uploading to eBay', 'in_progress')
+
+            try:
+                upload_result = upload_complete_listing(
+                    sku=actual_sku,
+                    inventory_item_data=inventory_item_data,
+                    offer_data=offer_data,
+                    locale="en-US",
+                    use_user_token=True
+                )
+            except Exception as upload_exception:
+                error_msg = str(upload_exception)
+                print(f"[API] Exception during upload_complete_listing: {error_msg}")
+                import traceback
+                traceback.print_exc()
+                yield error_event(f"Exception during upload: {error_msg}")
+                return
+
+            if not upload_result:
+                print(f"[API] upload_complete_listing returned None - upload failed")
+                yield error_event("Failed to upload listing to eBay. Check server logs for details.")
+                return
+
+            print(f"[API] Successfully uploaded listing to eBay")
+            print(f"[API] Upload result: {upload_result}")
+
+            yield progress_event('Uploading to eBay', 'completed')
+
+            yield result_event({
+                "upload_result": upload_result,
+                "error": None
+            })
+
+        except Exception as e:
+            try:
+                error_msg = str(e)
+            except UnicodeEncodeError:
+                error_msg = "An error occurred while uploading listing (encoding error)"
+
             import traceback
             traceback.print_exc()
-            return jsonify({
-                "error": f"Exception during upload: {error_msg}",
-                "upload_result": None
-            }), 500
-        
-        if not upload_result:
-            print(f"[API] upload_complete_listing returned None - upload failed")
-            return jsonify({
-                "error": "Failed to upload listing to eBay. Check server logs for details.",
-                "upload_result": None
-            }), 500
-        
-        print(f"[API] Successfully uploaded listing to eBay")
-        print(f"[API] Upload result: {upload_result}")
-        print(f"[API] Upload result type: {type(upload_result)}")
-        print(f"[API] Upload result keys: {list(upload_result.keys()) if isinstance(upload_result, dict) else 'Not a dict'}")
-        
-        return jsonify({
-            "upload_result": upload_result,
-            "error": None
-        }), 200
-        
-    except Exception as e:
-        try:
-            error_msg = str(e)
-        except UnicodeEncodeError:
-            error_msg = "An error occurred while uploading listing (encoding error)"
-        
-        import traceback
-        traceback.print_exc()
-        
-        return jsonify({
-            "error": f"An error occurred while uploading listing: {error_msg}",
-            "upload_result": None
-        }), 500
+
+            yield error_event(f"An error occurred while uploading listing: {error_msg}")
+
+    return streaming_response(generate())
 
 
 @app.route('/api/testing', methods=['POST'])
