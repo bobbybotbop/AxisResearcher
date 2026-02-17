@@ -1294,6 +1294,106 @@ def api_compile_canvas():
         }), 500
 
 
+@app.route('/api/tokens', methods=['GET'])
+def get_tokens():
+    """Get current token values (masked) from the .env file"""
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+    tokens = {'user_token': '', 'application_token': ''}
+
+    try:
+        with open(env_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                stripped = line.strip()
+                if stripped.startswith('user_token='):
+                    tokens['user_token'] = stripped[len('user_token='):]
+                elif stripped.startswith('application_token='):
+                    tokens['application_token'] = stripped[len('application_token='):]
+    except Exception as e:
+        return jsonify({"error": f"Failed to read .env: {str(e)}"}), 500
+
+    def mask(val):
+        if not val:
+            return ''
+        if len(val) > 30:
+            return val[:15] + '...' + val[-15:]
+        return val
+
+    return jsonify({
+        'user_token': mask(tokens['user_token']),
+        'application_token': mask(tokens['application_token']),
+        'user_token_set': bool(tokens['user_token']),
+        'application_token_set': bool(tokens['application_token'])
+    })
+
+
+@app.route('/api/update-tokens', methods=['POST'])
+def update_tokens():
+    """
+    Update user_token and/or application_token in the .env file.
+    Handles values with special characters like ^ # = etc.
+    Writes values unquoted to avoid shell-escaping issues.
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        user_token = data.get('user_token', '').strip()
+        application_token = data.get('application_token', '').strip()
+
+        if not user_token and not application_token:
+            return jsonify({"error": "At least one token must be provided"}), 400
+
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+
+        # Read current .env file preserving exact content
+        with open(env_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        new_lines = []
+        user_token_found = False
+        app_token_found = False
+
+        for line in lines:
+            stripped = line.strip()
+            if user_token and stripped.startswith('user_token='):
+                new_lines.append(f'user_token={user_token}\n')
+                user_token_found = True
+            elif application_token and stripped.startswith('application_token='):
+                new_lines.append(f'application_token={application_token}\n')
+                app_token_found = True
+            else:
+                new_lines.append(line)
+
+        # Append tokens that weren't found in the file
+        if user_token and not user_token_found:
+            if new_lines and not new_lines[-1].endswith('\n'):
+                new_lines.append('\n')
+            new_lines.append(f'user_token={user_token}\n')
+        if application_token and not app_token_found:
+            if new_lines and not new_lines[-1].endswith('\n'):
+                new_lines.append('\n')
+            new_lines.append(f'application_token={application_token}\n')
+
+        # Write back the file
+        with open(env_path, 'w', encoding='utf-8') as f:
+            f.writelines(new_lines)
+
+        print(f"[API] Tokens updated in .env - user_token: {'yes' if user_token else 'no'}, application_token: {'yes' if application_token else 'no'}")
+
+        return jsonify({
+            "success": True,
+            "message": "Tokens updated successfully",
+            "user_token_updated": bool(user_token),
+            "application_token_updated": bool(application_token)
+        })
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to update tokens: {str(e)}"}), 500
+
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""

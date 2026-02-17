@@ -1,10 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import PhotoGallery from './components/PhotoGallery'
-import Lightbox from './components/Lightbox'
-import ListingDetails from './components/ListingDetails'
-import ProgressIndicator from './components/ProgressIndicator'
-import ImageCanvas from './components/ImageCanvas'
-import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd'
+import CreateWorkflow from './components/CreateWorkflow'
+import { MOCK_DATA } from './mockData'
+import { trimTransparentPadding } from './utils/trimImage'
 import './styles/App.css'
 
 /**
@@ -75,6 +72,7 @@ function App() {
   const [generatedImages, setGeneratedImages] = useState([])
   const [customPrompt, setCustomPrompt] = useState('')
   const [selectedImagesForRegen, setSelectedImagesForRegen] = useState([])
+  const [isTrimming, setIsTrimming] = useState(false)
   const [isRegenerating, setIsRegenerating] = useState(false)
   const [isCreatingListing, setIsCreatingListing] = useState(false)
   const [listingData, setListingData] = useState(null)
@@ -129,6 +127,153 @@ function App() {
     completedSteps: [],
     totalSteps: []
   })
+
+  // Token refresh panel state
+  const [tokenPanelOpen, setTokenPanelOpen] = useState(false)
+  const [userTokenInput, setUserTokenInput] = useState('')
+  const [appTokenInput, setAppTokenInput] = useState('')
+  const [tokenSaving, setTokenSaving] = useState(false)
+  const [tokenMessage, setTokenMessage] = useState(null)
+  const [tokenInfo, setTokenInfo] = useState({ user_token_set: false, application_token_set: false, user_token: '', application_token: '' })
+  const [tokenLastUpdated, setTokenLastUpdated] = useState(() => {
+    const saved = localStorage.getItem('tokenLastUpdated')
+    return saved ? parseInt(saved, 10) : null
+  })
+  const [, setTickCounter] = useState(0)
+
+  // Re-render every 60s so the "ago" label and stale status stay current
+  useEffect(() => {
+    const interval = setInterval(() => setTickCounter(c => c + 1), 60000)
+    return () => clearInterval(interval)
+  }, [])
+
+  const TOKEN_STALE_MS = 2 * 60 * 60 * 1000 // 2 hours
+
+  const isTokenStale = tokenLastUpdated ? (Date.now() - tokenLastUpdated) > TOKEN_STALE_MS : true
+
+  const formatTimeAgo = (timestamp) => {
+    if (!timestamp) return 'never'
+    const diff = Date.now() - timestamp
+    const minutes = Math.floor(diff / 60000)
+    if (minutes < 1) return 'just now'
+    if (minutes < 60) return `${minutes}m ago`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours}h ${minutes % 60}m ago`
+    const days = Math.floor(hours / 24)
+    return `${days}d ${hours % 24}h ago`
+  }
+
+  const fetchTokenInfo = async () => {
+    try {
+      const res = await fetch('/api/tokens')
+      const data = await res.json()
+      if (data && !data.error) {
+        setTokenInfo(data)
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  const handleTokenPanelToggle = () => {
+    const opening = !tokenPanelOpen
+    setTokenPanelOpen(opening)
+    if (opening) {
+      fetchTokenInfo()
+      setTokenMessage(null)
+    }
+  }
+
+  const handleSaveTokens = async () => {
+    if (!userTokenInput.trim() && !appTokenInput.trim()) {
+      setTokenMessage({ type: 'error', text: 'Enter at least one token' })
+      return
+    }
+    setTokenSaving(true)
+    setTokenMessage(null)
+    try {
+      const body = {}
+      if (userTokenInput.trim()) body.user_token = userTokenInput.trim()
+      if (appTokenInput.trim()) body.application_token = appTokenInput.trim()
+      const res = await fetch('/api/update-tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Failed to update tokens')
+      const now = Date.now()
+      setTokenLastUpdated(now)
+      localStorage.setItem('tokenLastUpdated', now.toString())
+      setTokenMessage({ type: 'success', text: 'Tokens updated successfully!' })
+      setUserTokenInput('')
+      setAppTokenInput('')
+      fetchTokenInfo()
+    } catch (err) {
+      setTokenMessage({ type: 'error', text: err.message || 'Failed to save tokens' })
+    } finally {
+      setTokenSaving(false)
+    }
+  }
+
+  const handleOpenEbayAuth = () => {
+    window.open('https://developer.ebay.com/my/auth/?env=production&index=0', '_blank')
+  }
+
+  // Test workflow state (mock data, no API calls)
+  const [testListingId, setTestListingId] = useState('')
+  const [testPhotos, setTestPhotos] = useState([])
+  const [testCategories, setTestCategories] = useState({})
+  const [testEditableCategories, setTestEditableCategories] = useState({})
+  const [testListing, setTestListing] = useState(null)
+  const [testLoading, setTestLoading] = useState(false)
+  const [testIsConfirming, setTestIsConfirming] = useState(false)
+  const [testError, setTestError] = useState(null)
+  const [testGeneratedImages, setTestGeneratedImages] = useState([])
+  const [testCustomPrompt, setTestCustomPrompt] = useState('')
+  const [testSelectedImagesForRegen, setTestSelectedImagesForRegen] = useState([])
+  const [testIsRegenerating, setTestIsRegenerating] = useState(false)
+  const [testIsTrimming, setTestIsTrimming] = useState(false)
+  const [testUseRealEbayUpload, setTestUseRealEbayUpload] = useState(false)
+  const [testIsCreatingListing, setTestIsCreatingListing] = useState(false)
+  const [testListingData, setTestListingData] = useState(null)
+  const [testUploadResult, setTestUploadResult] = useState(null)
+  const [testCurrentSku, setTestCurrentSku] = useState(null)
+  const [testSkippedPhotos, setTestSkippedPhotos] = useState(new Set())
+  const [testUseOriginalPhotos, setTestUseOriginalPhotos] = useState(new Set())
+  const [testPromptModifier, setTestPromptModifier] = useState('')
+  const [testIsEditorOpen, setTestIsEditorOpen] = useState(false)
+  const [testEditableTitle, setTestEditableTitle] = useState('')
+  const [testIsTrimmingTitle, setTestIsTrimmingTitle] = useState(false)
+  const [testIsSavingTitle, setTestIsSavingTitle] = useState(false)
+  const [testLightboxOpen, setTestLightboxOpen] = useState(false)
+  const [testLightboxIndex, setTestLightboxIndex] = useState(0)
+  const [testFetchProgress, setTestFetchProgress] = useState({
+    isActive: false,
+    currentStep: null,
+    completedSteps: [],
+    totalSteps: []
+  })
+  const [testImageGenProgress, setTestImageGenProgress] = useState({
+    isActive: false,
+    taskId: null,
+    total: 0,
+    completed: 0,
+    currentGenerating: []
+  })
+  const [testCreateListingProgress, setTestCreateListingProgress] = useState({
+    isActive: false,
+    currentStep: null,
+    completedSteps: [],
+    totalSteps: []
+  })
+  const [testUploadProgress, setTestUploadProgress] = useState({
+    isActive: false,
+    currentStep: null,
+    completedSteps: [],
+    totalSteps: []
+  })
+  const [testUploadingSkus, setTestUploadingSkus] = useState(new Set())
 
   const fetchListingPhotos = async () => {
     if (!listingId.trim()) {
@@ -569,6 +714,45 @@ function App() {
     }
   }
 
+  const handleTrimSelected = async () => {
+    if (selectedImagesForRegen.length === 0) {
+      setError('Please select at least one image to trim')
+      return
+    }
+
+    setIsTrimming(true)
+    setError(null)
+
+    try {
+      const newImages = [...generatedImages]
+      for (const index of selectedImagesForRegen) {
+        const url = generatedImages[index]
+        const resp = await fetch(url)
+        const blob = await resp.blob()
+        const dataUrl = await new Promise((resolve) => {
+          const reader = new FileReader()
+          reader.onload = (ev) => resolve(ev.target.result)
+          reader.readAsDataURL(blob)
+        })
+        const trimmedUrl = await trimTransparentPadding(dataUrl)
+        const trimmedBlob = await (await fetch(trimmedUrl)).blob()
+        const formData = new FormData()
+        formData.append('image', trimmedBlob, 'trimmed.png')
+        const uploadResp = await fetch('/api/upload-image', { method: 'POST', body: formData })
+        const uploadData = await uploadResp.json()
+        if (!uploadResp.ok) throw new Error(uploadData.error || 'Upload failed')
+        if (uploadData.url) newImages[index] = uploadData.url
+      }
+      setGeneratedImages(newImages)
+      setSelectedImagesForRegen([])
+    } catch (err) {
+      console.error('Error trimming images:', err)
+      setError(err.message || 'An error occurred while trimming images')
+    } finally {
+      setIsTrimming(false)
+    }
+  }
+
   const handleConfirmAndEditText = async () => {
     if (generatedImages.length === 0) {
       setError('No generated images to add to listing')
@@ -916,11 +1100,260 @@ function App() {
     setListingDetailData(null)
   }
 
+  // Test workflow mock handlers (no API calls)
+  const testHandleSubmit = (e) => {
+    e.preventDefault()
+    if (!testListingId.trim()) {
+      setTestError('Please enter an eBay listing ID or URL (any value works for testing)')
+      return
+    }
+    setTestLoading(true)
+    setTestError(null)
+    const steps = ['Fetching listing from eBay', 'Creating initial JSON file', 'Categorizing images']
+    setTestFetchProgress({ isActive: true, currentStep: steps[0], completedSteps: [], totalSteps: steps })
+    setTimeout(() => {
+      setTestFetchProgress(prev => ({ ...prev, completedSteps: [steps[0]], currentStep: steps[1] }))
+    }, 400)
+    setTimeout(() => {
+      setTestFetchProgress(prev => ({ ...prev, completedSteps: [steps[0], steps[1]], currentStep: steps[2] }))
+    }, 800)
+    setTimeout(() => {
+      setTestPhotos(MOCK_DATA.photos)
+      setTestCategories(MOCK_DATA.categories)
+      setTestEditableCategories({ ...MOCK_DATA.categories })
+      setTestListing(MOCK_DATA.listing)
+      setTestCurrentSku(MOCK_DATA.sku)
+      setTestGeneratedImages([])
+      const autoSkip = new Set()
+      for (const [url, cat] of Object.entries(MOCK_DATA.categories)) {
+        if (cat === 'real_world_image' || cat === 'edited_image') autoSkip.add(url)
+      }
+      setTestSkippedPhotos(autoSkip)
+      setTestFetchProgress({ isActive: false, currentStep: null, completedSteps: steps, totalSteps: steps })
+      setTestLoading(false)
+    }, 1500)
+  }
+
+  const testHandleConfirmCategories = () => {
+    const photosToProcess = testPhotos.filter(url => !testSkippedPhotos.has(url))
+    const needsAI = photosToProcess.filter(url => !testUseOriginalPhotos.has(url))
+    if (photosToProcess.length === 0) {
+      setTestError('All photos are skipped. Include at least one photo.')
+      return
+    }
+    if (needsAI.length === 0) {
+      setTestGeneratedImages(photosToProcess)
+      setTestCategories(testEditableCategories)
+      setTestIsConfirming(false)
+      return
+    }
+    setTestIsConfirming(true)
+    setTestError(null)
+    const total = needsAI.length
+    setTestImageGenProgress({ isActive: true, taskId: 'mock', total, completed: 0, currentGenerating: [] })
+    let completed = 0
+    const interval = setInterval(() => {
+      completed += 1
+      setTestImageGenProgress(prev => ({ ...prev, completed }))
+      if (completed >= total) {
+        clearInterval(interval)
+        const merged = []
+        let aiIdx = 0
+        for (const url of photosToProcess) {
+          merged.push(testUseOriginalPhotos.has(url) ? url : MOCK_DATA.generatedImages[aiIdx++] || url)
+        }
+        setTestGeneratedImages(merged)
+        setTestCategories(testEditableCategories)
+        setTestImageGenProgress({ isActive: false, taskId: null, total, completed, currentGenerating: [] })
+        setTestIsConfirming(false)
+      }
+    }, 500)
+  }
+
+  const testHandleConfirmAndEditText = () => {
+    if (testGeneratedImages.length === 0) {
+      setTestError('No generated images to add to listing')
+      return
+    }
+    setTestIsCreatingListing(true)
+    setTestError(null)
+    const steps = ['Updating images', 'Generating optimized text', 'Updating metadata', 'Updating aspects']
+    setTestCreateListingProgress({ isActive: true, currentStep: steps[0], completedSteps: [], totalSteps: steps })
+    let stepIdx = 0
+    const interval = setInterval(() => {
+      stepIdx += 1
+      setTestCreateListingProgress(prev => ({
+        ...prev,
+        completedSteps: steps.slice(0, stepIdx),
+        currentStep: steps[stepIdx] || null
+      }))
+      if (stepIdx >= steps.length) {
+        clearInterval(interval)
+        const listingData = { ...MOCK_DATA.listingData, inventoryItem: { ...MOCK_DATA.listingData.inventoryItem, product: { ...MOCK_DATA.listingData.inventoryItem.product, imageUrls: testGeneratedImages } } }
+        setTestListingData(listingData)
+        setTestEditableTitle(listingData.inventoryItem?.product?.title || '')
+        setTestUploadResult(null)
+        setTestCreateListingProgress({ isActive: false, currentStep: null, completedSteps: steps, totalSteps: steps })
+        setTestIsCreatingListing(false)
+      }
+    }, 400)
+  }
+
+  const testHandleUploadToEbay = (sku, listingData) => {
+    setTestUploadingSkus(prev => new Set(prev).add(sku))
+    setTestError(null)
+    const steps = ['Preparing listing data', 'Uploading to eBay']
+    setTestUploadProgress({ isActive: true, currentStep: steps[0], completedSteps: [], totalSteps: steps })
+    setTimeout(() => {
+      setTestUploadProgress(prev => ({ ...prev, completedSteps: [steps[0]], currentStep: steps[1] }))
+    }, 400)
+    setTimeout(() => {
+      setTestUploadResult(MOCK_DATA.uploadResult)
+      setTestUploadProgress({ isActive: false, currentStep: null, completedSteps: steps, totalSteps: steps })
+      setTestUploadingSkus(prev => { const s = new Set(prev); s.delete(sku); return s })
+    }, 1000)
+  }
+
+  const testHandleRegenerateImages = () => {
+    if (!testCustomPrompt.trim() || testSelectedImagesForRegen.length === 0) {
+      setTestError('Please enter a prompt and select at least one image')
+      return
+    }
+    setTestIsRegenerating(true)
+    setTestError(null)
+    setTimeout(() => {
+      const newImages = [...testGeneratedImages]
+      const placeholderUrls = ['https://picsum.photos/seed/regen1/400/400', 'https://picsum.photos/seed/regen2/400/400']
+      testSelectedImagesForRegen.forEach((idx, i) => {
+        if (i < placeholderUrls.length) newImages[idx] = placeholderUrls[i]
+      })
+      setTestGeneratedImages(newImages)
+      setTestSelectedImagesForRegen([])
+      setTestCustomPrompt('')
+      setTestIsRegenerating(false)
+    }, 800)
+  }
+
+  const testHandleTrimSelected = async () => {
+    if (testSelectedImagesForRegen.length === 0) {
+      setTestError('Please select at least one image to trim')
+      return
+    }
+    setTestIsTrimming(true)
+    setTestError(null)
+    try {
+      const newImages = [...testGeneratedImages]
+      for (const index of testSelectedImagesForRegen) {
+        const url = testGeneratedImages[index]
+        const resp = await fetch(url)
+        const blob = await resp.blob()
+        const dataUrl = await new Promise((resolve) => {
+          const reader = new FileReader()
+          reader.onload = (ev) => resolve(ev.target.result)
+          reader.readAsDataURL(blob)
+        })
+        const trimmedUrl = await trimTransparentPadding(dataUrl)
+        newImages[index] = trimmedUrl
+      }
+      setTestGeneratedImages(newImages)
+      setTestSelectedImagesForRegen([])
+    } catch (err) {
+      console.error('Error trimming test images:', err)
+      setTestError(err.message || 'An error occurred while trimming images')
+    } finally {
+      setTestIsTrimming(false)
+    }
+  }
+
   return (
     <div className="app">
       <header className="app-header">
-        <h1>Axis Researcher</h1>
+        <div className="header-top-row">
+          <h1>Axis Researcher</h1>
+          <button
+            type="button"
+            className={`token-refresh-btn ${isTokenStale ? 'stale' : ''}`}
+            onClick={handleTokenPanelToggle}
+            title={`Refresh eBay Tokens – last updated: ${formatTimeAgo(tokenLastUpdated)}`}
+          >
+            {tokenPanelOpen ? '✕' : '⚙'}
+            {isTokenStale && !tokenPanelOpen && <span className="token-stale-dot" />}
+          </button>
+        </div>
         <p>Automatically create listings with AI</p>
+
+        {tokenPanelOpen && (
+          <div className="token-panel">
+            <div className="token-panel-header">
+              <h3>eBay Token Management</h3>
+              <button
+                type="button"
+                className="token-ebay-auth-btn"
+                onClick={handleOpenEbayAuth}
+              >
+                Open eBay Auth Page
+              </button>
+            </div>
+
+            <div className="token-status">
+              <span className={`token-status-indicator ${tokenInfo.user_token_set ? 'set' : 'unset'}`}>
+                user_token: {tokenInfo.user_token_set ? tokenInfo.user_token : 'not set'}
+              </span>
+              <span className={`token-status-indicator ${tokenInfo.application_token_set ? 'set' : 'unset'}`}>
+                application_token: {tokenInfo.application_token_set ? tokenInfo.application_token : 'not set'}
+              </span>
+            </div>
+
+            <div className={`token-last-updated ${isTokenStale ? 'stale' : 'fresh'}`}>
+              Last updated: {tokenLastUpdated
+                ? `${formatTimeAgo(tokenLastUpdated)}${isTokenStale ? ' — tokens may be expired!' : ''}`
+                : 'never'}
+            </div>
+
+            <div className="token-input-group">
+              <label className="token-label" htmlFor="user-token-input">User Token</label>
+              <input
+                id="user-token-input"
+                type="text"
+                className="token-input"
+                value={userTokenInput}
+                onChange={(e) => setUserTokenInput(e.target.value)}
+                placeholder="Paste user_token here..."
+                disabled={tokenSaving}
+              />
+            </div>
+
+            <div className="token-input-group">
+              <label className="token-label" htmlFor="app-token-input">Application Token</label>
+              <input
+                id="app-token-input"
+                type="text"
+                className="token-input"
+                value={appTokenInput}
+                onChange={(e) => setAppTokenInput(e.target.value)}
+                placeholder="Paste application_token here..."
+                disabled={tokenSaving}
+              />
+            </div>
+
+            <div className="token-actions">
+              <button
+                type="button"
+                className="token-save-btn"
+                onClick={handleSaveTokens}
+                disabled={tokenSaving || (!userTokenInput.trim() && !appTokenInput.trim())}
+              >
+                {tokenSaving ? 'Saving...' : 'Save Tokens'}
+              </button>
+            </div>
+
+            {tokenMessage && (
+              <div className={`token-message ${tokenMessage.type}`}>
+                {tokenMessage.text}
+              </div>
+            )}
+          </div>
+        )}
       </header>
 
       <main className="app-main">
@@ -938,12 +1371,79 @@ function App() {
             Upload Listings
           </button>
           <button
+            className={`tab-button ${activeTab === 'test-workflow' ? 'active' : ''}`}
+            onClick={() => handleTabChange('test-workflow')}
+          >
+            Test Workflow
+          </button>
+          <button
             className={`tab-button ${activeTab === 'testing' ? 'active' : ''}`}
             onClick={() => handleTabChange('testing')}
           >
             Testing
           </button>
         </div>
+
+        {activeTab === 'test-workflow' && (
+          <CreateWorkflow
+            listingId={testListingId}
+            photos={testPhotos}
+            categories={testCategories}
+            editableCategories={testEditableCategories}
+            listing={testListing}
+            currentSku={testCurrentSku}
+            skippedPhotos={testSkippedPhotos}
+            useOriginalPhotos={testUseOriginalPhotos}
+            promptModifier={testPromptModifier}
+            generatedImages={testGeneratedImages}
+            selectedImagesForRegen={testSelectedImagesForRegen}
+            customPrompt={testCustomPrompt}
+            loading={testLoading}
+            error={testError}
+            isConfirming={testIsConfirming}
+            isRegenerating={testIsRegenerating}
+            isTrimming={testIsTrimming}
+            isCreatingListing={testIsCreatingListing}
+            listingData={testListingData}
+            editableTitle={testEditableTitle}
+            uploadResult={testUploadResult}
+            isEditorOpen={testIsEditorOpen}
+            fetchProgress={testFetchProgress}
+            imageGenProgress={testImageGenProgress}
+            createListingProgress={testCreateListingProgress}
+            uploadProgress={testUploadProgress}
+            uploadingSkus={testUploadingSkus}
+            isTrimmingTitle={testIsTrimmingTitle}
+            isSavingTitle={testIsSavingTitle}
+            onListingIdChange={setTestListingId}
+            onSubmit={testHandleSubmit}
+            onCategoryChange={(url, cat) => setTestEditableCategories(prev => ({ ...prev, [url]: cat }))}
+            onSkipPhoto={(url) => setTestSkippedPhotos(prev => { const s = new Set(prev); s.has(url) ? s.delete(url) : s.add(url); return s })}
+            onUseOriginalPhoto={(url) => setTestUseOriginalPhotos(prev => { const s = new Set(prev); s.has(url) ? s.delete(url) : s.add(url); return s })}
+            onPromptModifierChange={setTestPromptModifier}
+            onConfirmCategories={testHandleConfirmCategories}
+            onImageSelection={(idx) => setTestSelectedImagesForRegen(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx])}
+            onRegenerateImages={testHandleRegenerateImages}
+            onTrimSelected={testHandleTrimSelected}
+            onCustomPromptChange={setTestCustomPrompt}
+            onDragEnd={(result) => { if (!result.destination) return; const src = result.source.index, dest = result.destination.index; if (src === dest) return; setTestGeneratedImages(prev => { const arr = [...prev]; const [moved] = arr.splice(src, 1); arr.splice(dest, 0, moved); return arr }) }}
+            onRemoveFromListing={(idx) => { setTestGeneratedImages(prev => prev.filter((_, i) => i !== idx)); setTestSelectedImagesForRegen([]) }}
+            onAddToListing={(url) => setTestGeneratedImages(prev => [...prev, url])}
+            onConfirmAndEditText={testHandleConfirmAndEditText}
+            onEditableTitleChange={setTestEditableTitle}
+            onTrimTitle={() => setTestEditableTitle(prev => prev.slice(0, 80))}
+            onSaveTitle={() => setTestListingData(prev => prev ? { ...prev, inventoryItem: { ...prev.inventoryItem, product: { ...prev.inventoryItem?.product, title: testEditableTitle } } } : prev)}
+            onUploadToEbay={testHandleUploadToEbay}
+            onEditorToggle={() => setTestIsEditorOpen(prev => !prev)}
+            useRealEbayUpload={testUseRealEbayUpload}
+            onUseRealEbayUploadChange={setTestUseRealEbayUpload}
+            onPhotoClick={(idx) => { setTestLightboxIndex(idx); setTestLightboxOpen(true) }}
+            onCloseLightbox={() => setTestLightboxOpen(false)}
+            onNavigateLightbox={(dir) => setTestLightboxIndex(prev => dir === 'next' ? (prev + 1) % testPhotos.length : (prev - 1 + testPhotos.length) % testPhotos.length)}
+            lightboxOpen={testLightboxOpen}
+            lightboxIndex={testLightboxIndex}
+          />
+        )}
 
         {activeTab === 'upload' && (
           <div className="upload-listings-section">
@@ -1106,343 +1606,62 @@ function App() {
         )}
 
         {activeTab === 'create' && (
-          <>
-        <form onSubmit={handleSubmit} className="search-form">
-          <input
-            type="text"
-            value={listingId}
-            onChange={(e) => setListingId(e.target.value)}
-            placeholder="eBay listing ID or URL (e.g., 123456789 or https://www.ebay.com/itm/123456789)"
-            className="search-input"
-            disabled={loading}
-          />
-          <button type="submit" className="search-button" disabled={loading}>
-            {loading ? 'Loading...' : 'Fetch Photos'}
-          </button>
-        </form>
-
-        {error && (
-          <div className="error-message">
-            <p>{error}</p>
-          </div>
-        )}
-
-        {loading && (
-          <div className="loading">
-            <div className="spinner"></div>
-            <p>Fetching listing data...</p>
-            {fetchProgress.isActive && fetchProgress.totalSteps.length > 0 && (
-              <ProgressIndicator
-                steps={fetchProgress.totalSteps}
-                currentStep={fetchProgress.currentStep}
-                completedSteps={fetchProgress.completedSteps}
-              />
-            )}
-          </div>
-        )}
-
-        {currentSku && (
-          <div className="sku-display" style={{ margin: '20px 0', padding: '10px', backgroundColor: '#f0f0f0', borderRadius: '5px' }}>
-            <strong>Current SKU:</strong> {currentSku}
-          </div>
-        )}
-
-        {photos.length > 0 && (
-          <>
-            <PhotoGallery
-              photos={photos}
-              editableCategories={editableCategories}
-              onCategoryChange={handleCategoryChange}
-              onConfirm={handleConfirmCategories}
-              isConfirming={isConfirming}
-              onPhotoClick={openLightbox}
-              skippedPhotos={skippedPhotos}
-              onSkipPhoto={handleSkipPhoto}
-              useOriginalPhotos={useOriginalPhotos}
-              onUseOriginalPhoto={handleUseOriginalPhoto}
-              promptModifier={promptModifier}
-              onPromptModifierChange={setPromptModifier}
-            />
-            {isConfirming && imageGenProgress.isActive && (
-              <div className="image-generation-progress" style={{ margin: '20px 0', padding: '15px', backgroundColor: '#f9f9f9', borderRadius: '5px' }}>
-                <h3>Generating Images</h3>
-                <div className="progress-info">
-                  <p>Progress: {imageGenProgress.completed} of {imageGenProgress.total} images complete</p>
-                  {imageGenProgress.total > 0 && (
-                    <div className="progress-bar-container" style={{ marginTop: '10px' }}>
-                      <div 
-                        className="progress-bar" 
-                        style={{ 
-                          width: `${(imageGenProgress.completed / imageGenProgress.total) * 100}%`,
-                          height: '20px',
-                          backgroundColor: '#4CAF50',
-                          borderRadius: '4px',
-                          transition: 'width 0.3s ease'
-                        }}
-                      ></div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Collapsible Image Editor */}
-            <div className="editor-collapsible-panel">
-              <button
-                type="button"
-                className="editor-toggle-button"
-                onClick={() => setIsEditorOpen(prev => !prev)}
-              >
-                <span className={`editor-chevron ${isEditorOpen ? 'open' : ''}`}>&#9654;</span>
-                Image Editor
-              </button>
-              {isEditorOpen && (
-                <div className="editor-panel-body">
-                  <ImageCanvas onAddToListing={handleAddToListing} originalPhotos={photos} />
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
-        {generatedImages.length > 0 && (
-          <div className="generated-images-section section-container new-listing-container">
-            <h2 className="gallery-title">New Listing Photos</h2>
-            <DragDropContext onDragEnd={handleDragEnd}>
-              <Droppable droppableId="new-listing-photos" direction="horizontal">
-                {(provided) => (
-                  <div
-                    className="gallery-grid"
-                    ref={provided.innerRef}
-                    {...provided.droppableProps}
-                  >
-                    {generatedImages.map((imageUrl, index) => (
-                      <Draggable key={`img-${imageUrl}-${index}`} draggableId={`img-${imageUrl}-${index}`} index={index}>
-                        {(provided, snapshot) => (
-                          <div
-                            ref={provided.innerRef}
-                            {...provided.draggableProps}
-                            className={`gallery-item image-selectable ${snapshot.isDragging ? 'is-dragging' : ''}`}
-                          >
-                            <div className="drag-handle" {...provided.dragHandleProps} title="Drag to reorder">
-                              <span className="drag-handle-dots">&#x2630;</span>
-                            </div>
-                            <label className="image-checkbox-label">
-                              <input
-                                type="checkbox"
-                                checked={selectedImagesForRegen.includes(index)}
-                                onChange={() => handleImageSelection(index)}
-                                className="image-checkbox"
-                              />
-                              <span className="checkbox-overlay">Select to regenerate</span>
-                            </label>
-                            <div className="gallery-order-badge">{index + 1}</div>
-                            <button
-                              type="button"
-                              className="listing-photo-delete-btn"
-                              onClick={() => handleRemoveFromListing(index)}
-                              title="Remove from listing"
-                            >
-                              &times;
-                            </button>
-                            <img
-                              src={imageUrl}
-                              alt={`New listing photo ${index + 1}`}
-                              className="gallery-image"
-                              loading="lazy"
-                            />
-                          </div>
-                        )}
-                      </Draggable>
-                    ))}
-                    {provided.placeholder}
-                  </div>
-                )}
-              </Droppable>
-            </DragDropContext>
-
-            <div className="prompt-section">
-              <h3 className="prompt-title">Optional: Edit Images Further</h3>
-              <p className="prompt-description">Enter a custom prompt to regenerate selected images</p>
-              <textarea
-                className="prompt-input"
-                value={customPrompt}
-                onChange={(e) => setCustomPrompt(e.target.value)}
-                placeholder="Enter your custom prompt for image editing..."
-                rows={4}
-                disabled={isRegenerating || selectedImagesForRegen.length === 0}
-              />
-              <div className="prompt-actions">
-                <button
-                  type="button"
-                  className="regenerate-button"
-                  onClick={handleRegenerateImages}
-                  disabled={isRegenerating || !customPrompt.trim() || selectedImagesForRegen.length === 0}
-                >
-                  {isRegenerating ? 'Regenerating...' : `Regenerate Selected (${selectedImagesForRegen.length})`}
-                </button>
-              </div>
-            </div>
-
-            <div className="listing-actions">
-              <button
-                type="button"
-                className="confirm-edit-button"
-                onClick={handleConfirmAndEditText}
-                disabled={isCreatingListing}
-              >
-                {isCreatingListing ? 'Updating Listing...' : 'Confirm and Edit Text'}
-              </button>
-              {isCreatingListing && createListingProgress.isActive && createListingProgress.totalSteps.length > 0 && (
-                <div style={{ marginTop: '15px' }}>
-                  <ProgressIndicator
-                    steps={createListingProgress.totalSteps}
-                    currentStep={createListingProgress.currentStep}
-                    completedSteps={createListingProgress.completedSteps}
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {listingData && (
-          <div className="listing-data-section">
-            <h2 className="gallery-title">Generated Listing</h2>
-            <div className="listing-data-display">
-              <div className="listing-info-item">
-                <strong>SKU:</strong> {listingData.sku}
-              </div>
-              <div className="listing-info-item title-edit-section">
-                <div className="title-edit-header">
-                  <strong>Title:</strong>
-                  <span className={`title-char-count ${editableTitle.length > 80 ? 'over-limit' : editableTitle.length >= 73 && editableTitle.length <= 80 ? 'good' : 'under'}`}>
-                    {editableTitle.length} / 80
-                    {editableTitle.length > 80 && ` (${editableTitle.length - 80} over)`}
-                  </span>
-                </div>
-                <input
-                  type="text"
-                  className={`title-edit-input ${editableTitle.length > 80 ? 'over-limit' : ''}`}
-                  value={editableTitle}
-                  onChange={(e) => setEditableTitle(e.target.value)}
-                  placeholder="Listing title..."
-                />
-                {editableTitle.length > 80 && (
-                  <div className="title-warning">
-                    Title exceeds 80 characters. Edit manually or use AI to trim it.
-                  </div>
-                )}
-                <div className="title-edit-actions">
-                  {editableTitle.length > 80 && (
-                    <button
-                      type="button"
-                      className="title-trim-button"
-                      onClick={handleTrimTitle}
-                      disabled={isTrimmingTitle}
-                    >
-                      {isTrimmingTitle ? 'Trimming...' : 'AI Trim Title'}
-                    </button>
-                  )}
-                  {editableTitle !== (listingData.inventoryItem?.product?.title || '') && (
-                    <button
-                      type="button"
-                      className="title-save-button"
-                      onClick={handleSaveTitle}
-                      disabled={isSavingTitle}
-                    >
-                      {isSavingTitle ? 'Saving...' : 'Save Title'}
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div className="listing-info-item">
-                <strong>Description:</strong>
-                <div className="listing-description-text">
-                  {listingData.inventoryItem?.product?.description || 'N/A'}
-                </div>
-              </div>
-              <div className="listing-info-item">
-                <strong>Price:</strong> ${listingData.offer?.pricingSummary?.price?.value || 'N/A'}
-              </div>
-              <div className="listing-info-item">
-                <strong>Category ID:</strong> {listingData.offer?.categoryId || 'N/A'}
-              </div>
-              <div className="listing-info-item">
-                <strong>Images ({listingData.inventoryItem?.product?.imageUrls?.length || 0}):</strong>
-                <div className="listing-images-list">
-                  {listingData.inventoryItem?.product?.imageUrls?.map((url, idx) => (
-                    <div key={idx} className="listing-image-url">{idx + 1}. {url}</div>
-                  )) || 'No images'}
-                </div>
-              </div>
-              <div className="listing-info-item">
-                <strong>Created:</strong> {listingData.createdDateTime || 'N/A'}
-              </div>
-            </div>
-
-            <div className="upload-section">
-              <button
-                type="button"
-                className="upload-button"
-                onClick={() => handleUploadToEbay(listingData.sku, listingData)}
-                disabled={uploadingSkus.has(listingData?.sku) || !listingData?.sku}
-              >
-                {uploadingSkus.has(listingData?.sku) ? 'Uploading to eBay...' : 'Upload to eBay'}
-              </button>
-              {uploadingSkus.has(listingData?.sku) && uploadProgress.isActive && uploadProgress.totalSteps.length > 0 && (
-                <div style={{ marginTop: '15px' }}>
-                  <ProgressIndicator
-                    steps={uploadProgress.totalSteps}
-                    currentStep={uploadProgress.currentStep}
-                    completedSteps={uploadProgress.completedSteps}
-                  />
-                </div>
-              )}
-            </div>
-
-            {uploadResult && (
-              <div className="upload-result-section">
-                <h3 className="upload-result-title">Upload Successful!</h3>
-                <div className="upload-result-info">
-                  {uploadResult.listingId && (
-                    <div className="upload-result-item">
-                      <strong>Listing ID:</strong> {uploadResult.listingId}
-                    </div>
-                  )}
-                  {uploadResult.ebayId && (
-                    <div className="upload-result-item">
-                      <strong>eBay ID:</strong> {uploadResult.ebayId}
-                    </div>
-                  )}
-                  {uploadResult.href && (
-                    <div className="upload-result-item">
-                      <strong>Listing URL:</strong>{' '}
-                      <a href={uploadResult.href} target="_blank" rel="noopener noreferrer" className="listing-link">
-                        View on eBay
-                      </a>
-                    </div>
-                  )}
-                  <div className="upload-result-item">
-                    <strong>Status:</strong> Listing is now live on eBay!
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {listing && <ListingDetails listing={listing} />}
-
-        {lightboxOpen && photos.length > 0 && (
-          <Lightbox
+          <CreateWorkflow
+            listingId={listingId}
             photos={photos}
-            currentIndex={lightboxIndex}
-            onClose={closeLightbox}
-            onNavigate={navigateLightbox}
+            categories={categories}
+            editableCategories={editableCategories}
+            listing={listing}
+            currentSku={currentSku}
+            skippedPhotos={skippedPhotos}
+            useOriginalPhotos={useOriginalPhotos}
+            promptModifier={promptModifier}
+            generatedImages={generatedImages}
+            selectedImagesForRegen={selectedImagesForRegen}
+            customPrompt={customPrompt}
+            loading={loading}
+            error={error}
+            isConfirming={isConfirming}
+            isRegenerating={isRegenerating}
+            isTrimming={isTrimming}
+            isCreatingListing={isCreatingListing}
+            listingData={listingData}
+            editableTitle={editableTitle}
+            uploadResult={uploadResult}
+            isEditorOpen={isEditorOpen}
+            fetchProgress={fetchProgress}
+            imageGenProgress={imageGenProgress}
+            createListingProgress={createListingProgress}
+            uploadProgress={uploadProgress}
+            uploadingSkus={uploadingSkus}
+            isTrimmingTitle={isTrimmingTitle}
+            isSavingTitle={isSavingTitle}
+            onListingIdChange={setListingId}
+            onSubmit={handleSubmit}
+            onCategoryChange={handleCategoryChange}
+            onSkipPhoto={handleSkipPhoto}
+            onUseOriginalPhoto={handleUseOriginalPhoto}
+            onPromptModifierChange={setPromptModifier}
+            onConfirmCategories={handleConfirmCategories}
+            onImageSelection={handleImageSelection}
+            onRegenerateImages={handleRegenerateImages}
+            onTrimSelected={handleTrimSelected}
+            onCustomPromptChange={setCustomPrompt}
+            onDragEnd={handleDragEnd}
+            onRemoveFromListing={handleRemoveFromListing}
+            onAddToListing={handleAddToListing}
+            onConfirmAndEditText={handleConfirmAndEditText}
+            onEditableTitleChange={setEditableTitle}
+            onTrimTitle={handleTrimTitle}
+            onSaveTitle={handleSaveTitle}
+            onUploadToEbay={handleUploadToEbay}
+            onEditorToggle={() => setIsEditorOpen((prev) => !prev)}
+            onPhotoClick={openLightbox}
+            onCloseLightbox={closeLightbox}
+            onNavigateLightbox={navigateLightbox}
+            lightboxOpen={lightboxOpen}
+            lightboxIndex={lightboxIndex}
           />
-        )}
-          </>
         )}
       </main>
     </div>
