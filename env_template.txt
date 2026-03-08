@@ -1,23 +1,19 @@
-# eBay API Configuration
-# Get these values from https://developer.ebay.com/my/keys
-
-# eBay App Credentials
-client_id=your_client_id_here
-client_secret=your_client_secret_here
-redirect_uri=your_ru_name_here
-
-
-# OAuth Tokens (automatically managed)
-application_token=
-user_token=
+# eBay App Credentials (from https://developer.ebay.com/my/keys)
+client_id=
+client_secret=
+redirect_url=
+auth_code=
 refresh_token=
-token_expiration=
 
-# OpenRouter API Key (for AI content generation)
-openrouter_api_key=your_openrouter_api_key_here
+# eBay Business Policies (from Account > Site Preferences > Business Policies)
+fulfillment_policy_id=
+payment_policy_id=
+return_policy_id=
 
-# eBay Business Policies (required for listings)
-# Get these from: https://www.ebay.com/sh/landing > Account > Site Preferences > Business Policies
-fulfillment_policy_id=your_fulfillment_policy_id_here
-payment_policy_id=your_payment_policy_id_here
-return_policy_id=your_return_policy_id_here
+# OpenRouter API (for AI content generation)
+openrouter_api_key=
+
+# eBay OAuth Tokens
+user_token=
+
+application_token=

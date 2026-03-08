@@ -6,3 +6,4 @@ __pycache__/
 *.pyd
 /generated-images
 node_modules
+.cursor/debug.log

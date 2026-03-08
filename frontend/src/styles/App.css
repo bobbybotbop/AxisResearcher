@@ -2047,8 +2047,8 @@ body {
 /* Drag Handle */
 .drag-handle {
   position: absolute;
-  top: 0.4rem;
-  right: 0.4rem;
+  bottom: 0.4rem;
+  left: 0.4rem;
   z-index: 11;
   width: 28px;
   height: 28px;

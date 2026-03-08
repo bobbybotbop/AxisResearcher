@@ -1,34 +1,30 @@
 """
-eBay OAuth Token Management Functions
+eBay OAuth Token Management: mint application and user tokens.
 
-This module provides functions for eBay OAuth user consent and token refresh operations.
-Based on eBay OAuth documentation:
-- https://developer.ebay.com/api-docs/static/oauth-consent-request.html
-- https://developer.ebay.com/api-docs/static/oauth-refresh-token-request.html
+Mint application tokens (client credentials) and user tokens (authorization code
+or refresh). Updates .env with tokens; values are written without quoting so
+special characters (e.g. ^, #) are preserved.
 
 Required environment variables:
-- client_id: Your eBay App client ID
-- client_secret: Your eBay App client secret
-- redirect_uri: Your eBay App RuName (redirect URI)
-- refresh_token: Your eBay refresh token (for refresh function)
+- client_id: eBay App client ID
+- client_secret: eBay App client secret
+- redirect_uri or redirect_url: eBay App RuName (redirect URI)
+- refresh_token: (for refresh_user_token only)
 """
 
 import os
 import base64
 import urllib.parse
 import webbrowser
-from dotenv import load_dotenv, set_key
+from dotenv import load_dotenv
 import requests
-import json
-from datetime import datetime
 
-# Load environment variables
 load_dotenv()
 
-# Environment variables
+# Environment variables; redirect supports both keys for template compatibility
 CLIENT_ID = os.getenv('client_id')
 CLIENT_SECRET = os.getenv('client_secret')
-REDIRECT_URI = os.getenv('redirect_uri')  # This should be your RuName
+REDIRECT_URI = os.getenv('redirect_uri') or os.getenv('redirect_url')
 REFRESH_TOKEN = os.getenv('refresh_token')
 
 # OAuth endpoints
@@ -37,160 +33,169 @@ PRODUCTION_AUTH_URL = "https://auth.ebay.com/oauth2/authorize"
 SANDBOX_TOKEN_URL = "https://api.sandbox.ebay.com/identity/v1/oauth2/token"
 PRODUCTION_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 
+# Keys we can write via update_env (aligned with env_template)
+ENV_TOKEN_KEYS = ('application_token', 'user_token', 'refresh_token', 'auth_code')
 
-def create_user_consent_url(environment="sandbox", scopes=None, state=None, locale=None, prompt=None):
+
+def _env_path():
+    """Path to project-root .env file."""
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+
+
+def update_env(updates):
     """
-    Create a user consent URL for eBay OAuth authorization code grant flow.
-    
-    This function generates the URL that users need to visit to grant consent
-    for your application to access their eBay account data.
-    
+    Update .env file by key. Preserves special characters (^, #, =, etc.) by
+    writing unquoted values. Updates only the keys present in the dict.
+
     Args:
-        environment (str): "sandbox" or "production"
-        scopes (list): List of OAuth scopes (default: common eBay scopes)
-        state (str): Optional state parameter for CSRF protection
-        locale (str): Optional locale for consent page (e.g., "en-US", "de-DE")
-        prompt (str): Optional prompt parameter ("login" to force login)
-    
+        updates: dict of key -> value (e.g. {'application_token': 'v^1.1#...'})
+    """
+    if not updates:
+        return
+    allowed = set(ENV_TOKEN_KEYS)
+    updates = {k: v for k, v in updates.items() if k in allowed and v is not None}
+    if not updates:
+        return
+    env_path = _env_path()
+    try:
+        with open(env_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        lines = []
+    new_lines = []
+    found = {k: False for k in updates}
+    for line in lines:
+        stripped = line.strip()
+        replaced = False
+        for key, value in updates.items():
+            if stripped.startswith(key + '='):
+                new_lines.append(f'{key}={value}\n')
+                found[key] = True
+                replaced = True
+                break
+        if not replaced:
+            new_lines.append(line)
+    for key, value in updates.items():
+        if not found[key]:
+            if new_lines and not new_lines[-1].endswith('\n'):
+                new_lines.append('\n')
+            new_lines.append(f'{key}={value}\n')
+    with open(env_path, 'w', encoding='utf-8') as f:
+        f.writelines(new_lines)
+
+
+def mint_application_token(environment="production", scopes=None):
+    """
+    Mint an application access token via client credentials grant.
+    On success, updates .env with application_token.
+
+    Args:
+        environment: "production" or "sandbox"
+        scopes: list of scope URLs (default: basic api_scope)
+
     Returns:
-        str: Complete consent URL for user to visit
-    
+        Token response dict with access_token, expires_in, etc., or None on failure.
+    """
+    if not CLIENT_ID or not CLIENT_SECRET:
+        raise ValueError("CLIENT_ID and CLIENT_SECRET are required in .env")
+    if scopes is None:
+        scopes = ["https://api.ebay.com/oauth/api_scope"]
+    token_url = PRODUCTION_TOKEN_URL if environment.lower() == "production" else SANDBOX_TOKEN_URL
+    auth_string = f"{CLIENT_ID}:{CLIENT_SECRET}"
+    auth_bytes = base64.b64encode(auth_string.encode()).decode()
+    headers = {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': f'Basic {auth_bytes}'
+    }
+    scope_str = ' '.join(scopes)
+    data = {'grant_type': 'client_credentials', 'scope': scope_str}
+    try:
+        response = requests.post(token_url, headers=headers, data=data)
+        if response.status_code == 200:
+            token_data = response.json()
+            access_token = token_data.get('access_token')
+            if access_token:
+                update_env({'application_token': access_token})
+            return token_data
+        print(f"Application token mint failed: {response.status_code} - {response.text}")
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"Network error minting application token: {e}")
+        return None
+
+
+def get_user_consent_url(environment="production", scopes=None, state=None, prompt=None):
+    """
+    Build the user consent URL for the authorization code flow.
+
+    Args:
+        environment: "production" or "sandbox"
+        scopes: list of OAuth scope URLs
+        state: optional state for CSRF
+        prompt: optional (e.g. "login")
+
+    Returns:
+        Full consent URL string.
+
     Raises:
-        ValueError: If required parameters are missing
+        ValueError: if client_id or redirect URI missing.
     """
     if not CLIENT_ID:
-        raise ValueError("❌ CLIENT_ID not found in environment variables")
-    
+        raise ValueError("CLIENT_ID is required in .env")
     if not REDIRECT_URI:
-        raise ValueError("❌ REDIRECT_URI not found in environment variables")
-    
-    # Default scopes - using only the basic scope that's available
+        raise ValueError("redirect_uri or redirect_url is required in .env")
     if scopes is None:
-        scopes = [
-            "https://api.ebay.com/oauth/api_scope"  # Basic API access scope - only one available
-        ]
-    
-    # Choose endpoint based on environment
-    if environment.lower() == "production":
-        auth_url = PRODUCTION_AUTH_URL
-        print("🌐 Using PRODUCTION environment")
-    else:
-        auth_url = SANDBOX_AUTH_URL
-        print("🧪 Using SANDBOX environment")
-    
-    # Build query parameters
+        scopes = ["https://api.ebay.com/oauth/api_scope"]
+    auth_url = PRODUCTION_AUTH_URL if environment.lower() == "production" else SANDBOX_AUTH_URL
     params = {
         'client_id': CLIENT_ID,
         'redirect_uri': REDIRECT_URI,
         'response_type': 'code',
         'scope': ' '.join(scopes)
     }
-    
-    # Add optional parameters
     if state:
         params['state'] = state
-    if locale:
-        params['locale'] = locale
     if prompt:
         params['prompt'] = prompt
-    
-    # Create the complete URL
     query_string = urllib.parse.urlencode(params)
-    consent_url = f"{auth_url}?{query_string}"
-    
-    print(f"✅ Generated consent URL:")
-    print(f"🔗 {consent_url}")
-    print(f"\n📋 Parameters:")
-    print(f"  Client ID: {CLIENT_ID[:10]}...")
-    print(f"  Redirect URI: {REDIRECT_URI}")
-    print(f"  Scopes: {len(scopes)} scopes")
-    print(f"  State: {state if state else 'Not provided'}")
-    
-    return consent_url
+    return f"{auth_url}?{query_string}"
 
 
-def open_user_consent_page(environment="sandbox", scopes=None, state=None, locale=None, prompt=None):
+def open_user_consent_page(environment="production", scopes=None, state=None, prompt=None):
+    """Build consent URL and open it in the default browser. Returns the URL."""
+    url = get_user_consent_url(environment, scopes, state, prompt)
+    webbrowser.open(url)
+    return url
+
+
+def exchange_code_for_user_token(authorization_code, environment="production", scopes=None):
     """
-    Create and open the user consent page in the default web browser.
-    
+    Exchange authorization code for user access token and refresh token.
+    On success, updates .env with user_token, refresh_token, and auth_code.
+
     Args:
-        environment (str): "sandbox" or "production"
-        scopes (list): List of OAuth scopes
-        state (str): Optional state parameter for CSRF protection
-        locale (str): Optional locale for consent page
-        prompt (str): Optional prompt parameter
-    
-    Returns:
-        str: The consent URL that was opened
-    """
-    try:
-        consent_url = create_user_consent_url(environment, scopes, state, locale, prompt)
-        
-        print(f"\n🌐 Opening consent page in browser...")
-        webbrowser.open(consent_url)
-        
-        print(f"\n📝 Instructions:")
-        print(f"1. Complete the consent process in your browser")
-        print(f"2. Copy the authorization code from the redirect URL")
-        print(f"3. Use exchange_authorization_code() to get access tokens")
-        
-        return consent_url
-        
-    except Exception as e:
-        print(f"❌ Error opening consent page: {e}")
-        return None
+        authorization_code: code from consent redirect
+        environment: "production" or "sandbox"
+        scopes: list of scopes (must match consent request)
 
-
-def exchange_authorization_code(authorization_code, environment="sandbox", scopes=None):
-    """
-    Exchange authorization code for access token and refresh token.
-    
-    Args:
-        authorization_code (str): The authorization code from consent redirect
-        environment (str): "sandbox" or "production"
-        scopes (list): List of OAuth scopes (should match consent request)
-    
     Returns:
-        dict: Token response with access_token, refresh_token, expires_in, etc.
-    
-    Raises:
-        ValueError: If required parameters are missing
+        Token response dict or None on failure.
     """
     if not authorization_code:
-        raise ValueError("❌ Authorization code is required")
-    
+        raise ValueError("authorization_code is required")
     if not CLIENT_ID or not CLIENT_SECRET:
-        raise ValueError("❌ CLIENT_ID and CLIENT_SECRET are required")
-    
+        raise ValueError("CLIENT_ID and CLIENT_SECRET are required in .env")
     if not REDIRECT_URI:
-        raise ValueError("❌ REDIRECT_URI is required")
-    
-    # Default scopes - using only the basic scope that's available
+        raise ValueError("redirect_uri or redirect_url is required in .env")
     if scopes is None:
-        scopes = [
-            "https://api.ebay.com/oauth/api_scope"  # Basic API access scope - only one available
-        ]
-    
-    # Choose endpoint based on environment
-    if environment.lower() == "production":
-        token_url = PRODUCTION_TOKEN_URL
-        print("🌐 Using PRODUCTION environment")
-    else:
-        token_url = SANDBOX_TOKEN_URL
-        print("🧪 Using SANDBOX environment")
-    
-    # Create Basic Auth header
+        scopes = ["https://api.ebay.com/oauth/api_scope"]
+    token_url = PRODUCTION_TOKEN_URL if environment.lower() == "production" else SANDBOX_TOKEN_URL
     auth_string = f"{CLIENT_ID}:{CLIENT_SECRET}"
     auth_bytes = base64.b64encode(auth_string.encode()).decode()
-    
-    # Request headers
     headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Authorization': f'Basic {auth_bytes}'
     }
-    
-    # Request payload
-    # URL decode the authorization code before sending
     decoded_code = urllib.parse.unquote(authorization_code)
     data = {
         'grant_type': 'authorization_code',
@@ -198,315 +203,120 @@ def exchange_authorization_code(authorization_code, environment="sandbox", scope
         'redirect_uri': REDIRECT_URI,
         'scope': ' '.join(scopes)
     }
-    
     try:
-        print(f"🔄 Exchanging authorization code for tokens...")
-        print(f"🔍 Debug - Client ID: {CLIENT_ID[:10]}...")
-        print(f"🔍 Debug - Redirect URI: {REDIRECT_URI}")
-        
         response = requests.post(token_url, headers=headers, data=data)
-        
         if response.status_code == 200:
             token_data = response.json()
-            
             access_token = token_data.get('access_token')
             refresh_token = token_data.get('refresh_token')
-            expires_in = token_data.get('expires_in', 7200)
-            token_type = token_data.get('token_type', 'User Access Token')
-            
-            print(f"✅ Token exchange successful!")
-            print(f"  Token Type: {token_type}")
-            print(f"  Expires In: {expires_in} seconds ({expires_in/3600:.1f} hours)")
-            print(f"  Access Token: {access_token[:20]}...")
-            print(f"  Refresh Token: {refresh_token[:20]}...")
-            
-            # Save tokens to .env file
-            try:
-                set_key('.env', 'application_token', access_token)
-                if refresh_token:
-                    set_key('.env', 'refresh_token', refresh_token)
-                print(f"💾 Tokens saved to .env file")
-            except Exception as e:
-                print(f"⚠️ Warning: Could not save tokens to .env file: {e}")
-            
+            updates = {'user_token': access_token}
+            if refresh_token:
+                updates['refresh_token'] = refresh_token
+            updates['auth_code'] = authorization_code
+            update_env(updates)
             return token_data
-            
-        else:
-            print(f"❌ Token exchange failed: {response.status_code}")
-            print(f"Response: {response.text}")
-            
-            # Handle specific error cases
-            if response.status_code == 400:
-                print("💡 This might be due to:")
-                print("   - Invalid authorization code")
-                print("   - Authorization code expired")
-                print("   - Invalid client credentials")
-                print("   - Mismatched redirect URI")
-            elif response.status_code == 401:
-                print("💡 This might be due to:")
-                print("   - Invalid client_id or client_secret")
-                print("   - Malformed Basic Auth header")
-            
-            return None
-            
+        print(f"Exchange code failed: {response.status_code} - {response.text}")
+        return None
     except requests.exceptions.RequestException as e:
-        print(f"❌ Network error during token exchange: {e}")
-        return None
-    except Exception as e:
-        print(f"❌ Unexpected error during token exchange: {e}")
+        print(f"Network error exchanging code: {e}")
         return None
 
 
-def refresh_application_token(environment="sandbox", scopes=None):
+def refresh_user_token(environment="production", scopes=None):
     """
-    Refresh user access token using refresh token.
-    
+    Refresh user access token using refresh_token from .env.
+    On success, updates .env with user_token (and refresh_token if returned).
+
     Args:
-        environment (str): "sandbox" or "production"
-        scopes (list): List of OAuth scopes (should match original consent)
-    
+        environment: "production" or "sandbox"
+        scopes: list of scopes (same as original consent)
+
     Returns:
-        dict: Token response with new access_token, expires_in, etc.
-    
+        Token response dict or None on failure.
+
     Raises:
-        ValueError: If required parameters are missing
+        ValueError: if refresh_token or credentials missing.
     """
     if not REFRESH_TOKEN:
-        raise ValueError("❌ REFRESH_TOKEN not found in environment variables")
-    
+        raise ValueError("refresh_token is required in .env")
     if not CLIENT_ID or not CLIENT_SECRET:
-        raise ValueError("❌ CLIENT_ID and CLIENT_SECRET are required")
-    
-    # Default scopes - using only the basic scope that's available
+        raise ValueError("CLIENT_ID and CLIENT_SECRET are required in .env")
     if scopes is None:
-        scopes = [
-            "https://api.ebay.com/oauth/api_scope"  # Basic API access scope - only one available
-        ]
-    
-    # Choose endpoint based on environment
-    if environment.lower() == "production":
-        token_url = PRODUCTION_TOKEN_URL
-        print("🌐 Using PRODUCTION environment")
-    else:
-        token_url = SANDBOX_TOKEN_URL
-        print("🧪 Using SANDBOX environment")
-    
-    # Create Basic Auth header
+        scopes = ["https://api.ebay.com/oauth/api_scope"]
+    token_url = PRODUCTION_TOKEN_URL if environment.lower() == "production" else SANDBOX_TOKEN_URL
     auth_string = f"{CLIENT_ID}:{CLIENT_SECRET}"
     auth_bytes = base64.b64encode(auth_string.encode()).decode()
-    
-    # Request headers
     headers = {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Authorization': f'Basic {auth_bytes}'
     }
-    
-    # Request payload
     data = {
         'grant_type': 'refresh_token',
         'refresh_token': REFRESH_TOKEN,
         'scope': ' '.join(scopes)
     }
-    
     try:
-        print(f"🔄 Refreshing user access token...")
-        print(f"🔍 Debug - Client ID: {CLIENT_ID[:10]}...")
-        print(f"🔍 Debug - Refresh Token: {REFRESH_TOKEN[:20]}...")
-        
         response = requests.post(token_url, headers=headers, data=data)
-        
         if response.status_code == 200:
             token_data = response.json()
-            
             access_token = token_data.get('access_token')
-            new_refresh_token = token_data.get('refresh_token', REFRESH_TOKEN)
-            expires_in = token_data.get('expires_in', 7200)
-            token_type = token_data.get('token_type', 'User Access Token')
-            
-            print(f"✅ Token refresh successful!")
-            print(f"  Token Type: {token_type}")
-            print(f"  Expires In: {expires_in} seconds ({expires_in/3600:.1f} hours)")
-            print(f"  New Access Token: {access_token[:20]}...")
-            
-            if new_refresh_token != REFRESH_TOKEN:
-                print(f"  New Refresh Token: {new_refresh_token[:20]}...")
-            
-            # Save tokens to .env file
-            try:
-                set_key('.env', 'application_token', access_token)
-                if new_refresh_token != REFRESH_TOKEN:
-                    set_key('.env', 'refresh_token', new_refresh_token)
-                print(f"💾 Tokens updated in .env file")
-            except Exception as e:
-                print(f"⚠️ Warning: Could not save tokens to .env file: {e}")
-            
+            new_refresh = token_data.get('refresh_token', REFRESH_TOKEN)
+            updates = {'user_token': access_token}
+            if new_refresh:
+                updates['refresh_token'] = new_refresh
+            update_env(updates)
             return token_data
-            
-        else:
-            print(f"❌ Token refresh failed: {response.status_code}")
-            print(f"Response: {response.text}")
-            
-            # Handle specific error cases
-            if response.status_code == 400:
-                print("💡 This might be due to:")
-                print("   - Invalid refresh token")
-                print("   - Refresh token expired")
-                print("   - Invalid client credentials")
-                print("   - User changed password or revoked access")
-            elif response.status_code == 401:
-                print("💡 This might be due to:")
-                print("   - Invalid client_id or client_secret")
-                print("   - Malformed Basic Auth header")
-            
-            return None
-            
+        print(f"Refresh user token failed: {response.status_code} - {response.text}")
+        return None
     except requests.exceptions.RequestException as e:
-        print(f"❌ Network error refreshing token: {e}")
+        print(f"Network error refreshing user token: {e}")
         return None
-    except Exception as e:
-        print(f"❌ Unexpected error refreshing token: {e}")
-        return None
-
-
-def complete_oauth_flow(environment="sandbox", scopes=None, state=None, locale=None):
-    """
-    Complete the full OAuth flow: consent + token exchange.
-    
-    This function will:
-    1. Generate and open the consent URL
-    2. Wait for user to provide authorization code
-    3. Exchange the code for tokens
-    
-    Args:
-        environment (str): "sandbox" or "production"
-        scopes (list): List of OAuth scopes
-        state (str): Optional state parameter
-        locale (str): Optional locale
-    
-    Returns:
-        dict: Token response if successful, None if failed
-    """
-    try:
-        print(f"🚀 Starting complete OAuth flow...")
-        
-        # Step 1: Open consent page
-        consent_url = open_user_consent_page(environment, scopes, state, locale)
-        if not consent_url:
-            return None
-        
-        # Step 2: Get authorization code from user
-        print(f"\n⏳ Please complete the consent process and copy the authorization code from the redirect URL.")
-        print(f"💡 Look for the 'code' parameter in the URL after you're redirected.")
-        
-        authorization_code = input("\n📝 Enter the authorization code: ").strip()
-        
-        if not authorization_code:
-            print("❌ No authorization code provided")
-            return None
-        
-        # Step 3: Exchange code for tokens
-        print(f"\n🔄 Exchanging authorization code for tokens...")
-        token_response = exchange_authorization_code(authorization_code, environment, scopes)
-        
-        if token_response:
-            print(f"\n🎉 OAuth flow completed successfully!")
-            return token_response
-        else:
-            print(f"\n❌ OAuth flow failed during token exchange")
-            return None
-            
-    except KeyboardInterrupt:
-        print(f"\n⚠️ OAuth flow cancelled by user")
-        return None
-    except Exception as e:
-        print(f"❌ Error in OAuth flow: {e}")
-        return None
-
-
-def test_functions():
-    """
-    Test function to demonstrate usage of OAuth functions.
-    """
-    print("🧪 Testing eBay OAuth Functions")
-    print("=" * 50)
-    
-    # Test 1: Create consent URL
-    print("\n1️⃣ Testing consent URL creation...")
-    try:
-        consent_url = create_user_consent_url(
-            environment="sandbox",
-            scopes=[
-                "https://api.ebay.com/oauth/api_scope"  # Only use the basic scope that's available
-            ],
-            state="test_state_123"
-        )
-        print("✅ Consent URL created successfully")
-    except Exception as e:
-        print(f"❌ Error creating consent URL: {e}")
-    
-    # Test 2: Refresh token (if available)
-    print("\n2️⃣ Testing token refresh...")
-    try:
-        if REFRESH_TOKEN:
-            token_response = refresh_application_token(environment="sandbox")
-            if token_response:
-                print("✅ Token refresh successful")
-            else:
-                print("❌ Token refresh failed")
-        else:
-            print("⚠️ No refresh token available for testing")
-    except Exception as e:
-        print(f"❌ Error refreshing token: {e}")
-    
-    print("\n🎯 Test completed!")
 
 
 if __name__ == "__main__":
     import sys
-    
     if len(sys.argv) < 2:
-        print("❌ Usage: python refreshTokenTest.py <command> [args...]")
-        print("Commands:")
-        print("  consent [sandbox|production] - Create consent URL")
-        print("  open [sandbox|production] - Open consent page in browser")
-        print("  exchange <auth_code> [sandbox|production] - Exchange auth code for tokens")
-        print("  refresh [sandbox|production] - Refresh access token")
-        print("  flow [sandbox|production] - Complete OAuth flow")
-        print("  test - Run test functions")
+        print("Usage: python refreshTokenTest.py <command> [args...]")
+        print("Commands (default environment: production):")
+        print("  mint-app [production|sandbox]")
+        print("  consent [production|sandbox]")
+        print("  open-consent [production|sandbox]")
+        print("  exchange <code> [production|sandbox]")
+        print("  refresh-user [production|sandbox]")
         sys.exit(1)
-    
     command = sys.argv[1].lower()
-    
+    env_arg = None
+    if command == "exchange":
+        if len(sys.argv) < 3:
+            print("Usage: exchange <auth_code> [production|sandbox]")
+            sys.exit(1)
+        code = sys.argv[2]
+        env_arg = sys.argv[3] if len(sys.argv) > 3 else "production"
+    else:
+        env_arg = sys.argv[2] if len(sys.argv) > 2 else "production"
+    env = env_arg if env_arg in ("production", "sandbox") else "production"
     try:
-        if command == "consent":
-            env = sys.argv[2] if len(sys.argv) > 2 else "sandbox"
-            create_user_consent_url(environment=env)
-            
-        elif command == "open":
-            env = sys.argv[2] if len(sys.argv) > 2 else "sandbox"
-            open_user_consent_page(environment=env)
-            
+        if command == "mint-app":
+            result = mint_application_token(environment=env)
+            if result:
+                print("Application token minted and saved to .env")
+        elif command == "consent":
+            url = get_user_consent_url(environment=env)
+            print(url)
+        elif command == "open-consent":
+            url = open_user_consent_page(environment=env)
+            print("Opened:", url)
         elif command == "exchange":
-            if len(sys.argv) < 3:
-                print("❌ Usage: exchange <auth_code> [sandbox|production]")
-                sys.exit(1)
-            auth_code = sys.argv[2]
-            env = sys.argv[3] if len(sys.argv) > 3 else "sandbox"
-            exchange_authorization_code(auth_code, environment=env)
-            
-        elif command == "refresh":
-            env = sys.argv[2] if len(sys.argv) > 2 else "sandbox"
-            refresh_application_token(environment=env)
-            
-        elif command == "flow":
-            env = sys.argv[2] if len(sys.argv) > 2 else "sandbox"
-            complete_oauth_flow(environment=env)
-            
-        elif command == "test":
-            test_functions()
-            
+            result = exchange_code_for_user_token(code, environment=env)
+            if result:
+                print("User token and refresh_token saved to .env")
+        elif command == "refresh-user":
+            result = refresh_user_token(environment=env)
+            if result:
+                print("User token updated in .env")
         else:
-            print("❌ Unknown command. Use 'python refreshTokenTest.py' to see available commands.")
-            
+            print("Unknown command. Use mint-app, consent, open-consent, exchange, or refresh-user.")
+            sys.exit(1)
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"Error: {e}")
+        sys.exit(1)
