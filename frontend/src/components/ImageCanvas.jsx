@@ -498,273 +498,264 @@ export default function ImageCanvas({ onAddToListing, originalPhotos = [], gener
 
   const selectedCount = selectedIds.size
 
+  const btnPrimary =
+    'rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60'
+  const btnSecondary =
+    'rounded-lg border-2 border-primary bg-white px-4 py-2 font-semibold text-primary transition-all hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60'
+  const btnDanger = 'rounded-lg bg-red-500 px-4 py-2 font-semibold text-white transition-all hover:bg-red-600 disabled:opacity-60'
+
   return (
-    <div className="canvas-compositor">
-      <h3 className="canvas-compositor-title">Image Canvas</h3>
-      <p className="testing-description">
-        Upload images, select which ones to add to the canvas, arrange them with drag / resize / rotate, then download or compile.
-      </p>
+    <div>
+      <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
+        <div className="flex flex-1 flex-col">
+          {/* Toolbar */}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white p-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-gray-700" title="Font size for new text">
+                  Size:
+                </label>
+                <input
+                  type="number"
+                  min="8"
+                  max="500"
+                  value={textFontSize}
+                  onChange={(e) =>
+                    setTextFontSize(Math.max(8, Math.min(500, parseInt(e.target.value, 10) || 48)))
+                  }
+                  className="w-16 rounded border border-gray-300 px-2 py-1 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="text-sm font-medium text-gray-700" title="Font weight for new text">
+                  Weight:
+                </label>
+                <select
+                  value={textFontWeight}
+                  onChange={(e) => setTextFontWeight(e.target.value)}
+                  className="rounded border border-gray-300 px-2 py-1 text-sm focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="normal">Normal</option>
+                  <option value="bold">Bold</option>
+                  <option value="bolder">Bolder</option>
+                  <option value="lighter">Lighter</option>
+                </select>
+              </div>
 
-      {/* Upload & image pool */}
-      <div className="canvas-pool-section">
-        <div className="canvas-pool-header">
-          <h4 className="canvas-pool-title">Image Pool</h4>
-          <div className="canvas-pool-actions">
-            <input
-              ref={uploadInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              style={{ display: 'none' }}
-              onChange={handleUploadImages}
-            />
-            <button
-              type="button"
-              className="testing-button canvas-btn-upload"
-              onClick={() => uploadInputRef.current?.click()}
-            >
-              Upload Images
-            </button>
-            {uploadedImages.length > 0 && (
-              <>
-                <button
-                  type="button"
-                  className="canvas-pool-link-btn"
-                  onClick={selectedIds.size === uploadedImages.length ? deselectAll : selectAll}
-                >
-                  {selectedIds.size === uploadedImages.length ? 'Deselect All' : 'Select All'}
-                </button>
-                <button
-                  type="button"
-                  className="canvas-pool-link-btn canvas-pool-link-btn-danger"
-                  onClick={removeFromPool}
-                  disabled={selectedCount === 0}
-                >
-                  Remove from Pool
-                </button>
-                <button
-                  type="button"
-                  className="testing-button canvas-btn-remove-add"
-                  onClick={handleRemoveAddSelected}
-                  disabled={isProcessing || selectedCount === 0}
-                  title={selectedCount === 0 ? 'Select images from the pool first' : ''}
-                >
-                  {isProcessing
-                    ? `Removing... (${processingCount}/${processingTotal})`
-                    : `Remove + Add${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
-                </button>
-                <button
-                  type="button"
-                  className="testing-button canvas-btn-add"
-                  onClick={handleAddSelected}
-                  disabled={isProcessing || selectedCount === 0}
-                  title={selectedCount === 0 ? 'Select images from the pool first' : ''}
-                >
-                  {`Add${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
+              <button type="button" className={btnSecondary} onClick={handleAddText} title="Add text to canvas">
+                Add Text
+              </button>
 
-        {uploadedImages.length > 0 ? (
-          <div className="canvas-pool-grid">
-            {uploadedImages.map((img) => {
-              const isImgProcessing = processingIds.has(img.id)
-              return (
-                <div
-                  key={img.id}
-                  className={`canvas-pool-thumb ${selectedIds.has(img.id) ? 'selected' : ''} ${isImgProcessing ? 'processing' : ''}`}
-                  onClick={() => !isImgProcessing && toggleImageSelection(img.id)}
-                  title={img.name}
+              <button type="button" className={btnDanger} onClick={handleDelete} title="Delete selected canvas object">
+                Delete
+              </button>
+
+              <span className="h-6 w-px bg-gray-300" />
+
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  className="rounded border border-gray-300 bg-gray-100 px-2 py-1 text-sm font-medium transition-colors hover:bg-gray-200"
+                  onClick={handleBringToFront}
+                  title="Bring to front"
                 >
-                  <img src={img.dataUrl} alt={img.name} />
-                  <div className="canvas-pool-check">
-                    {selectedIds.has(img.id) ? '\u2713' : ''}
+                  &#x21C8;
+                </button>
+                <button
+                  type="button"
+                  className="rounded border border-gray-300 bg-gray-100 px-2 py-1 text-sm font-medium transition-colors hover:bg-gray-200"
+                  onClick={handleBringForward}
+                  title="Bring forward"
+                >
+                  &#x2191;
+                </button>
+                <button
+                  type="button"
+                  className="rounded border border-gray-300 bg-gray-100 px-2 py-1 text-sm font-medium transition-colors hover:bg-gray-200"
+                  onClick={handleSendBackward}
+                  title="Send backward"
+                >
+                  &#x2193;
+                </button>
+                <button
+                  type="button"
+                  className="rounded border border-gray-300 bg-gray-100 px-2 py-1 text-sm font-medium transition-colors hover:bg-gray-200"
+                  onClick={handleSendToBack}
+                  title="Send to back"
+                >
+                  &#x21CA;
+                </button>
+              </div>
+            </div>
+
+            <div className="relative" ref={settingsRef}>
+              <button
+                type="button"
+                className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-300 bg-gray-100 text-lg transition-colors hover:bg-gray-200"
+                onClick={openSettings}
+                title="Canvas settings"
+              >
+                &#9881;
+              </button>
+
+              {showSettings && (
+                <div className="absolute right-0 top-full z-10 mt-2 flex w-48 flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-sm">Width:</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={tempWidth}
+                      onChange={(e) => setTempWidth(e.target.value)}
+                      className="w-20 rounded border border-gray-300 px-2 py-1 text-sm"
+                    />
                   </div>
-                  {isImgProcessing && (
-                    <div className="canvas-pool-loading-overlay">
-                      <div className="canvas-pool-loading-bar">
-                        <div className="canvas-pool-loading-fill" />
-                      </div>
-                    </div>
-                  )}
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-sm">Height:</label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={tempHeight}
+                      onChange={(e) => setTempHeight(e.target.value)}
+                      className="w-20 rounded border border-gray-300 px-2 py-1 text-sm"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-sm">BG Color:</label>
+                    <input
+                      type="color"
+                      value={tempBgColor}
+                      onChange={(e) => setTempBgColor(e.target.value)}
+                      className="h-8 w-14 cursor-pointer rounded border border-gray-300"
+                    />
+                  </div>
+                  <button type="button" className={btnPrimary} onClick={applySettings}>
+                    Apply
+                  </button>
                 </div>
-              )
-            })}
-          </div>
-        ) : (
-          <div className="canvas-pool-empty">
-            No images uploaded yet. Click "Upload Images" to add some.
-          </div>
-        )}
-      </div>
-
-      {/* Toolbar */}
-      <div className="canvas-toolbar">
-        <div className="canvas-toolbar-left">
-          <div className="canvas-text-settings">
-            <label className="canvas-text-label" title="Font size for new text">
-              Size:
-            </label>
-            <input
-              type="number"
-              min="8"
-              max="500"
-              value={textFontSize}
-              onChange={(e) => setTextFontSize(Math.max(8, Math.min(500, parseInt(e.target.value, 10) || 48)))}
-              className="canvas-text-input"
-            />
-            <label className="canvas-text-label" title="Font weight for new text">
-              Weight:
-            </label>
-            <select
-              value={textFontWeight}
-              onChange={(e) => setTextFontWeight(e.target.value)}
-              className="canvas-text-select"
-            >
-              <option value="normal">Normal</option>
-              <option value="bold">Bold</option>
-              <option value="bolder">Bolder</option>
-              <option value="lighter">Lighter</option>
-            </select>
+              )}
+            </div>
           </div>
 
-          <button
-            type="button"
-            className="testing-button canvas-btn-add-text"
-            onClick={handleAddText}
-            title="Add text to canvas"
-          >
-            Add Text
-          </button>
+          {/* Canvas area */}
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm" style={{ width: displayWidth, height: displayHeight }}>
+            <canvas ref={canvasRef} />
+          </div>
 
-          <button
-            type="button"
-            className="canvas-btn-delete"
-            onClick={handleDelete}
-            title="Delete selected canvas object"
-          >
-            Delete
-          </button>
+          <p className="mt-2 text-sm text-gray-600">
+            {canvasWidth} &times; {canvasHeight}px
+            {displayScale < 1 && ` (displayed at ${Math.round(displayScale * 100)}%)`}
+          </p>
 
-          <span className="canvas-toolbar-separator" />
-
-          <div className="canvas-layer-controls">
-            <button
-              type="button"
-              className="canvas-layer-btn"
-              onClick={handleBringToFront}
-              title="Bring to front"
-            >
-              &#x21C8;
+          <div className="mt-4 flex gap-3">
+            <button type="button" className={btnSecondary} onClick={handleDownload}>
+              Download
             </button>
-            <button
-              type="button"
-              className="canvas-layer-btn"
-              onClick={handleBringForward}
-              title="Bring forward"
-            >
-              &#x2191;
-            </button>
-            <button
-              type="button"
-              className="canvas-layer-btn"
-              onClick={handleSendBackward}
-              title="Send backward"
-            >
-              &#x2193;
-            </button>
-            <button
-              type="button"
-              className="canvas-layer-btn"
-              onClick={handleSendToBack}
-              title="Send to back"
-            >
-              &#x21CA;
+            <button type="button" className={btnPrimary} onClick={handleAddToListing} disabled={isCompiling}>
+              {isCompiling ? 'Adding...' : 'Add to New Listing'}
             </button>
           </div>
         </div>
 
-        <div className="canvas-toolbar-right">
-          {/* Settings gear */}
-          <div className="canvas-settings-container" ref={settingsRef}>
-            <button
-              type="button"
-              className="canvas-settings-btn"
-              onClick={openSettings}
-              title="Canvas settings"
-            >
-              &#9881;
-            </button>
+        {/* Image pool sidebar */}
+        <div className="flex min-w-0 flex-1 flex-col rounded-xl border border-gray-200 bg-white lg:max-w-sm">
+          <div className="border-b border-gray-200 p-4">
+            <h4 className="mb-3 text-lg font-semibold text-gray-800">Image Pool</h4>
+            <div className="flex flex-wrap gap-2">
+              <input
+                ref={uploadInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={handleUploadImages}
+              />
+              <button type="button" className={btnPrimary} onClick={() => uploadInputRef.current?.click()}>
+                Upload Images
+              </button>
+              {uploadedImages.length > 0 && (
+                <>
+                  <button
+                    type="button"
+                    className="text-sm font-semibold text-primary underline hover:no-underline"
+                    onClick={selectedIds.size === uploadedImages.length ? deselectAll : selectAll}
+                  >
+                    {selectedIds.size === uploadedImages.length ? 'Deselect All' : 'Select All'}
+                  </button>
+                  <button
+                    type="button"
+                    className="text-sm font-semibold text-red-600 underline hover:no-underline disabled:opacity-50"
+                    onClick={removeFromPool}
+                    disabled={selectedCount === 0}
+                  >
+                    Remove from Pool
+                  </button>
+                  <button
+                    type="button"
+                    className={btnPrimary}
+                    onClick={handleRemoveAddSelected}
+                    disabled={isProcessing || selectedCount === 0}
+                    title={selectedCount === 0 ? 'Select images from the pool first' : ''}
+                  >
+                    {isProcessing
+                      ? `Removing... (${processingCount}/${processingTotal})`
+                      : `Remove + Add${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
+                  </button>
+                  <button
+                    type="button"
+                    className={btnSecondary}
+                    onClick={handleAddSelected}
+                    disabled={isProcessing || selectedCount === 0}
+                    title={selectedCount === 0 ? 'Select images from the pool first' : ''}
+                  >
+                    {`Add${selectedCount > 0 ? ` (${selectedCount})` : ''}`}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
 
-            {showSettings && (
-              <div className="canvas-settings-popover">
-                <div className="canvas-settings-row">
-                  <label>Width:</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={tempWidth}
-                    onChange={(e) => setTempWidth(e.target.value)}
-                  />
-                </div>
-                <div className="canvas-settings-row">
-                  <label>Height:</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={tempHeight}
-                    onChange={(e) => setTempHeight(e.target.value)}
-                  />
-                </div>
-                <div className="canvas-settings-row">
-                  <label>BG Color:</label>
-                  <input
-                    type="color"
-                    value={tempBgColor}
-                    onChange={(e) => setTempBgColor(e.target.value)}
-                  />
-                </div>
-                <button
-                  type="button"
-                  className="testing-button canvas-settings-apply"
-                  onClick={applySettings}
-                >
-                  Apply
-                </button>
+          <div className="flex-1 overflow-auto p-4">
+            {uploadedImages.length > 0 ? (
+              <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
+                {uploadedImages.map((img) => {
+                  const isImgProcessing = processingIds.has(img.id)
+                  const isSelected = selectedIds.has(img.id)
+                  return (
+                    <div
+                      key={img.id}
+                      className={`relative aspect-square cursor-pointer overflow-hidden rounded-lg border-2 transition-all ${
+                        isSelected ? 'border-primary ring-2 ring-primary/30' : 'border-transparent'
+                      } ${isImgProcessing ? 'pointer-events-none opacity-70' : ''}`}
+                      onClick={() => !isImgProcessing && toggleImageSelection(img.id)}
+                      title={img.name}
+                    >
+                      <img src={img.dataUrl} alt={img.name} className="h-full w-full object-cover" />
+                      <div
+                        className={`absolute inset-0 flex items-center justify-center bg-primary/20 text-2xl font-bold text-primary ${
+                          isSelected ? 'opacity-100' : 'opacity-0'
+                        }`}
+                      >
+                        {isSelected ? '\u2713' : ''}
+                      </div>
+                      {isImgProcessing && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                          <div className="h-1 w-3/4 overflow-hidden rounded-full bg-gray-700">
+                            <div className="h-full w-2/5 animate-pool-loading rounded-full bg-violet-500" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="py-8 text-center text-sm text-gray-500">
+                No images uploaded yet. Click &quot;Upload Images&quot; to add some.
               </div>
             )}
           </div>
         </div>
-      </div>
-
-      {/* Canvas area */}
-      <div className="canvas-wrapper" style={{ width: displayWidth, height: displayHeight }}>
-        <canvas ref={canvasRef} />
-      </div>
-
-      <p className="canvas-dimensions-label">
-        {canvasWidth} &times; {canvasHeight}px
-        {displayScale < 1 && ` (displayed at ${Math.round(displayScale * 100)}%)`}
-      </p>
-
-      <div className="canvas-export-actions">
-        <button
-          type="button"
-          className="testing-button canvas-btn-download"
-          onClick={handleDownload}
-        >
-          Download
-        </button>
-        <button
-          type="button"
-          className="testing-button canvas-btn-compile"
-          onClick={handleAddToListing}
-          disabled={isCompiling}
-        >
-          {isCompiling ? 'Adding...' : 'Add to New Listing'}
-        </button>
       </div>
     </div>
   )

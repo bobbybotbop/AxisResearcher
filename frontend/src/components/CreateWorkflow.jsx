@@ -63,32 +63,39 @@ function CreateWorkflow({
   lightboxOpen,
   lightboxIndex,
 }) {
+  const btnPrimary =
+    'rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60'
+  const btnSuccess =
+    'rounded-lg bg-gradient-to-br from-success to-emerald-600 px-4 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60'
+  const btnDanger =
+    'rounded-lg bg-gradient-to-br from-red-500 to-red-600 px-4 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60'
+
   return (
     <>
-      <form onSubmit={onSubmit} className="search-form">
+      <form onSubmit={onSubmit} className="mb-8 flex flex-wrap gap-4">
         <input
           type="text"
           value={listingId}
           onChange={(e) => onListingIdChange(e.target.value)}
           placeholder="eBay listing ID or URL (e.g., 123456789 or https://www.ebay.com/itm/123456789)"
-          className="search-input"
+          className="min-w-[250px] flex-1 rounded-lg border-2 border-gray-300 px-4 py-3 text-base transition-colors focus:border-primary focus:outline-none disabled:cursor-not-allowed disabled:bg-gray-100"
           disabled={loading}
         />
-        <button type="submit" className="search-button" disabled={loading}>
+        <button type="submit" className={btnPrimary} disabled={loading}>
           {loading ? 'Loading...' : 'Fetch Photos'}
         </button>
       </form>
 
       {error && (
-        <div className="error-message">
+        <div className="mb-8 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
           <p>{error}</p>
         </div>
       )}
 
       {loading && (
-        <div className="loading">
-          <div className="spinner"></div>
-          <p>Fetching listing data...</p>
+        <div className="flex flex-col items-center justify-center gap-4 py-12">
+          <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200 border-t-primary" />
+          <p className="text-gray-600">Fetching listing data...</p>
           {fetchProgress?.isActive && fetchProgress?.totalSteps?.length > 0 && (
             <ProgressIndicator
               steps={fetchProgress.totalSteps}
@@ -100,7 +107,7 @@ function CreateWorkflow({
       )}
 
       {currentSku && (
-        <div className="sku-display" style={{ margin: '20px 0', padding: '10px', backgroundColor: '#f0f0f0', borderRadius: '5px' }}>
+        <div className="my-5 rounded-md bg-gray-100 p-2.5">
           <strong>Current SKU:</strong> {currentSku}
         </div>
       )}
@@ -122,41 +129,48 @@ function CreateWorkflow({
             onPromptModifierChange={onPromptModifierChange}
           />
           {isConfirming && imageGenProgress?.isActive && (
-            <div className="image-generation-progress" style={{ margin: '20px 0', padding: '15px', backgroundColor: '#f9f9f9', borderRadius: '5px' }}>
-              <h3>Generating Images</h3>
-              <div className="progress-info">
-                <p>Progress: {imageGenProgress.completed} of {imageGenProgress.total} images complete</p>
+            <div className="my-5 rounded-lg border border-gray-200 bg-gray-50 p-4">
+              <h3 className="mb-2.5 text-lg text-gray-800">Generating Images</h3>
+              <div className="mt-2.5">
+                <p className="text-gray-600">
+                  Progress: {imageGenProgress.completed} of {imageGenProgress.total} images complete
+                </p>
                 {imageGenProgress.total > 0 && (
-                  <div className="progress-bar-container" style={{ marginTop: '10px' }}>
+                  <div className="relative mt-2.5 h-5 w-full overflow-hidden rounded bg-gray-200">
                     <div
-                      className="progress-bar"
+                      className="h-full rounded bg-green-500 transition-[width] duration-300"
                       style={{
                         width: `${(imageGenProgress.completed / imageGenProgress.total) * 100}%`,
-                        height: '20px',
-                        backgroundColor: '#4CAF50',
-                        borderRadius: '4px',
-                        transition: 'width 0.3s ease',
                       }}
-                    ></div>
+                    />
                   </div>
                 )}
               </div>
             </div>
           )}
 
-          <div className="editor-collapsible-panel">
-            <button type="button" className="editor-toggle-button" onClick={onEditorToggle}>
-              <span className={`editor-chevron ${isEditorOpen ? 'open' : ''}`}>&#9654;</span>
+          <div className="mt-6 overflow-hidden rounded-xl border border-gray-200 bg-white">
+            <button
+              type="button"
+              className="flex w-full items-center gap-3 border-none bg-[#fafbfe] px-5 py-4 text-left text-lg font-semibold text-gray-800 transition-colors hover:bg-[#f0f2fa]"
+              onClick={onEditorToggle}
+            >
+              <span
+                className={`inline-block text-sm text-primary transition-transform ${isEditorOpen ? 'rotate-90' : ''}`}
+              >
+                &#9654;
+              </span>
               Image Editor
             </button>
             {isEditorOpen && (
-              <div className="editor-panel-body">
+              <div className="border-t border-gray-200 p-4">
                 {onUseRealEbayUploadChange != null && (
-                  <label className="editor-upload-checkbox" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px', cursor: 'pointer' }}>
+                  <label className="mb-3 flex cursor-pointer items-center gap-2">
                     <input
                       type="checkbox"
                       checked={useRealEbayUpload ?? false}
                       onChange={(e) => onUseRealEbayUploadChange(e.target.checked)}
+                      className="rounded"
                     />
                     <span>Upload to eBay when adding from canvas</span>
                   </label>
@@ -174,36 +188,48 @@ function CreateWorkflow({
       )}
 
       {generatedImages?.length > 0 && (
-        <div className="generated-images-section section-container new-listing-container">
-          <h2 className="gallery-title">New Listing Photos</h2>
+        <div className="mt-8 rounded-2xl border border-green-200 bg-green-50/50 p-6">
+          <h2 className="mb-5 text-xl font-semibold text-gray-800">New Listing Photos</h2>
           <DragDropContext onDragEnd={onDragEnd}>
             <Droppable droppableId="new-listing-photos" direction="horizontal">
               {(provided) => (
-                <div className="gallery-grid" ref={provided.innerRef} {...provided.droppableProps}>
+                <div
+                  className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:gap-5"
+                  ref={provided.innerRef}
+                  {...provided.droppableProps}
+                >
                   {generatedImages.map((imageUrl, index) => (
                     <Draggable key={`img-${imageUrl}-${index}`} draggableId={`img-${imageUrl}-${index}`} index={index}>
                       {(provided, snapshot) => (
                         <div
                           ref={provided.innerRef}
                           {...provided.draggableProps}
-                          className={`gallery-item image-selectable ${snapshot.isDragging ? 'is-dragging' : ''}`}
+                          className={`group relative aspect-square overflow-hidden rounded-xl transition-all ${
+                            snapshot.isDragging ? 'opacity-80 shadow-lg' : ''
+                          }`}
                         >
-                          <div className="drag-handle" {...provided.dragHandleProps} title="Drag to reorder">
-                            <span className="drag-handle-dots">&#x2630;</span>
+                          <div
+                            className="absolute left-1.5 top-1.5 z-20 cursor-grab text-gray-600 hover:text-gray-800"
+                            {...provided.dragHandleProps}
+                            title="Drag to reorder"
+                          >
+                            &#x2630;
                           </div>
-                          <label className="image-checkbox-label">
+                          <label className="absolute inset-0 z-10 cursor-pointer">
                             <input
                               type="checkbox"
                               checked={selectedImagesForRegen?.includes(index)}
                               onChange={() => onImageSelection(index)}
-                              className="image-checkbox"
+                              className="peer sr-only"
                             />
-                            <span className="checkbox-overlay">Select to regenerate</span>
+                            <span className="pointer-events-none absolute inset-0 hidden rounded-xl border-2 border-primary bg-primary/10 peer-checked:block" />
                           </label>
-                          <div className="gallery-order-badge">{index + 1}</div>
+                          <div className="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-0.5 text-sm font-bold text-white">
+                            {index + 1}
+                          </div>
                           <button
                             type="button"
-                            className="listing-photo-delete-btn"
+                            className="absolute right-1.5 top-1.5 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-lg font-bold text-white opacity-0 transition-opacity hover:bg-red-600 group-hover:opacity-100"
                             onClick={() => onRemoveFromListing(index)}
                             title="Remove from listing"
                           >
@@ -212,7 +238,7 @@ function CreateWorkflow({
                           <img
                             src={imageUrl}
                             alt={`New listing photo ${index + 1}`}
-                            className="gallery-image"
+                            className="h-full w-full object-cover"
                             loading="lazy"
                           />
                         </div>
@@ -225,29 +251,35 @@ function CreateWorkflow({
             </Droppable>
           </DragDropContext>
 
-          <div className="prompt-section">
-            <h3 className="prompt-title">Optional: Edit Images Further</h3>
-            <p className="prompt-description">Enter a custom prompt to regenerate selected images</p>
+          <div className="mt-8 rounded-xl bg-white p-6 shadow-sm">
+            <h3 className="mb-2 text-xl text-gray-800">Optional: Edit Images Further</h3>
+            <p className="mb-4 text-gray-600">Enter a custom prompt to regenerate selected images</p>
             <textarea
-              className="prompt-input"
+              className="w-full resize-y rounded-lg border-2 border-gray-300 p-3 text-base transition-colors focus:border-primary focus:outline-none disabled:cursor-not-allowed disabled:bg-gray-100"
               value={customPrompt}
               onChange={(e) => onCustomPromptChange(e.target.value)}
               placeholder="Enter your custom prompt for image editing..."
               rows={4}
               disabled={isRegenerating || (selectedImagesForRegen?.length ?? 0) === 0}
             />
-            <div className="prompt-actions">
+            <div className="mt-4 flex justify-end gap-3">
               <button
                 type="button"
-                className="regenerate-button"
+                className={btnSuccess}
                 onClick={onRegenerateImages}
-                disabled={isRegenerating || !customPrompt?.trim() || (selectedImagesForRegen?.length ?? 0) === 0}
+                disabled={
+                  isRegenerating ||
+                  !customPrompt?.trim() ||
+                  (selectedImagesForRegen?.length ?? 0) === 0
+                }
               >
-                {isRegenerating ? 'Regenerating...' : `Regenerate Selected (${selectedImagesForRegen?.length ?? 0})`}
+                {isRegenerating
+                  ? 'Regenerating...'
+                  : `Regenerate Selected (${selectedImagesForRegen?.length ?? 0})`}
               </button>
               <button
                 type="button"
-                className="regenerate-button"
+                className={btnSuccess}
                 onClick={onTrimSelected}
                 disabled={isTrimming || (selectedImagesForRegen?.length ?? 0) === 0}
               >
@@ -256,17 +288,20 @@ function CreateWorkflow({
             </div>
           </div>
 
-          <div className="listing-actions">
+          <div className="mt-8 flex justify-center">
             <button
               type="button"
-              className="confirm-edit-button"
+              className={btnPrimary}
               onClick={onConfirmAndEditText}
               disabled={isCreatingListing}
             >
               {isCreatingListing ? 'Updating Listing...' : 'Confirm and Edit Text'}
             </button>
-            {isCreatingListing && createListingProgress?.isActive && createListingProgress?.totalSteps?.length > 0 && (
-              <div style={{ marginTop: '15px' }}>
+          </div>
+          {isCreatingListing &&
+            createListingProgress?.isActive &&
+            createListingProgress?.totalSteps?.length > 0 && (
+              <div className="mt-4">
                 <ProgressIndicator
                   steps={createListingProgress.totalSteps}
                   currentStep={createListingProgress.currentStep}
@@ -274,23 +309,26 @@ function CreateWorkflow({
                 />
               </div>
             )}
-          </div>
         </div>
       )}
 
       {listingData && (
-        <div className="listing-data-section">
-          <h2 className="gallery-title">Generated Listing</h2>
-          <div className="listing-data-display">
-            <div className="listing-info-item">
-              <strong>SKU:</strong> {listingData.sku}
+        <div className="mt-8">
+          <h2 className="mb-4 text-xl font-semibold text-gray-800">Generated Listing</h2>
+          <div className="space-y-4">
+            <div className="border-b border-gray-200 pb-4">
+              <strong className="text-primary">SKU:</strong> {listingData.sku}
             </div>
-            <div className="listing-info-item title-edit-section">
-              <div className="title-edit-header">
-                <strong>Title:</strong>
+            <div className="flex flex-col gap-2 border-b border-gray-200 pb-4">
+              <div className="flex items-center justify-between">
+                <strong className="text-primary">Title:</strong>
                 <span
-                  className={`title-char-count ${
-                    editableTitle?.length > 80 ? 'over-limit' : editableTitle?.length >= 73 && editableTitle?.length <= 80 ? 'good' : 'under'
+                  className={`rounded-full px-2.5 py-1 text-sm font-semibold ${
+                    editableTitle?.length > 80
+                      ? 'bg-red-100 text-red-700'
+                      : editableTitle?.length >= 73 && editableTitle?.length <= 80
+                        ? 'bg-green-100 text-green-700'
+                        : 'bg-primary/10 text-primary'
                   }`}
                 >
                   {editableTitle?.length ?? 0} / 80
@@ -299,65 +337,88 @@ function CreateWorkflow({
               </div>
               <input
                 type="text"
-                className={`title-edit-input ${editableTitle?.length > 80 ? 'over-limit' : ''}`}
+                className={`w-full rounded-lg border-2 px-3 py-2.5 transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20 ${
+                  editableTitle?.length > 80
+                    ? 'border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500/20'
+                    : 'border-gray-300 focus:border-primary'
+                }`}
                 value={editableTitle}
                 onChange={(e) => onEditableTitleChange(e.target.value)}
                 placeholder="Listing title..."
               />
               {editableTitle?.length > 80 && (
-                <div className="title-warning">Title exceeds 80 characters. Edit manually or use AI to trim it.</div>
+                <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                  Title exceeds 80 characters. Edit manually or use AI to trim it.
+                </div>
               )}
-              <div className="title-edit-actions">
+              <div className="flex gap-2">
                 {editableTitle?.length > 80 && (
-                  <button type="button" className="title-trim-button" onClick={onTrimTitle} disabled={isTrimmingTitle}>
+                  <button
+                    type="button"
+                    className="rounded-lg bg-gradient-to-br from-amber-500 to-amber-600 px-4 py-2 font-semibold text-white transition-all hover:-translate-y-0.5 disabled:opacity-60"
+                    onClick={onTrimTitle}
+                    disabled={isTrimmingTitle}
+                  >
                     {isTrimmingTitle ? 'Trimming...' : 'AI Trim Title'}
                   </button>
                 )}
                 {editableTitle !== (listingData.inventoryItem?.product?.title || '') && (
-                  <button type="button" className="title-save-button" onClick={onSaveTitle} disabled={isSavingTitle}>
+                  <button
+                    type="button"
+                    className={btnSuccess}
+                    onClick={onSaveTitle}
+                    disabled={isSavingTitle}
+                  >
                     {isSavingTitle ? 'Saving...' : 'Save Title'}
                   </button>
                 )}
               </div>
             </div>
-            <div className="listing-info-item">
-              <strong>Description:</strong>
-              <div className="listing-description-text">
+            <div className="border-b border-gray-200 pb-4">
+              <strong className="text-primary">Description:</strong>
+              <div className="mt-2 whitespace-pre-wrap rounded-md bg-gray-50 p-3 text-gray-600">
                 {listingData.inventoryItem?.product?.description || 'N/A'}
               </div>
             </div>
-            <div className="listing-info-item">
-              <strong>Price:</strong> ${listingData.offer?.pricingSummary?.price?.value || 'N/A'}
+            <div className="border-b border-gray-200 pb-4">
+              <strong className="text-primary">Price:</strong> $
+              {listingData.offer?.pricingSummary?.price?.value || 'N/A'}
             </div>
-            <div className="listing-info-item">
-              <strong>Category ID:</strong> {listingData.offer?.categoryId || 'N/A'}
+            <div className="border-b border-gray-200 pb-4">
+              <strong className="text-primary">Category ID:</strong>{' '}
+              {listingData.offer?.categoryId || 'N/A'}
             </div>
-            <div className="listing-info-item">
-              <strong>Images ({listingData.inventoryItem?.product?.imageUrls?.length || 0}):</strong>
-              <div className="listing-images-list">
+            <div className="border-b border-gray-200 pb-4">
+              <strong className="text-primary">
+                Images ({listingData.inventoryItem?.product?.imageUrls?.length || 0}):
+              </strong>
+              <div className="mt-2 space-y-2">
                 {listingData.inventoryItem?.product?.imageUrls?.map((url, idx) => (
-                  <div key={idx} className="listing-image-url">
+                  <div key={idx} className="rounded-md bg-gray-50 p-2 text-sm text-gray-600 break-all">
                     {idx + 1}. {url}
                   </div>
                 )) || 'No images'}
               </div>
             </div>
-            <div className="listing-info-item">
-              <strong>Created:</strong> {listingData.createdDateTime || 'N/A'}
+            <div className="border-b border-gray-200 pb-4">
+              <strong className="text-primary">Created:</strong> {listingData.createdDateTime || 'N/A'}
             </div>
           </div>
 
-          <div className="upload-section">
+          <div className="mt-8 flex justify-center border-t-2 border-gray-200 pt-8">
             <button
               type="button"
-              className="upload-button"
+              className="rounded-lg bg-gradient-to-br from-red-500 to-red-600 px-10 py-4 text-lg font-bold text-white shadow-lg transition-all hover:-translate-y-0.5 hover:shadow-xl disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
               onClick={() => onUploadToEbay(listingData.sku, listingData)}
               disabled={uploadingSkus?.has(listingData?.sku) || !listingData?.sku}
             >
               {uploadingSkus?.has(listingData?.sku) ? 'Uploading to eBay...' : 'Upload to eBay'}
             </button>
-            {uploadingSkus?.has(listingData?.sku) && uploadProgress?.isActive && uploadProgress?.totalSteps?.length > 0 && (
-              <div style={{ marginTop: '15px' }}>
+          </div>
+          {uploadingSkus?.has(listingData?.sku) &&
+            uploadProgress?.isActive &&
+            uploadProgress?.totalSteps?.length > 0 && (
+              <div className="mt-4">
                 <ProgressIndicator
                   steps={uploadProgress.totalSteps}
                   currentStep={uploadProgress.currentStep}
@@ -365,31 +426,35 @@ function CreateWorkflow({
                 />
               </div>
             )}
-          </div>
 
           {uploadResult && (
-            <div className="upload-result-section">
-              <h3 className="upload-result-title">Upload Successful!</h3>
-              <div className="upload-result-info">
+            <div className="mt-8 rounded-xl bg-gradient-to-br from-success to-emerald-600 p-6 text-white">
+              <h3 className="mb-4 text-2xl font-semibold">Upload Successful!</h3>
+              <div className="flex flex-col gap-3">
                 {uploadResult.listingId && (
-                  <div className="upload-result-item">
+                  <div>
                     <strong>Listing ID:</strong> {uploadResult.listingId}
                   </div>
                 )}
                 {uploadResult.ebayId && (
-                  <div className="upload-result-item">
+                  <div>
                     <strong>eBay ID:</strong> {uploadResult.ebayId}
                   </div>
                 )}
                 {uploadResult.href && (
-                  <div className="upload-result-item">
+                  <div>
                     <strong>Listing URL:</strong>{' '}
-                    <a href={uploadResult.href} target="_blank" rel="noopener noreferrer" className="listing-link">
+                    <a
+                      href={uploadResult.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold underline hover:no-underline"
+                    >
                       View on eBay
                     </a>
                   </div>
                 )}
-                <div className="upload-result-item">
+                <div>
                   <strong>Status:</strong> Listing is now live on eBay!
                 </div>
               </div>

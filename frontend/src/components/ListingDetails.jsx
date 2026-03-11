@@ -32,42 +32,44 @@ function ListingDetails({ listing }) {
   }
 
   return (
-    <div className="listing-details">
-      <h2 className="listing-title">{listing.title || 'N/A'}</h2>
-      
-      <div className="listing-info-grid">
-        <div className="info-item">
-          <span className="info-label">Item ID:</span>
-          <span className="info-value">{listing.itemId || 'N/A'}</span>
+    <div className="mb-8 rounded-xl bg-white p-6 shadow-sm sm:p-8">
+      <h2 className="mb-6 text-2xl font-semibold leading-snug text-gray-800 sm:text-[1.8rem]">
+        {listing.title || 'N/A'}
+      </h2>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-semibold text-gray-600">Item ID:</span>
+          <span className="text-base text-gray-800">{listing.itemId || 'N/A'}</span>
         </div>
-        
-        <div className="info-item">
-          <span className="info-label">Price:</span>
-          <span className="info-value price">{formatPrice()}</span>
+
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-semibold text-gray-600">Price:</span>
+          <span className="text-base font-bold text-success">{formatPrice()}</span>
         </div>
-        
-        <div className="info-item">
-          <span className="info-label">Category ID:</span>
-          <span className="info-value">{listing.categoryId || 'N/A'}</span>
+
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-semibold text-gray-600">Category ID:</span>
+          <span className="text-base text-gray-800">{listing.categoryId || 'N/A'}</span>
         </div>
-        
-        <div className="info-item">
-          <span className="info-label">Created:</span>
-          <span className="info-value">{formatDate(listing.itemCreationDate)}</span>
+
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-semibold text-gray-600">Created:</span>
+          <span className="text-base text-gray-800">{formatDate(listing.itemCreationDate)}</span>
         </div>
-        
+
         {listing.estimatedSoldQuantity !== null && listing.estimatedSoldQuantity !== undefined && (
-          <div className="info-item">
-            <span className="info-label">Estimated Sold:</span>
-            <span className="info-value">{listing.estimatedSoldQuantity}</span>
+          <div className="flex flex-col gap-1">
+            <span className="text-sm font-semibold text-gray-600">Estimated Sold:</span>
+            <span className="text-base text-gray-800">{listing.estimatedSoldQuantity}</span>
           </div>
         )}
       </div>
 
       {listing.description && listing.description !== 'No description available' && (
-        <div className="listing-description">
-          <h3>Description</h3>
-          <p>{listing.description}</p>
+        <div className="mt-6 border-t border-gray-200 pt-6">
+          <h3 className="mb-2 text-lg text-gray-800">Description</h3>
+          <p className="leading-relaxed text-gray-600">{listing.description}</p>
         </div>
       )}
     </div>

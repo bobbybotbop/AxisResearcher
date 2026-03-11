@@ -36,6 +36,14 @@ PRODUCTION_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 # Keys we can write via update_env (aligned with env_template)
 ENV_TOKEN_KEYS = ('application_token', 'user_token', 'refresh_token', 'auth_code')
 
+# Default scopes for user consent, exchange, and refresh (must match across all three)
+# User token is used for: Sell Inventory API, Trading API (UploadSiteHostedPictures)
+# Application token (separate) handles: Browse API, Commerce Taxonomy
+DEFAULT_USER_SCOPES = [
+    "https://api.ebay.com/oauth/api_scope",           # Trading API (image upload), legacy compatibility
+    "https://api.ebay.com/oauth/api_scope/sell.inventory",  # Inventory API (create listing, offer, publish, location)
+]
+
 
 def _env_path():
     """Path to project-root .env file."""
@@ -145,7 +153,7 @@ def get_user_consent_url(environment="production", scopes=None, state=None, prom
     if not REDIRECT_URI:
         raise ValueError("redirect_uri or redirect_url is required in .env")
     if scopes is None:
-        scopes = ["https://api.ebay.com/oauth/api_scope"]
+        scopes = DEFAULT_USER_SCOPES
     auth_url = PRODUCTION_AUTH_URL if environment.lower() == "production" else SANDBOX_AUTH_URL
     params = {
         'client_id': CLIENT_ID,
@@ -188,7 +196,7 @@ def exchange_code_for_user_token(authorization_code, environment="production", s
     if not REDIRECT_URI:
         raise ValueError("redirect_uri or redirect_url is required in .env")
     if scopes is None:
-        scopes = ["https://api.ebay.com/oauth/api_scope"]
+        scopes = DEFAULT_USER_SCOPES
     token_url = PRODUCTION_TOKEN_URL if environment.lower() == "production" else SANDBOX_TOKEN_URL
     auth_string = f"{CLIENT_ID}:{CLIENT_SECRET}"
     auth_bytes = base64.b64encode(auth_string.encode()).decode()
@@ -242,7 +250,7 @@ def refresh_user_token(environment="production", scopes=None):
     if not CLIENT_ID or not CLIENT_SECRET:
         raise ValueError("CLIENT_ID and CLIENT_SECRET are required in .env")
     if scopes is None:
-        scopes = ["https://api.ebay.com/oauth/api_scope"]
+        scopes = DEFAULT_USER_SCOPES
     token_url = PRODUCTION_TOKEN_URL if environment.lower() == "production" else SANDBOX_TOKEN_URL
     auth_string = f"{CLIENT_ID}:{CLIENT_SECRET}"
     auth_bytes = base64.b64encode(auth_string.encode()).decode()

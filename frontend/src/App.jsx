@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react'
 import CreateWorkflow from './components/CreateWorkflow'
 import { MOCK_DATA } from './mockData'
 import { trimTransparentPadding } from './utils/trimImage'
-import './styles/App.css'
 
 /**
  * Fetch with streaming progress support.
@@ -82,6 +81,10 @@ function App() {
   const [testingResult, setTestingResult] = useState(null)
   const [isTesting, setIsTesting] = useState(false)
   const [testingId, setTestingId] = useState('')
+  const [appTokenResult, setAppTokenResult] = useState(null)
+  const [isTestingAppToken, setIsTestingAppToken] = useState(false)
+  const [userTokenResult, setUserTokenResult] = useState(null)
+  const [isTestingUserToken, setIsTestingUserToken] = useState(false)
   const [allListings, setAllListings] = useState([])
   const [loadingListings, setLoadingListings] = useState(false)
   const [uploadingSkus, setUploadingSkus] = useState(new Set())
@@ -1030,6 +1033,36 @@ function App() {
     }
   }
 
+  const handleTestAppToken = async () => {
+    setIsTestingAppToken(true)
+    setAppTokenResult(null)
+    try {
+      const response = await fetch('/api/test-application-token', { method: 'POST' })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Test failed')
+      setAppTokenResult(data.result)
+    } catch (err) {
+      setAppTokenResult({ ok: false, message: err.message })
+    } finally {
+      setIsTestingAppToken(false)
+    }
+  }
+
+  const handleTestUserToken = async () => {
+    setIsTestingUserToken(true)
+    setUserTokenResult(null)
+    try {
+      const response = await fetch('/api/test-user-token', { method: 'POST' })
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Test failed')
+      setUserTokenResult(data.result)
+    } catch (err) {
+      setUserTokenResult({ ok: false, message: err.message })
+    } finally {
+      setIsTestingUserToken(false)
+    }
+  }
+
   const handleTestingFunction = async () => {
     setIsTesting(true)
     setError(null)
@@ -1266,56 +1299,74 @@ function App() {
   }
 
   return (
-    <div className="app">
-      <header className="app-header">
-        <div className="header-top-row">
-          <h1>Axis Researcher</h1>
+    <div className="flex min-h-screen flex-col">
+      <header className="bg-gradient-to-br from-primary to-primary-dark px-6 py-8 text-center text-white shadow-sm md:px-8 md:py-8">
+        <div className="relative flex items-center justify-center gap-4">
+          <h1 className="mb-2 text-3xl font-bold md:text-4xl">Axis Researcher</h1>
           <button
             type="button"
-            className={`token-refresh-btn ${isTokenStale ? 'stale' : ''}`}
+            className={`absolute right-0 flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border-2 text-xl transition-all hover:scale-110 ${
+              isTokenStale ? 'border-red-500/70' : 'border-white/40 bg-white/15 hover:border-white/60 hover:bg-white/25'
+            }`}
             onClick={handleTokenPanelToggle}
             title={`Refresh eBay Tokens – last updated: ${formatTimeAgo(tokenLastUpdated)}`}
           >
             {tokenPanelOpen ? '✕' : '⚙'}
-            {isTokenStale && !tokenPanelOpen && <span className="token-stale-dot" />}
+            {isTokenStale && !tokenPanelOpen && (
+              <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 animate-stale-pulse rounded-full border-2 border-primary-dark bg-danger" />
+            )}
           </button>
         </div>
-        <p>Automatically create listings with AI</p>
+        <p className="text-lg opacity-90">Automatically create listings with AI</p>
 
         {tokenPanelOpen && (
-          <div className="token-panel">
-            <div className="token-panel-header">
-              <h3>eBay Token Management</h3>
+          <div className="mx-auto mt-5 max-w-[700px] animate-token-slide-down rounded-xl border border-white/25 bg-white/10 p-5 text-left">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="m-0 text-lg font-semibold text-white">eBay Token Management</h3>
               <button
                 type="button"
-                className="token-ebay-auth-btn"
+                className="cursor-pointer rounded-md border-none bg-white px-4 py-2 text-sm font-semibold text-primary transition-all hover:-translate-y-0.5 hover:bg-blue-50 hover:shadow-md"
                 onClick={handleOpenEbayAuth}
               >
                 Open eBay Auth Page
               </button>
             </div>
 
-            <div className="token-status">
-              <span className={`token-status-indicator ${tokenInfo.user_token_set ? 'set' : 'unset'}`}>
+            <div className="mb-4 flex flex-col gap-1.5 font-mono text-sm">
+              <span
+                className={`rounded px-2 py-1 break-all ${
+                  tokenInfo.user_token_set ? 'bg-emerald-500/20 text-emerald-200' : 'bg-red-500/20 text-red-200'
+                }`}
+              >
                 user_token: {tokenInfo.user_token_set ? tokenInfo.user_token : 'not set'}
               </span>
-              <span className={`token-status-indicator ${tokenInfo.application_token_set ? 'set' : 'unset'}`}>
+              <span
+                className={`rounded px-2 py-1 break-all ${
+                  tokenInfo.application_token_set ? 'bg-emerald-500/20 text-emerald-200' : 'bg-red-500/20 text-red-200'
+                }`}
+              >
                 application_token: {tokenInfo.application_token_set ? tokenInfo.application_token : 'not set'}
               </span>
             </div>
 
-            <div className={`token-last-updated ${isTokenStale ? 'stale' : 'fresh'}`}>
+            <div
+              className={`mb-4 rounded-md px-2.5 py-1.5 text-sm font-semibold ${
+                isTokenStale ? 'border border-red-500/40 bg-red-500/20 text-red-200' : 'border border-emerald-500/30 bg-emerald-500/15 text-emerald-200'
+              }`}
+            >
               Last updated: {tokenLastUpdated
                 ? `${formatTimeAgo(tokenLastUpdated)}${isTokenStale ? ' — tokens may be expired!' : ''}`
                 : 'never'}
             </div>
 
-            <div className="token-input-group">
-              <label className="token-label" htmlFor="user-token-input">User Token</label>
+            <div className="mb-3">
+              <label className="mb-1 block text-sm font-semibold text-white/85" htmlFor="user-token-input">
+                User Token
+              </label>
               <input
                 id="user-token-input"
                 type="text"
-                className="token-input"
+                className="w-full rounded-lg border-2 border-white/30 bg-white/10 px-3 py-2 font-mono text-sm text-white transition-colors placeholder:text-white/40 focus:border-white/60 focus:bg-white/15 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                 value={userTokenInput}
                 onChange={(e) => setUserTokenInput(e.target.value)}
                 placeholder="Paste user_token here..."
@@ -1323,12 +1374,14 @@ function App() {
               />
             </div>
 
-            <div className="token-input-group">
-              <label className="token-label" htmlFor="app-token-input">Application Token</label>
+            <div className="mb-3">
+              <label className="mb-1 block text-sm font-semibold text-white/85" htmlFor="app-token-input">
+                Application Token
+              </label>
               <input
                 id="app-token-input"
                 type="text"
-                className="token-input"
+                className="w-full rounded-lg border-2 border-white/30 bg-white/10 px-3 py-2 font-mono text-sm text-white transition-colors placeholder:text-white/40 focus:border-white/60 focus:bg-white/15 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                 value={appTokenInput}
                 onChange={(e) => setAppTokenInput(e.target.value)}
                 placeholder="Paste application_token here..."
@@ -1336,10 +1389,10 @@ function App() {
               />
             </div>
 
-            <div className="token-actions">
+            <div className="mt-3 flex gap-2">
               <button
                 type="button"
-                className="token-save-btn"
+                className="cursor-pointer rounded-lg border-none bg-white px-6 py-2.5 text-sm font-semibold text-primary transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:transform-none"
                 onClick={handleSaveTokens}
                 disabled={tokenSaving || (!userTokenInput.trim() && !appTokenInput.trim())}
               >
@@ -1348,7 +1401,13 @@ function App() {
             </div>
 
             {tokenMessage && (
-              <div className={`token-message ${tokenMessage.type}`}>
+              <div
+                className={`mt-3 rounded-md px-3 py-2 text-sm font-medium ${
+                  tokenMessage.type === 'success'
+                    ? 'border border-emerald-500/40 bg-emerald-500/25 text-emerald-200'
+                    : 'border border-red-500/40 bg-red-500/25 text-red-200'
+                }`}
+              >
                 {tokenMessage.text}
               </div>
             )}
@@ -1356,28 +1415,36 @@ function App() {
         )}
       </header>
 
-      <main className="app-main">
-        <div className="tabs">
+      <main className="mx-auto flex flex-1 max-w-[1200px] w-full flex-col p-6 md:p-8">
+        <div className="flex flex-wrap gap-2 border-b-2 border-gray-200">
           <button
-            className={`tab-button ${activeTab === 'create' ? 'active' : ''}`}
+            className={`rounded-t-lg px-4 py-2 font-semibold transition-colors ${
+              activeTab === 'create' ? 'border-b-2 border-primary bg-white text-primary' : 'text-gray-600 hover:text-primary'
+            }`}
             onClick={() => handleTabChange('create')}
           >
             Create Listing
           </button>
           <button
-            className={`tab-button ${activeTab === 'upload' ? 'active' : ''}`}
+            className={`rounded-t-lg px-4 py-2 font-semibold transition-colors ${
+              activeTab === 'upload' ? 'border-b-2 border-primary bg-white text-primary' : 'text-gray-600 hover:text-primary'
+            }`}
             onClick={() => handleTabChange('upload')}
           >
             Upload Listings
           </button>
           <button
-            className={`tab-button ${activeTab === 'test-workflow' ? 'active' : ''}`}
+            className={`rounded-t-lg px-4 py-2 font-semibold transition-colors ${
+              activeTab === 'test-workflow' ? 'border-b-2 border-primary bg-white text-primary' : 'text-gray-600 hover:text-primary'
+            }`}
             onClick={() => handleTabChange('test-workflow')}
           >
             Test Workflow
           </button>
           <button
-            className={`tab-button ${activeTab === 'testing' ? 'active' : ''}`}
+            className={`rounded-t-lg px-4 py-2 font-semibold transition-colors ${
+              activeTab === 'testing' ? 'border-b-2 border-primary bg-white text-primary' : 'text-gray-600 hover:text-primary'
+            }`}
             onClick={() => handleTabChange('testing')}
           >
             Testing
@@ -1446,86 +1513,88 @@ function App() {
         )}
 
         {activeTab === 'upload' && (
-          <div className="upload-listings-section">
-            <h2 className="gallery-title">Generated Listings</h2>
-            
+          <div className="mt-8">
+            <h2 className="mb-5 text-xl font-semibold text-gray-800">Generated Listings</h2>
+
             {loadingListings ? (
-              <div className="loading">
-                <div className="spinner"></div>
-                <p>Loading listings...</p>
+              <div className="flex flex-col items-center justify-center gap-4 py-12">
+                <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200 border-t-primary" />
+                <p className="text-gray-600">Loading listings...</p>
               </div>
             ) : allListings.length === 0 ? (
-              <div className="no-listings">
-                <p>No generated listings found. Create a listing first!</p>
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-8 text-center">
+                <p className="text-gray-600">No generated listings found. Create a listing first!</p>
               </div>
             ) : (
-              <div className="listings-grid">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {allListings.map((listing) => (
-                  <div 
-                    key={listing.sku} 
-                    className="listing-card"
+                  <div
+                    key={listing.sku}
+                    className="cursor-pointer rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-all hover:shadow-md"
                     onClick={() => handleListingClick(listing)}
                   >
-                    <div className="listing-card-header">
-                      <h3 className="listing-card-title">{listing.title}</h3>
-                      <span className="listing-card-sku">{listing.sku}</span>
+                    <div className="mb-3 flex items-start justify-between gap-2">
+                      <h3 className="flex-1 text-lg font-semibold text-gray-800">{listing.title}</h3>
+                      <span className="rounded bg-gray-100 px-2 py-0.5 text-sm font-mono text-gray-600">
+                        {listing.sku}
+                      </span>
                     </div>
-                    <div className="listing-card-info">
-                      <div className="listing-card-item">
+                    <div className="mb-4 space-y-1 text-sm text-gray-600">
+                      <div>
                         <strong>Price:</strong> ${listing.price}
                       </div>
-                      <div className="listing-card-item">
+                      <div>
                         <strong>Category:</strong> {listing.categoryId}
                       </div>
-                      <div className="listing-card-item">
+                      <div>
                         <strong>Images:</strong> {listing.imageCount}
                       </div>
-                      <div className="listing-card-item">
+                      <div>
                         <strong>Created:</strong>{' '}
                         {listing.createdDateTime
                           ? new Date(listing.createdDateTime).toLocaleString()
                           : 'N/A'}
                       </div>
                     </div>
-                    <div className="listing-card-actions">
+                    <div className="flex flex-col gap-2">
                       <button
                         type="button"
-                        className="listing-upload-button"
+                        className="w-full rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60 disabled:transform-none"
                         onClick={(e) => {
                           e.stopPropagation()
                           handleUploadToEbay(listing.sku, listing)
                         }}
                         disabled={uploadingSkus.has(listing.sku)}
                       >
-                        {uploadingSkus.has(listing.sku)
-                          ? 'Uploading...'
-                          : 'Upload to eBay'}
+                        {uploadingSkus.has(listing.sku) ? 'Uploading...' : 'Upload to eBay'}
                       </button>
-                    </div>
-                    {uploadResults[listing.sku] && (
-                      <div className="listing-upload-result">
-                        <div className="upload-success-icon">✓</div>
-                        <div className="upload-success-info">
-                          {uploadResults[listing.sku].listingId && (
-                            <div>
-                              <strong>Listing ID:</strong> {uploadResults[listing.sku].listingId}
-                            </div>
-                          )}
-                          {uploadResults[listing.sku].href && (
-                            <div>
-                              <a
-                                href={uploadResults[listing.sku].href}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="listing-link"
-                              >
-                                View on eBay →
-                              </a>
-                            </div>
-                          )}
+                      {uploadResults[listing.sku] && (
+                        <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 p-3">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-green-500 text-lg font-bold text-white">
+                            ✓
+                          </div>
+                          <div className="flex-1 text-sm">
+                            {uploadResults[listing.sku].listingId && (
+                              <div>
+                                <strong>Listing ID:</strong> {uploadResults[listing.sku].listingId}
+                              </div>
+                            )}
+                            {uploadResults[listing.sku].href && (
+                              <div>
+                                <a
+                                  href={uploadResults[listing.sku].href}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="font-semibold text-primary underline hover:no-underline"
+                                >
+                                  View on eBay →
+                                </a>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1535,48 +1604,92 @@ function App() {
 
         {/* Listing Detail Modal */}
         {selectedListing && (
-          <div className="listing-detail-modal" onClick={closeListingDetail}>
-            <div className="listing-detail-content" onClick={(e) => e.stopPropagation()}>
-              <div className="listing-detail-header">
-                <h2 className="listing-detail-title">Listing Details: {selectedListing.sku}</h2>
-                <button className="listing-detail-close" onClick={closeListingDetail}>×</button>
+          <div
+            className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4"
+            onClick={closeListingDetail}
+          >
+            <div
+              className="flex max-h-[90vh] max-w-[90%] flex-col overflow-hidden rounded-xl bg-white shadow-2xl animate-slide-up md:max-w-[95%]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b-2 border-gray-200 p-4">
+                <h2 className="m-0 text-xl font-semibold text-gray-800 md:text-2xl">
+                  Listing Details: {selectedListing.sku}
+                </h2>
+                <button
+                  className="flex h-10 w-10 items-center justify-center rounded-full border-none bg-gray-100 text-2xl text-gray-600 transition-all hover:rotate-90 hover:bg-gray-200 hover:text-gray-800"
+                  onClick={closeListingDetail}
+                >
+                  ×
+                </button>
               </div>
-              
+
               {loadingListingDetail ? (
-                <div className="loading">
-                  <div className="spinner"></div>
-                  <p>Loading listing details...</p>
+                <div className="flex flex-col items-center justify-center gap-4 py-12">
+                  <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200 border-t-primary" />
+                  <p className="text-gray-600">Loading listing details...</p>
                 </div>
               ) : listingDetailData ? (
-                <div className="listing-detail-body">
-                  <pre className="listing-json-display">
+                <div className="flex-1 overflow-auto p-4">
+                  <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-gray-200 bg-gray-50 p-4 font-mono text-sm text-gray-800">
                     {JSON.stringify(listingDetailData, null, 2)}
                   </pre>
                 </div>
               ) : (
-                <div className="listing-detail-error">
-                  <p>Failed to load listing details</p>
-                </div>
+                <div className="p-8 text-center text-danger">Failed to load listing details</div>
               )}
             </div>
           </div>
         )}
 
         {activeTab === 'testing' && (
-          <div className="testing-section">
-            <h2 className="gallery-title">Testing</h2>
-            <div className="testing-content">
-              <p className="testing-description">
-                Use this section to test functions and debug code.
-              </p>
-              <div className="testing-input-group">
-                <label htmlFor="testing-id" className="testing-label">
+          <div className="mt-8 rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
+            <h2 className="mb-5 text-xl font-semibold text-gray-800">Testing</h2>
+            <div className="flex flex-col gap-6">
+              <p className="text-gray-600">Use this section to test functions and debug code.</p>
+
+              <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50/50 p-4">
+                <h3 className="text-sm font-semibold text-gray-700">Token tests</h3>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    className="rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 text-sm font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={handleTestAppToken}
+                    disabled={isTestingAppToken}
+                  >
+                    {isTestingAppToken ? 'Testing...' : 'Test Application Token'}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 text-sm font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={handleTestUserToken}
+                    disabled={isTestingUserToken}
+                  >
+                    {isTestingUserToken ? 'Testing...' : 'Test User Token'}
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-4">
+                  {appTokenResult && (
+                    <div className={`rounded-lg border px-3 py-2 text-sm ${appTokenResult.ok ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-red-300 bg-red-50 text-red-800'}`}>
+                      <span className="font-medium">Application token:</span> {appTokenResult.message}
+                    </div>
+                  )}
+                  {userTokenResult && (
+                    <div className={`rounded-lg border px-3 py-2 text-sm ${userTokenResult.ok ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-red-300 bg-red-50 text-red-800'}`}>
+                      <span className="font-medium">User token:</span> {userTokenResult.message}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <label htmlFor="testing-id" className="text-sm font-semibold text-gray-700">
                   ID (optional):
                 </label>
                 <input
                   id="testing-id"
                   type="text"
-                  className="testing-input"
+                  className="rounded-lg border-2 border-gray-300 px-4 py-2 transition-colors focus:border-primary focus:outline-none disabled:bg-gray-100"
                   value={testingId}
                   onChange={(e) => setTestingId(e.target.value)}
                   placeholder="Enter ID parameter..."
@@ -1585,18 +1698,18 @@ function App() {
               </div>
               <button
                 type="button"
-                className="testing-button"
+                className="w-fit rounded-lg bg-gradient-to-br from-primary to-primary-dark px-6 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={handleTestingFunction}
                 disabled={isTesting}
               >
                 {isTesting ? 'Running...' : 'Run Testing Function'}
               </button>
               {testingResult && (
-                <div className="testing-result">
-                  <h3>Result:</h3>
-                  <pre className="testing-result-display">
-                    {typeof testingResult === 'string' 
-                      ? testingResult 
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <h3 className="mb-2 font-semibold text-gray-800">Result:</h3>
+                  <pre className="overflow-x-auto whitespace-pre-wrap text-sm text-gray-700">
+                    {typeof testingResult === 'string'
+                      ? testingResult
                       : JSON.stringify(testingResult, null, 2)}
                   </pre>
                 </div>

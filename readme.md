@@ -161,6 +161,26 @@ PROCESSED*<seller_username>\_YYYYMMDD_HHMMSS.json
 
 [SCREENSHOT: File structure diagram]
 
+temp token updater:
+
+Verify – check current state:
+python testing/test_update_tokens.py verify
+
+Exchange – only if you need a new user token from scratch:
+python refreshTokenTest.py open-consent
+
+Complete consent in the browser
+Copy the code from the redirect URL
+python testing/test_update_tokens.py exchange "YOUR_CODE"
+
+Mint app token – refresh application token:
+python testing/test_update_tokens.py mint-app
+
+Refresh user token – test user token refresh (needs refresh_token in .env):
+python testing/test_update_tokens.py refresh-user
+
+
+
 limitations:
 
 - cannot do currency conversions yet

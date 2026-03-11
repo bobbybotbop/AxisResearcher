@@ -30,6 +30,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from copyScripts.create_text import create_text
 from copyScripts.imageEditing import remove_background, compile_images
 from copyScripts.upload_to_ebay import upload_complete_listing
+import requests
 
 app = Flask(__name__)
 # Enable CORS for all routes to allow React frontend to make requests
@@ -1019,6 +1020,67 @@ def upload_listing():
             yield error_event(f"An error occurred while uploading listing: {error_msg}")
 
     return streaming_response(generate())
+
+
+def _test_application_token():
+    """Test application token by making a simple Browse API search call."""
+    token = os.getenv('application_token')
+    if not token or not token.strip():
+        return {'ok': False, 'message': 'application_token is not set in .env'}
+    url = 'https://api.ebay.com/buy/browse/v1/item_summary/search'
+    headers = {
+        'Authorization': f'Bearer {token.strip()}',
+        'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
+        'Content-Type': 'application/json'
+    }
+    params = {'q': 'test', 'limit': 1}
+    try:
+        r = requests.get(url, headers=headers, params=params, timeout=15)
+        if r.status_code == 200:
+            return {'ok': True, 'message': 'Application token is valid'}
+        return {'ok': False, 'message': f'eBay API returned {r.status_code}: {r.text[:200]}'}
+    except requests.RequestException as e:
+        return {'ok': False, 'message': str(e)}
+
+
+def _test_user_token():
+    """Test user token by making a simple Inventory API call."""
+    token = os.getenv('user_token')
+    if not token or not token.strip():
+        return {'ok': False, 'message': 'user_token is not set in .env'}
+    url = 'https://api.ebay.com/sell/inventory/v1/inventory_item'
+    headers = {
+        'Authorization': f'Bearer {token.strip()}',
+        'Content-Type': 'application/json'
+    }
+    params = {'limit': 1}
+    try:
+        r = requests.get(url, headers=headers, params=params, timeout=15)
+        if r.status_code == 200:
+            return {'ok': True, 'message': 'User token is valid'}
+        return {'ok': False, 'message': f'eBay API returned {r.status_code}: {r.text[:200]}'}
+    except requests.RequestException as e:
+        return {'ok': False, 'message': str(e)}
+
+
+@app.route('/api/test-application-token', methods=['POST'])
+def api_test_application_token():
+    """Test the application token via a simple Browse API call."""
+    try:
+        result = _test_application_token()
+        return jsonify({'result': result, 'error': None}), 200
+    except Exception as e:
+        return jsonify({'result': None, 'error': str(e)}), 500
+
+
+@app.route('/api/test-user-token', methods=['POST'])
+def api_test_user_token():
+    """Test the user token via a simple Inventory API call."""
+    try:
+        result = _test_user_token()
+        return jsonify({'result': result, 'error': None}), 200
+    except Exception as e:
+        return jsonify({'result': None, 'error': str(e)}), 500
 
 
 @app.route('/api/testing', methods=['POST'])
