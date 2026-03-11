@@ -49,6 +49,7 @@ function CreateWorkflow({
   onDragEnd,
   onRemoveFromListing,
   onAddToListing,
+  onAddToOriginalPhotos,
   onConfirmAndEditText,
   onEditableTitleChange,
   onTrimTitle,
@@ -127,6 +128,7 @@ function CreateWorkflow({
             onUseOriginalPhoto={onUseOriginalPhoto}
             promptModifier={promptModifier}
             onPromptModifierChange={onPromptModifierChange}
+            onAddToOriginalPhotos={onAddToOriginalPhotos}
           />
           {isConfirming && imageGenProgress?.isActive && (
             <div className="my-5 rounded-lg border border-gray-200 bg-gray-50 p-4">
@@ -177,6 +179,7 @@ function CreateWorkflow({
                 )}
                 <ImageCanvas
                   onAddToListing={onAddToListing}
+                  onAddToOriginalPhotos={onAddToOriginalPhotos}
                   originalPhotos={photos}
                   generatedImages={generatedImages}
                   useRealUpload={onUseRealEbayUploadChange != null ? (useRealEbayUpload ?? false) : true}

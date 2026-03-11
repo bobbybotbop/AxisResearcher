@@ -9,7 +9,7 @@ import os
 import requests
 import json
 from dotenv import load_dotenv
-from helper_functions import helper_get_valid_token, refreshToken
+from backend.helper_functions import helper_get_valid_token, refreshToken
 
 # Load environment variables
 load_dotenv()

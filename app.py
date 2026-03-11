@@ -15,10 +15,10 @@ if sys.platform == 'win32':
 
 from flask import Flask, jsonify, request, Response, stream_with_context
 from flask_cors import CORS
-from copyScripts.CopyListingMain import copy_listing_main, testing_function
-from copyScripts.create_image import generate_image_from_urls, ImageType, categorize_images
-from copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects
-from helper_functions import remove_html_tags
+from backend.copyScripts.CopyListingMain import copy_listing_main, testing_function
+from backend.copyScripts.create_image import generate_image_from_urls, ImageType, categorize_images
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects
+from backend.helper_functions import remove_html_tags
 import os
 import json
 import os
@@ -27,10 +27,11 @@ import time
 import uuid
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from copyScripts.create_text import create_text
-from copyScripts.imageEditing import remove_background, compile_images
-from copyScripts.upload_to_ebay import upload_complete_listing
+from backend.copyScripts.create_text import create_text
+from backend.copyScripts.imageEditing import remove_background, compile_images
+from backend.copyScripts.upload_to_ebay import upload_complete_listing
 import requests
+from dotenv import load_dotenv
 
 app = Flask(__name__)
 # Enable CORS for all routes to allow React frontend to make requests
@@ -73,7 +74,7 @@ def get_listing_photos(listing_id):
     """
     def generate():
         try:
-            from main_ebay_commands import single_get_detailed_item_data
+            from backend.main_ebay_commands import single_get_detailed_item_data
 
             # Parse ID from URL if needed
             item_id = listing_id
@@ -544,7 +545,7 @@ def create_listing():
             # Step 1: Updating images
             yield progress_event('Updating images', 'in_progress')
 
-            from copyScripts.combine_data import listing_file_exists
+            from backend.copyScripts.combine_data import listing_file_exists
             if not listing_file_exists(sku):
                 print(f"[API] File doesn't exist for SKU {sku}, creating it...")
                 create_listing_with_preferences(sku=sku)
@@ -679,7 +680,7 @@ def trim_title():
             chars_over=chars_over
         )
 
-        from main_ebay_commands import call_openrouter_llm
+        from backend.main_ebay_commands import call_openrouter_llm
         trimmed = call_openrouter_llm(prompt)
 
         if not trimmed:
@@ -1454,6 +1455,19 @@ def update_tokens():
         import traceback
         traceback.print_exc()
         return jsonify({"error": f"Failed to update tokens: {str(e)}"}), 500
+
+
+@app.route('/api/refresh-tokens', methods=['POST'])
+def api_refresh_tokens():
+    """Refresh both user and application tokens via OAuth."""
+    try:
+        from backend.refreshToken import refresh_user_and_app_token
+        result = refresh_user_and_app_token()
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+        load_dotenv(env_path, override=True)
+        return jsonify(result), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/health', methods=['GET'])

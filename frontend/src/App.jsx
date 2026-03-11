@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import CreateWorkflow from './components/CreateWorkflow'
 import { MOCK_DATA } from './mockData'
 import { trimTransparentPadding } from './utils/trimImage'
@@ -133,9 +133,7 @@ function App() {
 
   // Token refresh panel state
   const [tokenPanelOpen, setTokenPanelOpen] = useState(false)
-  const [userTokenInput, setUserTokenInput] = useState('')
-  const [appTokenInput, setAppTokenInput] = useState('')
-  const [tokenSaving, setTokenSaving] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [tokenMessage, setTokenMessage] = useState(null)
   const [tokenInfo, setTokenInfo] = useState({ user_token_set: false, application_token_set: false, user_token: '', application_token: '' })
   const [tokenLastUpdated, setTokenLastUpdated] = useState(() => {
@@ -187,37 +185,42 @@ function App() {
     }
   }
 
-  const handleSaveTokens = async () => {
-    if (!userTokenInput.trim() && !appTokenInput.trim()) {
-      setTokenMessage({ type: 'error', text: 'Enter at least one token' })
-      return
-    }
-    setTokenSaving(true)
+  const handleRefreshTokens = async () => {
+    setIsRefreshing(true)
     setTokenMessage(null)
     try {
-      const body = {}
-      if (userTokenInput.trim()) body.user_token = userTokenInput.trim()
-      if (appTokenInput.trim()) body.application_token = appTokenInput.trim()
-      const res = await fetch('/api/update-tokens', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      })
+      const res = await fetch('/api/refresh-tokens', { method: 'POST' })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed to update tokens')
+      if (!res.ok) throw new Error(data.error || 'Failed to refresh tokens')
       const now = Date.now()
       setTokenLastUpdated(now)
       localStorage.setItem('tokenLastUpdated', now.toString())
-      setTokenMessage({ type: 'success', text: 'Tokens updated successfully!' })
-      setUserTokenInput('')
-      setAppTokenInput('')
+      const successCount = (data.user_token_refreshed ? 1 : 0) + (data.application_token_refreshed ? 1 : 0)
+      if (successCount > 0) {
+        setTokenMessage({ type: 'success', text: `Tokens refreshed! User: ${data.user_token_refreshed ? 'yes' : 'no'}, App: ${data.application_token_refreshed ? 'yes' : 'no'}` })
+      } else {
+        setTokenMessage({ type: 'error', text: data.errors?.join('; ') || 'Refresh failed' })
+      }
       fetchTokenInfo()
     } catch (err) {
-      setTokenMessage({ type: 'error', text: err.message || 'Failed to save tokens' })
+      setTokenMessage({ type: 'error', text: err.message || 'Failed to refresh tokens' })
     } finally {
-      setTokenSaving(false)
+      setIsRefreshing(false)
     }
   }
+
+  // Auto-refresh tokens on mount if stale (>2h), only once per session
+  const hasAutoRefreshed = useRef(false)
+  useEffect(() => {
+    if (hasAutoRefreshed.current) return
+    const saved = localStorage.getItem('tokenLastUpdated')
+    const lastUpdated = saved ? parseInt(saved, 10) : null
+    const stale = lastUpdated ? (Date.now() - lastUpdated) > TOKEN_STALE_MS : true
+    if (stale) {
+      hasAutoRefreshed.current = true
+      handleRefreshTokens()
+    }
+  }, [])
 
   const handleOpenEbayAuth = () => {
     window.open('https://developer.ebay.com/my/auth/?env=production&index=0', '_blank')
@@ -394,6 +397,18 @@ function App() {
       ...prev,
       [photoUrl]: newCategory
     }))
+  }
+
+  const handleAddToOriginalPhotos = (newUrls) => {
+    if (!newUrls?.length) return
+    setPhotos((prev) => [...prev, ...newUrls])
+    setEditableCategories((prev) => {
+      const next = { ...prev }
+      newUrls.forEach((url) => {
+        next[url] = 'professional_image'
+      })
+      return next
+    })
   }
 
   const handleSkipPhoto = (photoUrl) => {
@@ -1359,45 +1374,49 @@ function App() {
                 : 'never'}
             </div>
 
-            <div className="mb-3">
-              <label className="mb-1 block text-sm font-semibold text-white/85" htmlFor="user-token-input">
-                User Token
-              </label>
-              <input
-                id="user-token-input"
-                type="text"
-                className="w-full rounded-lg border-2 border-white/30 bg-white/10 px-3 py-2 font-mono text-sm text-white transition-colors placeholder:text-white/40 focus:border-white/60 focus:bg-white/15 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                value={userTokenInput}
-                onChange={(e) => setUserTokenInput(e.target.value)}
-                placeholder="Paste user_token here..."
-                disabled={tokenSaving}
-              />
-            </div>
-
-            <div className="mb-3">
-              <label className="mb-1 block text-sm font-semibold text-white/85" htmlFor="app-token-input">
-                Application Token
-              </label>
-              <input
-                id="app-token-input"
-                type="text"
-                className="w-full rounded-lg border-2 border-white/30 bg-white/10 px-3 py-2 font-mono text-sm text-white transition-colors placeholder:text-white/40 focus:border-white/60 focus:bg-white/15 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                value={appTokenInput}
-                onChange={(e) => setAppTokenInput(e.target.value)}
-                placeholder="Paste application_token here..."
-                disabled={tokenSaving}
-              />
-            </div>
-
             <div className="mt-3 flex gap-2">
               <button
                 type="button"
                 className="cursor-pointer rounded-lg border-none bg-white px-6 py-2.5 text-sm font-semibold text-primary transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:transform-none"
-                onClick={handleSaveTokens}
-                disabled={tokenSaving || (!userTokenInput.trim() && !appTokenInput.trim())}
+                onClick={handleRefreshTokens}
+                disabled={isRefreshing}
               >
-                {tokenSaving ? 'Saving...' : 'Save Tokens'}
+                {isRefreshing ? 'Refreshing...' : 'Refresh Tokens'}
               </button>
+            </div>
+
+            <div className="mt-4 flex flex-col gap-3 rounded-lg border border-white/20 bg-white/5 p-4">
+              <h4 className="text-sm font-semibold text-white/90">Token tests</h4>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  className="rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 text-sm font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={handleTestAppToken}
+                  disabled={isTestingAppToken}
+                >
+                  {isTestingAppToken ? 'Testing...' : 'Test Application Token'}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 text-sm font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={handleTestUserToken}
+                  disabled={isTestingUserToken}
+                >
+                  {isTestingUserToken ? 'Testing...' : 'Test User Token'}
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-4">
+                {appTokenResult && (
+                  <div className={`rounded-lg border px-3 py-2 text-sm ${appTokenResult.ok ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-red-300 bg-red-50 text-red-800'}`}>
+                    <span className="font-medium">Application token:</span> {appTokenResult.message}
+                  </div>
+                )}
+                {userTokenResult && (
+                  <div className={`rounded-lg border px-3 py-2 text-sm ${userTokenResult.ok ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-red-300 bg-red-50 text-red-800'}`}>
+                    <span className="font-medium">User token:</span> {userTokenResult.message}
+                  </div>
+                )}
+              </div>
             </div>
 
             {tokenMessage && (
@@ -1496,6 +1515,15 @@ function App() {
             onDragEnd={(result) => { if (!result.destination) return; const src = result.source.index, dest = result.destination.index; if (src === dest) return; setTestGeneratedImages(prev => { const arr = [...prev]; const [moved] = arr.splice(src, 1); arr.splice(dest, 0, moved); return arr }) }}
             onRemoveFromListing={(idx) => { setTestGeneratedImages(prev => prev.filter((_, i) => i !== idx)); setTestSelectedImagesForRegen([]) }}
             onAddToListing={(url) => setTestGeneratedImages(prev => [...prev, url])}
+            onAddToOriginalPhotos={(urls) => {
+              if (!urls?.length) return
+              setTestPhotos(prev => [...prev, ...urls])
+              setTestEditableCategories(prev => {
+                const next = { ...prev }
+                urls.forEach(url => { next[url] = 'professional_image' })
+                return next
+              })
+            }}
             onConfirmAndEditText={testHandleConfirmAndEditText}
             onEditableTitleChange={setTestEditableTitle}
             onTrimTitle={() => setTestEditableTitle(prev => prev.slice(0, 80))}
@@ -1648,40 +1676,6 @@ function App() {
             <div className="flex flex-col gap-6">
               <p className="text-gray-600">Use this section to test functions and debug code.</p>
 
-              <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50/50 p-4">
-                <h3 className="text-sm font-semibold text-gray-700">Token tests</h3>
-                <div className="flex flex-wrap gap-3">
-                  <button
-                    type="button"
-                    className="rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 text-sm font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
-                    onClick={handleTestAppToken}
-                    disabled={isTestingAppToken}
-                  >
-                    {isTestingAppToken ? 'Testing...' : 'Test Application Token'}
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 text-sm font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
-                    onClick={handleTestUserToken}
-                    disabled={isTestingUserToken}
-                  >
-                    {isTestingUserToken ? 'Testing...' : 'Test User Token'}
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-4">
-                  {appTokenResult && (
-                    <div className={`rounded-lg border px-3 py-2 text-sm ${appTokenResult.ok ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-red-300 bg-red-50 text-red-800'}`}>
-                      <span className="font-medium">Application token:</span> {appTokenResult.message}
-                    </div>
-                  )}
-                  {userTokenResult && (
-                    <div className={`rounded-lg border px-3 py-2 text-sm ${userTokenResult.ok ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-red-300 bg-red-50 text-red-800'}`}>
-                      <span className="font-medium">User token:</span> {userTokenResult.message}
-                    </div>
-                  )}
-                </div>
-              </div>
-
               <div className="flex flex-col gap-2">
                 <label htmlFor="testing-id" className="text-sm font-semibold text-gray-700">
                   ID (optional):
@@ -1763,6 +1757,7 @@ function App() {
             onDragEnd={handleDragEnd}
             onRemoveFromListing={handleRemoveFromListing}
             onAddToListing={handleAddToListing}
+            onAddToOriginalPhotos={handleAddToOriginalPhotos}
             onConfirmAndEditText={handleConfirmAndEditText}
             onEditableTitleChange={setEditableTitle}
             onTrimTitle={handleTrimTitle}

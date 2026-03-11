@@ -1,3 +1,6 @@
+import { useState, useCallback } from 'react'
+import ImageUploadModal from './ImageUploadModal'
+
 function PhotoGallery({
   photos,
   editableCategories,
@@ -11,7 +14,19 @@ function PhotoGallery({
   onUseOriginalPhoto,
   promptModifier = '',
   onPromptModifierChange,
+  onAddToOriginalPhotos,
 }) {
+  const [showUploadModal, setShowUploadModal] = useState(false)
+
+  const handleModalAddImages = useCallback(
+    (images, destination) => {
+      if (destination === 'original' && onAddToOriginalPhotos) {
+        const urls = Array.isArray(images) ? images : [images]
+        onAddToOriginalPhotos(urls)
+      }
+    },
+    [onAddToOriginalPhotos],
+  )
   if (!photos || photos.length === 0) {
     return null
   }
@@ -65,7 +80,18 @@ function PhotoGallery({
 
   return (
     <div className="mt-8 rounded-2xl border border-gray-200 bg-gray-50 p-6">
-      <h2 className="mb-4 text-xl font-semibold text-gray-800">Original Photos</h2>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-xl font-semibold text-gray-800">Original Photos</h2>
+        {onAddToOriginalPhotos && (
+          <button
+            type="button"
+            className="rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md"
+            onClick={() => setShowUploadModal(true)}
+          >
+            Upload Images
+          </button>
+        )}
+      </div>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:gap-5">
         {photos.map((photoUrl, index) => {
           const category = editableCategories[photoUrl]
@@ -191,6 +217,16 @@ function PhotoGallery({
           {isConfirming ? 'Generating Images...' : 'Confirm Categories'}
         </button>
       </div>
+
+      {onAddToOriginalPhotos && (
+        <ImageUploadModal
+          isOpen={showUploadModal}
+          onClose={() => setShowUploadModal(false)}
+          onAddImages={handleModalAddImages}
+          canAddToOriginal={false}
+          mode="original"
+        />
+      )}
     </div>
   )
 }

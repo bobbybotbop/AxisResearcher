@@ -71,7 +71,7 @@ def main():
     args = parser.parse_args()
     environment = "sandbox" if args.sandbox else "production"
 
-    from refreshTokenTest import (
+    from backend.refreshToken import (
         mint_application_token,
         exchange_code_for_user_token,
         refresh_user_token,
