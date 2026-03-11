@@ -2,14 +2,14 @@
 eBay Single Functions Module
 
 This module contains the singleSearch function and related dependencies
-extracted from main_ebay_commands.py for better code organization.
+extracted from ebay_cli.py for better code organization.
 """
 
 import os
 import requests
 import json
 from dotenv import load_dotenv
-from backend.helper_functions import helper_get_valid_token, refreshToken
+from backend.helper_functions import helper_get_valid_token
 
 # Load environment variables
 load_dotenv()

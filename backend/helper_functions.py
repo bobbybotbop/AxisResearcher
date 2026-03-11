@@ -1,7 +1,7 @@
 """
 Helper Functions Module
 
-This module contains utility functions extracted from main_ebay_commands.py
+This module contains utility functions extracted from ebay_cli.py
 for better code organization and reusability.
 """
 

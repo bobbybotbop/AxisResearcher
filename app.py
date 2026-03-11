@@ -21,8 +21,6 @@ from backend.copyScripts.combine_data import get_next_sku, create_listing_with_p
 from backend.helper_functions import remove_html_tags
 import os
 import json
-import os
-import glob
 import time
 import uuid
 import threading
@@ -74,7 +72,7 @@ def get_listing_photos(listing_id):
     """
     def generate():
         try:
-            from backend.main_ebay_commands import single_get_detailed_item_data
+            from backend.ebay_cli import single_get_detailed_item_data
 
             # Parse ID from URL if needed
             item_id = listing_id
@@ -680,7 +678,7 @@ def trim_title():
             chars_over=chars_over
         )
 
-        from backend.main_ebay_commands import call_openrouter_llm
+        from backend.ebay_cli import call_openrouter_llm
         trimmed = call_openrouter_llm(prompt)
 
         if not trimmed:

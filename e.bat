@@ -1,2 +1,2 @@
 @echo off
-python main_ebay_commands.py %* 
+python -m backend.ebay_cli %* 

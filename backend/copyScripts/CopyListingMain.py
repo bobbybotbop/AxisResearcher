@@ -23,7 +23,7 @@ def copy_listing_main(id):
         dict: Optimized listing content with edited_title and edited_description, or None on failure
     """
     # Import here to avoid circular import issues
-    from backend.main_ebay_commands import single_get_detailed_item_data
+    from backend.ebay_cli import single_get_detailed_item_data
     
     # Handle URL parsing if needed
     if (id[0] == 'h' or id[0] == 'e'):
@@ -143,7 +143,7 @@ def testing_function(id=None):
     Returns:
         dict: Result of testing update_listing_with_aspects function
     """
-    from backend.main_ebay_commands import single_get_detailed_item_data
+    from backend.ebay_cli import single_get_detailed_item_data
     from backend.copyScripts.combine_data import (
         get_next_sku, create_listing_with_preferences, update_listing_with_aspects,
         load_listing_data, DEFAULT_QUANTITY, DEFAULT_WEIGHT, DEFAULT_DIMESIONS,

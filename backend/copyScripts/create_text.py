@@ -19,7 +19,7 @@ def create_text(old_title, old_description):
         dict: Optimized listing content with edited_title and edited_description, or None on failure
     """
     # Import here to avoid circular import issues
-    from backend.main_ebay_commands import call_openrouter_llm
+    from backend.ebay_cli import call_openrouter_llm
     
     # Load prompt template from file
     prompt_template_path = "prompts/generateTextPrompt.txt"

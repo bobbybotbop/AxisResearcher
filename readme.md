@@ -167,7 +167,7 @@ Verify – check current state:
 python testing/test_update_tokens.py verify
 
 Exchange – only if you need a new user token from scratch:
-python refreshTokenTest.py open-consent
+python -m backend.refreshToken open-consent
 
 Complete consent in the browser
 Copy the code from the redirect URL

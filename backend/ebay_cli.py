@@ -12,14 +12,12 @@ API Documentation: https://developer.ebay.com/api-docs/buy/browse/resources/item
 """
 
 import os
-import base64
-from dotenv import load_dotenv, set_key
+from dotenv import load_dotenv
 import requests
 import json
 import time
 from datetime import datetime
 import sys
-import re
 import importlib.util
 
 # Import single_functions module (handles unused folder - keeping dynamic import for now)
@@ -1472,7 +1470,7 @@ def run_command(command, *args):
 if __name__ == "__main__":
 
     if len(sys.argv) < 2:
-        print("❌ Usage: python main_ebay_commands.py <command> [args...]")
+        print("❌ Usage: python -m backend.ebay_cli <command> [args...]")
         print("Commands: search, seller, item, collect, process, top, copy, refresh [token], test-add [item_index], list [sku], createinv, combine [sku] [output_filename], image <url> <type>, decode, upload [picture_name], aspects <category_id> [category_tree_id]")
         sys.exit(1)
     
