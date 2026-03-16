@@ -29,11 +29,9 @@ CLIENT_SECRET = os.getenv('client_secret')
 REDIRECT_URI = os.getenv('redirect_uri') or os.getenv('redirect_url')
 REFRESH_TOKEN = os.getenv('refresh_token')
 
-# OAuth endpoints
-SANDBOX_AUTH_URL = "https://auth.sandbox.ebay.com/oauth2/authorize"
-PRODUCTION_AUTH_URL = "https://auth.ebay.com/oauth2/authorize"
-SANDBOX_TOKEN_URL = "https://api.sandbox.ebay.com/identity/v1/oauth2/token"
-PRODUCTION_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
+# OAuth endpoints (production only)
+AUTH_URL = "https://auth.ebay.com/oauth2/authorize"
+TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 
 # Keys we can write via update_env (aligned with env_template)
 ENV_TOKEN_KEYS = ('application_token', 'user_token', 'refresh_token', 'auth_code')
@@ -94,23 +92,17 @@ def update_env(updates):
         f.writelines(new_lines)
 
 
-def mint_application_token(environment="production", scopes=None):
+def mint_application_token():
     """
     Mint an application access token via client credentials grant.
     On success, updates .env with application_token.
-
-    Args:
-        environment: "production" or "sandbox"
-        scopes: list of scope URLs (default: basic api_scope)
 
     Returns:
         Token response dict with access_token, expires_in, etc., or None on failure.
     """
     if not CLIENT_ID or not CLIENT_SECRET:
         raise ValueError("CLIENT_ID and CLIENT_SECRET are required in .env")
-    if scopes is None:
-        scopes = ["https://api.ebay.com/oauth/api_scope"]
-    token_url = PRODUCTION_TOKEN_URL if environment.lower() == "production" else SANDBOX_TOKEN_URL
+    scopes = ["https://api.ebay.com/oauth/api_scope"]
     auth_string = f"{CLIENT_ID}:{CLIENT_SECRET}"
     auth_bytes = base64.b64encode(auth_string.encode()).decode()
     headers = {
@@ -120,7 +112,7 @@ def mint_application_token(environment="production", scopes=None):
     scope_str = ' '.join(scopes)
     data = {'grant_type': 'client_credentials', 'scope': scope_str}
     try:
-        response = requests.post(token_url, headers=headers, data=data)
+        response = requests.post(TOKEN_URL, headers=headers, data=data)
         if response.status_code == 200:
             token_data = response.json()
             access_token = token_data.get('access_token')
@@ -134,13 +126,11 @@ def mint_application_token(environment="production", scopes=None):
         return None
 
 
-def get_user_consent_url(environment="production", scopes=None, state=None, prompt=None):
+def get_user_consent_url(state=None, prompt=None):
     """
     Build the user consent URL for the authorization code flow.
 
     Args:
-        environment: "production" or "sandbox"
-        scopes: list of OAuth scope URLs
         state: optional state for CSRF
         prompt: optional (e.g. "login")
 
@@ -154,39 +144,34 @@ def get_user_consent_url(environment="production", scopes=None, state=None, prom
         raise ValueError("CLIENT_ID is required in .env")
     if not REDIRECT_URI:
         raise ValueError("redirect_uri or redirect_url is required in .env")
-    if scopes is None:
-        scopes = DEFAULT_USER_SCOPES
-    auth_url = PRODUCTION_AUTH_URL if environment.lower() == "production" else SANDBOX_AUTH_URL
     params = {
         'client_id': CLIENT_ID,
         'redirect_uri': REDIRECT_URI,
         'response_type': 'code',
-        'scope': ' '.join(scopes)
+        'scope': ' '.join(DEFAULT_USER_SCOPES)
     }
     if state:
         params['state'] = state
     if prompt:
         params['prompt'] = prompt
     query_string = urllib.parse.urlencode(params)
-    return f"{auth_url}?{query_string}"
+    return f"{AUTH_URL}?{query_string}"
 
 
-def open_user_consent_page(environment="production", scopes=None, state=None, prompt=None):
+def open_user_consent_page(state=None, prompt=None):
     """Build consent URL and open it in the default browser. Returns the URL."""
-    url = get_user_consent_url(environment, scopes, state, prompt)
+    url = get_user_consent_url(state, prompt)
     webbrowser.open(url)
     return url
 
 
-def exchange_code_for_user_token(authorization_code, environment="production", scopes=None):
+def exchange_code_for_user_token(authorization_code):
     """
     Exchange authorization code for user access token and refresh token.
     On success, updates .env with user_token, refresh_token, and auth_code.
 
     Args:
         authorization_code: code from consent redirect
-        environment: "production" or "sandbox"
-        scopes: list of scopes (must match consent request)
 
     Returns:
         Token response dict or None on failure.
@@ -197,9 +182,6 @@ def exchange_code_for_user_token(authorization_code, environment="production", s
         raise ValueError("CLIENT_ID and CLIENT_SECRET are required in .env")
     if not REDIRECT_URI:
         raise ValueError("redirect_uri or redirect_url is required in .env")
-    if scopes is None:
-        scopes = DEFAULT_USER_SCOPES
-    token_url = PRODUCTION_TOKEN_URL if environment.lower() == "production" else SANDBOX_TOKEN_URL
     auth_string = f"{CLIENT_ID}:{CLIENT_SECRET}"
     auth_bytes = base64.b64encode(auth_string.encode()).decode()
     headers = {
@@ -211,10 +193,10 @@ def exchange_code_for_user_token(authorization_code, environment="production", s
         'grant_type': 'authorization_code',
         'code': decoded_code,
         'redirect_uri': REDIRECT_URI,
-        'scope': ' '.join(scopes)
+        'scope': ' '.join(DEFAULT_USER_SCOPES)
     }
     try:
-        response = requests.post(token_url, headers=headers, data=data)
+        response = requests.post(TOKEN_URL, headers=headers, data=data)
         if response.status_code == 200:
             token_data = response.json()
             access_token = token_data.get('access_token')
@@ -232,14 +214,10 @@ def exchange_code_for_user_token(authorization_code, environment="production", s
         return None
 
 
-def refresh_user_token(environment="production", scopes=None):
+def refresh_user_token():
     """
     Refresh user access token using refresh_token from .env.
     On success, updates .env with user_token (and refresh_token if returned).
-
-    Args:
-        environment: "production" or "sandbox"
-        scopes: list of scopes (same as original consent)
 
     Returns:
         Token response dict or None on failure.
@@ -251,9 +229,6 @@ def refresh_user_token(environment="production", scopes=None):
         raise ValueError("refresh_token is required in .env")
     if not CLIENT_ID or not CLIENT_SECRET:
         raise ValueError("CLIENT_ID and CLIENT_SECRET are required in .env")
-    if scopes is None:
-        scopes = DEFAULT_USER_SCOPES
-    token_url = PRODUCTION_TOKEN_URL if environment.lower() == "production" else SANDBOX_TOKEN_URL
     auth_string = f"{CLIENT_ID}:{CLIENT_SECRET}"
     auth_bytes = base64.b64encode(auth_string.encode()).decode()
     headers = {
@@ -263,10 +238,10 @@ def refresh_user_token(environment="production", scopes=None):
     data = {
         'grant_type': 'refresh_token',
         'refresh_token': REFRESH_TOKEN,
-        'scope': ' '.join(scopes)
+        'scope': ' '.join(DEFAULT_USER_SCOPES)
     }
     try:
-        response = requests.post(token_url, headers=headers, data=data)
+        response = requests.post(TOKEN_URL, headers=headers, data=data)
         if response.status_code == 200:
             token_data = response.json()
             access_token = token_data.get('access_token')
@@ -283,7 +258,7 @@ def refresh_user_token(environment="production", scopes=None):
         return None
 
 
-def refresh_user_and_app_token(environment="production"):
+def refresh_user_and_app_token():
     """
     Refresh both user and application tokens in one call.
     Calls mint_application_token first, then refresh_user_token.
@@ -292,7 +267,7 @@ def refresh_user_and_app_token(environment="production"):
     results = {'user_token_refreshed': False, 'application_token_refreshed': False, 'errors': []}
 
     try:
-        app_result = mint_application_token(environment=environment)
+        app_result = mint_application_token()
         results['application_token_refreshed'] = bool(app_result)
         if not app_result:
             results['errors'].append('Failed to mint application token')
@@ -300,7 +275,7 @@ def refresh_user_and_app_token(environment="production"):
         results['errors'].append(f'Application token: {str(e)}')
 
     try:
-        user_result = refresh_user_token(environment=environment)
+        user_result = refresh_user_token()
         results['user_token_refreshed'] = bool(user_result)
         if not user_result:
             results['errors'].append('Failed to refresh user token')
@@ -314,41 +289,36 @@ if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
         print("Usage: python -m backend.refreshToken <command> [args...]")
-        print("Commands (default environment: production):")
-        print("  mint-app [production|sandbox]")
-        print("  consent [production|sandbox]")
-        print("  open-consent [production|sandbox]")
-        print("  exchange <code> [production|sandbox]")
-        print("  refresh-user [production|sandbox]")
+        print("Commands:")
+        print("  mint-app")
+        print("  consent")
+        print("  open-consent")
+        print("  exchange <code>")
+        print("  refresh-user")
         sys.exit(1)
     command = sys.argv[1].lower()
-    env_arg = None
     if command == "exchange":
         if len(sys.argv) < 3:
-            print("Usage: exchange <auth_code> [production|sandbox]")
+            print("Usage: exchange <auth_code>")
             sys.exit(1)
         code = sys.argv[2]
-        env_arg = sys.argv[3] if len(sys.argv) > 3 else "production"
-    else:
-        env_arg = sys.argv[2] if len(sys.argv) > 2 else "production"
-    env = env_arg if env_arg in ("production", "sandbox") else "production"
     try:
         if command == "mint-app":
-            result = mint_application_token(environment=env)
+            result = mint_application_token()
             if result:
                 print("Application token minted and saved to .env")
         elif command == "consent":
-            url = get_user_consent_url(environment=env)
+            url = get_user_consent_url()
             print(url)
         elif command == "open-consent":
-            url = open_user_consent_page(environment=env)
+            url = open_user_consent_page()
             print("Opened:", url)
         elif command == "exchange":
-            result = exchange_code_for_user_token(code, environment=env)
+            result = exchange_code_for_user_token(code)
             if result:
                 print("User token and refresh_token saved to .env")
         elif command == "refresh-user":
-            result = refresh_user_token(environment=env)
+            result = refresh_user_token()
             if result:
                 print("User token updated in .env")
         else:

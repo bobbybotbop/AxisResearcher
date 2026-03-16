@@ -6,8 +6,6 @@ Run from project root:
   python testing/test_update_tokens.py verify
   python testing/test_update_tokens.py refresh-user
   python testing/test_update_tokens.py exchange [code]
-
-Default environment is production. Use --sandbox for sandbox.
 """
 
 import os
@@ -50,7 +48,7 @@ def _verify_env():
 def main():
     import argparse
     parser = argparse.ArgumentParser(
-        description="Test token minting and .env updates (CLI only, default: production)."
+        description="Test token minting and .env updates (CLI only)."
     )
     parser.add_argument(
         "command",
@@ -63,13 +61,7 @@ def main():
         default=None,
         help="For exchange: authorization code from consent redirect (optional; will prompt if omitted)"
     )
-    parser.add_argument(
-        "--sandbox",
-        action="store_true",
-        help="Use sandbox environment instead of production"
-    )
     args = parser.parse_args()
-    environment = "sandbox" if args.sandbox else "production"
 
     from backend.refreshToken import (
         mint_application_token,
@@ -78,8 +70,8 @@ def main():
     )
 
     if args.command == "mint-app":
-        print(f"Minting application token ({environment})...")
-        result = mint_application_token(environment=environment)
+        print("Minting application token...")
+        result = mint_application_token()
         if result:
             print("Application token minted and written to .env.")
             _verify_env()
@@ -92,9 +84,9 @@ def main():
         _verify_env()
 
     elif args.command == "refresh-user":
-        print(f"Refreshing user token ({environment})...")
+        print("Refreshing user token...")
         try:
-            result = refresh_user_token(environment=environment)
+            result = refresh_user_token()
             if result:
                 print("User token refreshed and written to .env.")
                 _verify_env()
@@ -112,8 +104,8 @@ def main():
         if not code:
             print("No code provided.")
             sys.exit(1)
-        print(f"Exchanging code for user token ({environment})...")
-        result = exchange_code_for_user_token(code, environment=environment)
+        print("Exchanging code for user token...")
+        result = exchange_code_for_user_token(code)
         if result:
             print("User token and refresh_token written to .env.")
             _verify_env()
