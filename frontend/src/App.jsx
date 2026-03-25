@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { FilePlus, Upload, Route, FlaskConical, Settings } from 'lucide-react'
 import CreateWorkflow from './components/CreateWorkflow'
 import { MOCK_DATA } from './mockData'
+import { createTestWorkflowState } from './testWorkflowState'
 import { trimTransparentPadding } from './utils/trimImage'
 
 /**
@@ -60,6 +62,22 @@ async function fetchWithProgress(url, options, onProgress) {
   return result
 }
 
+/** Merge AI-generated URLs with originals: originals keep their URL; others consume aiGeneratedList in order. */
+function mergeGeneratedWithOriginals(photosToProcess, aiGeneratedList, useOriginalPhotos, { allowPartial } = {}) {
+  const merged = []
+  let aiIndex = 0
+  for (const photoUrl of photosToProcess) {
+    if (useOriginalPhotos.has(photoUrl)) {
+      merged.push(photoUrl)
+    } else if (allowPartial && aiIndex < aiGeneratedList.length) {
+      merged.push(aiGeneratedList[aiIndex++])
+    } else if (!allowPartial) {
+      merged.push(aiGeneratedList[aiIndex++])
+    }
+  }
+  return merged
+}
+
 function App() {
   const [photos, setPhotos] = useState([])
   const [categories, setCategories] = useState({})
@@ -73,11 +91,12 @@ function App() {
   const [selectedImagesForRegen, setSelectedImagesForRegen] = useState([])
   const [isTrimming, setIsTrimming] = useState(false)
   const [isRegenerating, setIsRegenerating] = useState(false)
+  const [isAddingNewVersions, setIsAddingNewVersions] = useState(false)
   const [isCreatingListing, setIsCreatingListing] = useState(false)
   const [listingData, setListingData] = useState(null)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadResult, setUploadResult] = useState(null)
-  const [activeTab, setActiveTab] = useState('create') // 'create', 'upload', or 'testing'
+  const [activeTab, setActiveTab] = useState('create') // 'create' | 'upload' | 'test-workflow' | 'testing' | 'settings'
   const [testingResult, setTestingResult] = useState(null)
   const [isTesting, setIsTesting] = useState(false)
   const [testingId, setTestingId] = useState('')
@@ -132,7 +151,6 @@ function App() {
   })
 
   // Token refresh panel state
-  const [tokenPanelOpen, setTokenPanelOpen] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [tokenMessage, setTokenMessage] = useState(null)
   const [tokenInfo, setTokenInfo] = useState({ user_token_set: false, application_token_set: false, user_token: '', application_token: '' })
@@ -170,18 +188,13 @@ function App() {
       const data = await res.json()
       if (data && !data.error) {
         setTokenInfo(data)
+        if (typeof data.token_last_updated_ms === 'number' && Number.isFinite(data.token_last_updated_ms)) {
+          setTokenLastUpdated(data.token_last_updated_ms)
+          localStorage.setItem('tokenLastUpdated', data.token_last_updated_ms.toString())
+        }
       }
     } catch (e) {
       // ignore
-    }
-  }
-
-  const handleTokenPanelToggle = () => {
-    const opening = !tokenPanelOpen
-    setTokenPanelOpen(opening)
-    if (opening) {
-      fetchTokenInfo()
-      setTokenMessage(null)
     }
   }
 
@@ -216,6 +229,7 @@ function App() {
     const saved = localStorage.getItem('tokenLastUpdated')
     const lastUpdated = saved ? parseInt(saved, 10) : null
     const stale = lastUpdated ? (Date.now() - lastUpdated) > TOKEN_STALE_MS : true
+    fetchTokenInfo()
     if (stale) {
       hasAutoRefreshed.current = true
       handleRefreshTokens()
@@ -226,60 +240,79 @@ function App() {
     window.open('https://developer.ebay.com/my/auth/?env=production&index=0', '_blank')
   }
 
-  // Test workflow state (mock data, no API calls)
-  const [testListingId, setTestListingId] = useState('')
-  const [testPhotos, setTestPhotos] = useState([])
-  const [testCategories, setTestCategories] = useState({})
-  const [testEditableCategories, setTestEditableCategories] = useState({})
-  const [testListing, setTestListing] = useState(null)
-  const [testLoading, setTestLoading] = useState(false)
-  const [testIsConfirming, setTestIsConfirming] = useState(false)
-  const [testError, setTestError] = useState(null)
-  const [testGeneratedImages, setTestGeneratedImages] = useState([])
-  const [testCustomPrompt, setTestCustomPrompt] = useState('')
-  const [testSelectedImagesForRegen, setTestSelectedImagesForRegen] = useState([])
-  const [testIsRegenerating, setTestIsRegenerating] = useState(false)
-  const [testIsTrimming, setTestIsTrimming] = useState(false)
-  const [testUseRealEbayUpload, setTestUseRealEbayUpload] = useState(false)
-  const [testIsCreatingListing, setTestIsCreatingListing] = useState(false)
-  const [testListingData, setTestListingData] = useState(null)
-  const [testUploadResult, setTestUploadResult] = useState(null)
-  const [testCurrentSku, setTestCurrentSku] = useState(null)
-  const [testSkippedPhotos, setTestSkippedPhotos] = useState(new Set())
-  const [testUseOriginalPhotos, setTestUseOriginalPhotos] = useState(new Set())
-  const [testPromptModifier, setTestPromptModifier] = useState('')
-  const [testIsEditorOpen, setTestIsEditorOpen] = useState(false)
-  const [testEditableTitle, setTestEditableTitle] = useState('')
-  const [testIsTrimmingTitle, setTestIsTrimmingTitle] = useState(false)
-  const [testIsSavingTitle, setTestIsSavingTitle] = useState(false)
-  const [testLightboxOpen, setTestLightboxOpen] = useState(false)
-  const [testLightboxIndex, setTestLightboxIndex] = useState(0)
-  const [testFetchProgress, setTestFetchProgress] = useState({
-    isActive: false,
-    currentStep: null,
-    completedSteps: [],
-    totalSteps: []
-  })
-  const [testImageGenProgress, setTestImageGenProgress] = useState({
-    isActive: false,
-    taskId: null,
-    total: 0,
-    completed: 0,
-    currentGenerating: []
-  })
-  const [testCreateListingProgress, setTestCreateListingProgress] = useState({
-    isActive: false,
-    currentStep: null,
-    completedSteps: [],
-    totalSteps: []
-  })
-  const [testUploadProgress, setTestUploadProgress] = useState({
-    isActive: false,
-    currentStep: null,
-    completedSteps: [],
-    totalSteps: []
-  })
-  const [testUploadingSkus, setTestUploadingSkus] = useState(new Set())
+  // Test workflow state (mock data, no API calls) — single state object
+  const [testWf, setTestWf] = useState(createTestWorkflowState)
+  const setTestKey = (key) => (valOrFn) =>
+    setTestWf((w) => ({ ...w, [key]: typeof valOrFn === 'function' ? valOrFn(w[key]) : valOrFn }))
+  const setTestListingId = setTestKey('listingId')
+  const setTestPhotos = setTestKey('photos')
+  const setTestCategories = setTestKey('categories')
+  const setTestEditableCategories = setTestKey('editableCategories')
+  const setTestListing = setTestKey('listing')
+  const setTestLoading = setTestKey('loading')
+  const setTestIsConfirming = setTestKey('isConfirming')
+  const setTestError = setTestKey('error')
+  const setTestGeneratedImages = setTestKey('generatedImages')
+  const setTestCustomPrompt = setTestKey('customPrompt')
+  const setTestSelectedImagesForRegen = setTestKey('selectedImagesForRegen')
+  const setTestIsRegenerating = setTestKey('isRegenerating')
+  const setTestIsTrimming = setTestKey('isTrimming')
+  const setTestIsAddingNewVersions = setTestKey('isAddingNewVersions')
+  const setTestUseRealEbayUpload = setTestKey('useRealEbayUpload')
+  const setTestIsCreatingListing = setTestKey('isCreatingListing')
+  const setTestListingData = setTestKey('listingData')
+  const setTestUploadResult = setTestKey('uploadResult')
+  const setTestCurrentSku = setTestKey('currentSku')
+  const setTestSkippedPhotos = setTestKey('skippedPhotos')
+  const setTestUseOriginalPhotos = setTestKey('useOriginalPhotos')
+  const setTestPromptModifier = setTestKey('promptModifier')
+  const setTestIsEditorOpen = setTestKey('isEditorOpen')
+  const setTestEditableTitle = setTestKey('editableTitle')
+  const setTestIsTrimmingTitle = setTestKey('isTrimmingTitle')
+  const setTestIsSavingTitle = setTestKey('isSavingTitle')
+  const setTestLightboxOpen = setTestKey('lightboxOpen')
+  const setTestLightboxIndex = setTestKey('lightboxIndex')
+  const setTestFetchProgress = setTestKey('fetchProgress')
+  const setTestImageGenProgress = setTestKey('imageGenProgress')
+  const setTestCreateListingProgress = setTestKey('createListingProgress')
+  const setTestUploadProgress = setTestKey('uploadProgress')
+  const setTestUploadingSkus = setTestKey('uploadingSkus')
+
+  const {
+    listingId: testListingId,
+    photos: testPhotos,
+    categories: testCategories,
+    editableCategories: testEditableCategories,
+    listing: testListing,
+    loading: testLoading,
+    isConfirming: testIsConfirming,
+    error: testError,
+    generatedImages: testGeneratedImages,
+    customPrompt: testCustomPrompt,
+    selectedImagesForRegen: testSelectedImagesForRegen,
+    isRegenerating: testIsRegenerating,
+    isTrimming: testIsTrimming,
+    isAddingNewVersions: testIsAddingNewVersions,
+    useRealEbayUpload: testUseRealEbayUpload,
+    isCreatingListing: testIsCreatingListing,
+    listingData: testListingData,
+    uploadResult: testUploadResult,
+    currentSku: testCurrentSku,
+    skippedPhotos: testSkippedPhotos,
+    useOriginalPhotos: testUseOriginalPhotos,
+    promptModifier: testPromptModifier,
+    isEditorOpen: testIsEditorOpen,
+    editableTitle: testEditableTitle,
+    isTrimmingTitle: testIsTrimmingTitle,
+    isSavingTitle: testIsSavingTitle,
+    lightboxOpen: testLightboxOpen,
+    lightboxIndex: testLightboxIndex,
+    fetchProgress: testFetchProgress,
+    imageGenProgress: testImageGenProgress,
+    createListingProgress: testCreateListingProgress,
+    uploadProgress: testUploadProgress,
+    uploadingSkus: testUploadingSkus,
+  } = testWf
 
   const fetchListingPhotos = async () => {
     if (!listingId.trim()) {
@@ -529,17 +562,9 @@ function App() {
               console.log('AI generated images:', aiGeneratedList)
               console.log(`Successfully generated ${aiGeneratedList.length} image(s)`)
               
-              // Merge: for each photo in photosToProcess, use original URL or next AI result
-              const merged = []
-              let aiIndex = 0
-              for (const photoUrl of photosToProcess) {
-                if (useOriginalPhotos.has(photoUrl)) {
-                  merged.push(photoUrl)
-                } else {
-                  merged.push(aiGeneratedList[aiIndex++])
-                }
-              }
-              setGeneratedImages(merged)
+              setGeneratedImages(
+                mergeGeneratedWithOriginals(photosToProcess, aiGeneratedList, useOriginalPhotos, { allowPartial: false })
+              )
               setCategories(editableCategories)
               setSelectedImagesForRegen([])
               setCustomPrompt('')
@@ -554,16 +579,9 @@ function App() {
             } else {
               // Failed - show errors but return partial results if any
               const aiGeneratedList = statusData.generated_images || []
-              const merged = []
-              let aiIndex = 0
-              for (const photoUrl of photosToProcess) {
-                if (useOriginalPhotos.has(photoUrl)) {
-                  merged.push(photoUrl)
-                } else if (aiIndex < aiGeneratedList.length) {
-                  merged.push(aiGeneratedList[aiIndex++])
-                }
-              }
-              setGeneratedImages(merged)
+              setGeneratedImages(
+                mergeGeneratedWithOriginals(photosToProcess, aiGeneratedList, useOriginalPhotos, { allowPartial: true })
+              )
               
               const errorMsg = statusData.errors && statusData.errors.length > 0
                 ? `Image generation completed with errors: ${statusData.errors.join('; ')}`
@@ -643,9 +661,6 @@ function App() {
   }, [])
 
   const handleImageSelection = (index) => {
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/02f918e9-918d-446f-84f2-b624a202fc2e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:handleImageSelection',message:'Checkbox clicked',data:{index,currentSelected:selectedImagesForRegen,generatedImagesLength:generatedImages.length},timestamp:Date.now(),hypothesisId:'checkbox'})}).catch(()=>{});
-    // #endregion
     setSelectedImagesForRegen((prev) => {
       if (prev.includes(index)) {
         return prev.filter(i => i !== index)
@@ -656,26 +671,23 @@ function App() {
   }
 
   const handleRegenerateImages = async () => {
-    if (!customPrompt.trim()) {
-      setError('Please enter a custom prompt')
+    if (!customPrompt?.trim()) {
+      setError('Please enter a prompt to guide the regeneration')
       return
     }
-    if (selectedImagesForRegen.length === 0) {
-      setError('Please select at least one image to regenerate')
-      return
-    }
+    const indices = selectedImagesForRegen.length > 0
+      ? selectedImagesForRegen
+      : generatedImages.map((_, i) => i)
+    if (indices.length === 0) return
 
     setIsRegenerating(true)
     setError(null)
 
     try {
       const imagesToRegen = selectedImagesForRegen.map(index => generatedImages[index])
+      const promptToUse = customPrompt.trim()
       console.log('Regenerating images:', imagesToRegen)
-      console.log('Custom prompt:', customPrompt)
-
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/02f918e9-918d-446f-84f2-b624a202fc2e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:handleRegenerateImages:entry',message:'Regenerate request starting',data:{selectedIndices:selectedImagesForRegen,imageUrls:imagesToRegen,promptLength:customPrompt.length,totalGeneratedImages:generatedImages.length},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
+      console.log('Custom prompt:', promptToUse)
 
       const response = await fetch('/api/regenerate-images', {
         method: 'POST',
@@ -684,16 +696,12 @@ function App() {
         },
         body: JSON.stringify({
           image_urls: imagesToRegen,
-          prompt: customPrompt
+          prompt: promptToUse
         })
       })
 
       const data = await response.json()
       console.log('Regeneration response:', data)
-
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/02f918e9-918d-446f-84f2-b624a202fc2e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:handleRegenerateImages:response',message:'Regeneration API response received',data:{status:response.status,ok:response.ok,error:data.error,warnings:data.warnings,generatedImagesCount:(data.generated_images||[]).length,generatedImages:data.generated_images},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to regenerate images')
@@ -708,24 +716,17 @@ function App() {
 
       // Replace selected images with regenerated ones
       const newImages = [...generatedImages]
-      selectedImagesForRegen.forEach((originalIndex, regenIndex) => {
+      indices.forEach((originalIndex, regenIndex) => {
         if (regenIndex < regeneratedUrls.length) {
           newImages[originalIndex] = regeneratedUrls[regenIndex]
         }
       })
-
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/02f918e9-918d-446f-84f2-b624a202fc2e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:handleRegenerateImages:replacement',message:'Image replacement result',data:{regeneratedUrlsCount:regeneratedUrls.length,replacementsAttempted:selectedImagesForRegen.length,newImagesLength:newImages.length},timestamp:Date.now(),hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
 
       setGeneratedImages(newImages)
       setSelectedImagesForRegen([])
       setCustomPrompt('')
     } catch (err) {
       console.error('Error regenerating images:', err)
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/02f918e9-918d-446f-84f2-b624a202fc2e',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'App.jsx:handleRegenerateImages:error',message:'Regeneration error caught',data:{errorMessage:err.message,errorName:err.name},timestamp:Date.now(),hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       setError(err.message || 'An error occurred while regenerating images')
     } finally {
       setIsRegenerating(false)
@@ -733,17 +734,17 @@ function App() {
   }
 
   const handleTrimSelected = async () => {
-    if (selectedImagesForRegen.length === 0) {
-      setError('Please select at least one image to trim')
-      return
-    }
+    const indices = selectedImagesForRegen.length > 0
+      ? selectedImagesForRegen
+      : generatedImages.map((_, i) => i)
+    if (indices.length === 0) return
 
     setIsTrimming(true)
     setError(null)
 
     try {
       const newImages = [...generatedImages]
-      for (const index of selectedImagesForRegen) {
+      for (const index of indices) {
         const url = generatedImages[index]
         const resp = await fetch(url)
         const blob = await resp.blob()
@@ -762,12 +763,73 @@ function App() {
         if (uploadData.url) newImages[index] = uploadData.url
       }
       setGeneratedImages(newImages)
-      setSelectedImagesForRegen([])
     } catch (err) {
       console.error('Error trimming images:', err)
       setError(err.message || 'An error occurred while trimming images')
     } finally {
       setIsTrimming(false)
+    }
+  }
+
+  const handleAddNewVersions = async () => {
+    if (!customPrompt?.trim()) {
+      setError('Please enter a prompt to guide the new version')
+      return
+    }
+    if (!currentSku) {
+      setError('SKU is required. Please fetch photos first.')
+      return
+    }
+
+    const indices = selectedImagesForRegen.length > 0
+      ? selectedImagesForRegen
+      : generatedImages.map((_, i) => i)
+    const imagesToRegen = indices.map(i => generatedImages[i]).filter(Boolean)
+    if (imagesToRegen.length === 0) {
+      setError('No valid images to regenerate')
+      return
+    }
+
+    setIsAddingNewVersions(true)
+    setError(null)
+
+    try {
+      const response = await fetch('/api/regenerate-images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          image_urls: imagesToRegen,
+          prompt: customPrompt.trim()
+        })
+      })
+
+      const data = await response.json()
+      if (!response.ok) throw new Error(data.error || 'Failed to regenerate images')
+
+      const newUrls = data.generated_images || []
+      const nextImages = [...generatedImages, ...newUrls]
+      setGeneratedImages(nextImages)
+      setSelectedImagesForRegen([])
+
+      const syncResp = await fetch('/api/update-listing-images', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sku: currentSku, image_urls: nextImages })
+      })
+
+      const syncData = await syncResp.json()
+      if (!syncResp.ok) throw new Error(syncData.error || 'Failed to update listing file')
+      if (syncData.listing_data) {
+        setListingData(syncData.listing_data)
+        setEditableTitle(syncData.listing_data?.inventoryItem?.product?.title || '')
+      }
+
+      await handleUploadToEbay(currentSku, syncData.listing_data)
+    } catch (err) {
+      console.error('Error in add new version:', err)
+      setError(err.message || 'An error occurred while adding new version')
+    } finally {
+      setIsAddingNewVersions(false)
     }
   }
 
@@ -1046,7 +1108,18 @@ function App() {
     if (tab === 'upload') {
       fetchAllListings()
     }
+    if (tab === 'settings') {
+      fetchTokenInfo()
+      setTokenMessage(null)
+    }
   }
+
+  const navItemClass = (tab) =>
+    `flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+      activeTab === tab
+        ? 'bg-primary/10 font-semibold text-primary'
+        : 'font-medium text-gray-700 hover:bg-gray-100'
+    }`
 
   const handleTestAppToken = async () => {
     setIsTestingAppToken(true)
@@ -1282,16 +1355,42 @@ function App() {
     }, 800)
   }
 
-  const testHandleTrimSelected = async () => {
-    if (testSelectedImagesForRegen.length === 0) {
-      setTestError('Please select at least one image to trim')
+  const testHandleAddNewVersions = () => {
+    if (!testCustomPrompt?.trim()) {
+      setTestError('Please enter a prompt')
       return
     }
+    const indices = testSelectedImagesForRegen.length > 0
+      ? testSelectedImagesForRegen
+      : testGeneratedImages.map((_, i) => i)
+    if (indices.length === 0) return
+    setTestIsAddingNewVersions(true)
+    setTestError(null)
+    const placeholderUrls = ['https://picsum.photos/seed/newver1/400/400', 'https://picsum.photos/seed/newver2/400/400']
+    const toAppend = indices.slice(0, placeholderUrls.length).map((_, i) => placeholderUrls[i])
+    setTimeout(() => {
+      setTestGeneratedImages(prev => {
+        const updated = [...prev, ...toAppend]
+        const listingData = { ...MOCK_DATA.listingData, inventoryItem: { ...MOCK_DATA.listingData.inventoryItem, product: { ...MOCK_DATA.listingData.inventoryItem.product, imageUrls: updated } } }
+        setTestListingData(listingData)
+        setTestEditableTitle(listingData.inventoryItem?.product?.title || '')
+        testHandleUploadToEbay(testCurrentSku || MOCK_DATA.listingData?.sku, listingData)
+        return updated
+      })
+      setTestIsAddingNewVersions(false)
+    }, 600)
+  }
+
+  const testHandleTrimSelected = async () => {
+    const indices = testSelectedImagesForRegen.length > 0
+      ? testSelectedImagesForRegen
+      : testGeneratedImages.map((_, i) => i)
+    if (indices.length === 0) return
     setTestIsTrimming(true)
     setTestError(null)
     try {
       const newImages = [...testGeneratedImages]
-      for (const index of testSelectedImagesForRegen) {
+      for (const index of indices) {
         const url = testGeneratedImages[index]
         const resp = await fetch(url)
         const blob = await resp.blob()
@@ -1304,7 +1403,6 @@ function App() {
         newImages[index] = trimmedUrl
       }
       setTestGeneratedImages(newImages)
-      setTestSelectedImagesForRegen([])
     } catch (err) {
       console.error('Error trimming test images:', err)
       setTestError(err.message || 'An error occurred while trimming images')
@@ -1314,162 +1412,77 @@ function App() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <header className="bg-gradient-to-br from-primary to-primary-dark px-6 py-8 text-center text-white shadow-sm md:px-8 md:py-8">
-        <div className="relative flex items-center justify-center gap-4">
-          <h1 className="mb-2 text-3xl font-bold md:text-4xl">Axis Researcher</h1>
-          <button
-            type="button"
-            className={`absolute right-0 flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border-2 text-xl transition-all hover:scale-110 ${
-              isTokenStale ? 'border-red-500/70' : 'border-white/40 bg-white/15 hover:border-white/60 hover:bg-white/25'
-            }`}
-            onClick={handleTokenPanelToggle}
-            title={`Refresh eBay Tokens – last updated: ${formatTimeAgo(tokenLastUpdated)}`}
+    <div className="flex min-h-screen">
+      <aside
+        className="sticky top-0 flex h-screen w-60 shrink-0 flex-col rounded-tr-xl border-r border-gray-200 bg-white shadow-sm"
+        aria-label="Main navigation"
+      >
+        <div className="flex items-center px-4 py-5">
+          <div
+            className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary-dark text-sm font-bold tracking-tight text-white"
+            aria-hidden
           >
-            {tokenPanelOpen ? '✕' : '⚙'}
-            {isTokenStale && !tokenPanelOpen && (
-              <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 animate-stale-pulse rounded-full border-2 border-primary-dark bg-danger" />
-            )}
-          </button>
-        </div>
-        <p className="text-lg opacity-90">Automatically create listings with AI</p>
-
-        {tokenPanelOpen && (
-          <div className="mx-auto mt-5 max-w-[700px] animate-token-slide-down rounded-xl border border-white/25 bg-white/10 p-5 text-left">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="m-0 text-lg font-semibold text-white">eBay Token Management</h3>
-              <button
-                type="button"
-                className="cursor-pointer rounded-md border-none bg-white px-4 py-2 text-sm font-semibold text-primary transition-all hover:-translate-y-0.5 hover:bg-blue-50 hover:shadow-md"
-                onClick={handleOpenEbayAuth}
-              >
-                Open eBay Auth Page
-              </button>
-            </div>
-
-            <div className="mb-4 flex flex-col gap-1.5 font-mono text-sm">
-              <span
-                className={`rounded px-2 py-1 break-all ${
-                  tokenInfo.user_token_set ? 'bg-emerald-500/20 text-emerald-200' : 'bg-red-500/20 text-red-200'
-                }`}
-              >
-                user_token: {tokenInfo.user_token_set ? tokenInfo.user_token : 'not set'}
-              </span>
-              <span
-                className={`rounded px-2 py-1 break-all ${
-                  tokenInfo.application_token_set ? 'bg-emerald-500/20 text-emerald-200' : 'bg-red-500/20 text-red-200'
-                }`}
-              >
-                application_token: {tokenInfo.application_token_set ? tokenInfo.application_token : 'not set'}
-              </span>
-            </div>
-
-            <div
-              className={`mb-4 rounded-md px-2.5 py-1.5 text-sm font-semibold ${
-                isTokenStale ? 'border border-red-500/40 bg-red-500/20 text-red-200' : 'border border-emerald-500/30 bg-emerald-500/15 text-emerald-200'
-              }`}
-            >
-              Last updated: {tokenLastUpdated
-                ? `${formatTimeAgo(tokenLastUpdated)}${isTokenStale ? ' — tokens may be expired!' : ''}`
-                : 'never'}
-            </div>
-
-            <div className="mt-3 flex gap-2">
-              <button
-                type="button"
-                className="cursor-pointer rounded-lg border-none bg-white px-6 py-2.5 text-sm font-semibold text-primary transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:transform-none"
-                onClick={handleRefreshTokens}
-                disabled={isRefreshing}
-              >
-                {isRefreshing ? 'Refreshing...' : 'Refresh Tokens'}
-              </button>
-            </div>
-
-            <div className="mt-4 flex flex-col gap-3 rounded-lg border border-white/20 bg-white/5 p-4">
-              <h4 className="text-sm font-semibold text-white/90">Token tests</h4>
-              <div className="flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  className="rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 text-sm font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
-                  onClick={handleTestAppToken}
-                  disabled={isTestingAppToken}
-                >
-                  {isTestingAppToken ? 'Testing...' : 'Test Application Token'}
-                </button>
-                <button
-                  type="button"
-                  className="rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 text-sm font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
-                  onClick={handleTestUserToken}
-                  disabled={isTestingUserToken}
-                >
-                  {isTestingUserToken ? 'Testing...' : 'Test User Token'}
-                </button>
-              </div>
-              <div className="flex flex-wrap gap-4">
-                {appTokenResult && (
-                  <div className={`rounded-lg border px-3 py-2 text-sm ${appTokenResult.ok ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-red-300 bg-red-50 text-red-800'}`}>
-                    <span className="font-medium">Application token:</span> {appTokenResult.message}
-                  </div>
-                )}
-                {userTokenResult && (
-                  <div className={`rounded-lg border px-3 py-2 text-sm ${userTokenResult.ok ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-red-300 bg-red-50 text-red-800'}`}>
-                    <span className="font-medium">User token:</span> {userTokenResult.message}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {tokenMessage && (
-              <div
-                className={`mt-3 rounded-md px-3 py-2 text-sm font-medium ${
-                  tokenMessage.type === 'success'
-                    ? 'border border-emerald-500/40 bg-emerald-500/25 text-emerald-200'
-                    : 'border border-red-500/40 bg-red-500/25 text-red-200'
-                }`}
-              >
-                {tokenMessage.text}
-              </div>
-            )}
+            AR
           </div>
-        )}
-      </header>
-
-      <main className="mx-auto flex flex-1 max-w-[1200px] w-full flex-col p-6 md:p-8">
-        <div className="flex flex-wrap gap-2 border-b-2 border-gray-200">
-          <button
-            className={`rounded-t-lg px-4 py-2 font-semibold transition-colors ${
-              activeTab === 'create' ? 'border-b-2 border-primary bg-white text-primary' : 'text-gray-600 hover:text-primary'
-            }`}
-            onClick={() => handleTabChange('create')}
-          >
-            Create Listing
-          </button>
-          <button
-            className={`rounded-t-lg px-4 py-2 font-semibold transition-colors ${
-              activeTab === 'upload' ? 'border-b-2 border-primary bg-white text-primary' : 'text-gray-600 hover:text-primary'
-            }`}
-            onClick={() => handleTabChange('upload')}
-          >
-            Upload Listings
-          </button>
-          <button
-            className={`rounded-t-lg px-4 py-2 font-semibold transition-colors ${
-              activeTab === 'test-workflow' ? 'border-b-2 border-primary bg-white text-primary' : 'text-gray-600 hover:text-primary'
-            }`}
-            onClick={() => handleTabChange('test-workflow')}
-          >
-            Test Workflow
-          </button>
-          <button
-            className={`rounded-t-lg px-4 py-2 font-semibold transition-colors ${
-              activeTab === 'testing' ? 'border-b-2 border-primary bg-white text-primary' : 'text-gray-600 hover:text-primary'
-            }`}
-            onClick={() => handleTabChange('testing')}
-          >
-            Testing
-          </button>
         </div>
+        <nav className="flex flex-1 flex-col px-3 pb-4">
+          <p className="mb-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-gray-400">Research</p>
+          <div className="flex flex-col gap-0.5">
+            <button
+              type="button"
+              className={navItemClass('create')}
+              onClick={() => handleTabChange('create')}
+            >
+              <FilePlus size={20} strokeWidth={1.75} className="shrink-0" />
+              <span>Create Listing</span>
+            </button>
+            <button
+              type="button"
+              className={navItemClass('upload')}
+              onClick={() => handleTabChange('upload')}
+            >
+              <Upload size={20} strokeWidth={1.75} className="shrink-0" />
+              <span>Upload Listings</span>
+            </button>
+            <button
+              type="button"
+              className={navItemClass('test-workflow')}
+              onClick={() => handleTabChange('test-workflow')}
+            >
+              <Route size={20} strokeWidth={1.75} className="shrink-0" />
+              <span>Test Workflow</span>
+            </button>
+            <button
+              type="button"
+              className={navItemClass('testing')}
+              onClick={() => handleTabChange('testing')}
+            >
+              <FlaskConical size={20} strokeWidth={1.75} className="shrink-0" />
+              <span>Testing</span>
+            </button>
+          </div>
+          <div className="mt-auto border-t border-gray-200 pt-3">
+            <button
+              type="button"
+              className={`${navItemClass('settings')} relative`}
+              onClick={() => handleTabChange('settings')}
+              title={`eBay tokens – last updated: ${formatTimeAgo(tokenLastUpdated)}`}
+            >
+              <Settings size={20} strokeWidth={1.75} className="shrink-0" />
+              <span>Settings</span>
+              {isTokenStale && (
+                <span
+                  className="absolute right-2.5 top-1/2 h-2 w-2 -translate-y-1/2 animate-stale-pulse rounded-full bg-danger ring-2 ring-white"
+                  aria-label="Tokens may be stale"
+                />
+              )}
+            </button>
+          </div>
+        </nav>
+      </aside>
 
+      <main className="min-h-screen flex-1 overflow-auto bg-gray-50">
+        <div className="mx-auto flex w-full max-w-[1200px] flex-col px-6 py-6 md:px-8 md:py-8">
         {activeTab === 'test-workflow' && (
           <CreateWorkflow
             listingId={testListingId}
@@ -1489,6 +1502,7 @@ function App() {
             isConfirming={testIsConfirming}
             isRegenerating={testIsRegenerating}
             isTrimming={testIsTrimming}
+            isAddingNewVersions={testIsAddingNewVersions}
             isCreatingListing={testIsCreatingListing}
             listingData={testListingData}
             editableTitle={testEditableTitle}
@@ -1511,6 +1525,7 @@ function App() {
             onImageSelection={(idx) => setTestSelectedImagesForRegen(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx])}
             onRegenerateImages={testHandleRegenerateImages}
             onTrimSelected={testHandleTrimSelected}
+            onAddNewVersions={testHandleAddNewVersions}
             onCustomPromptChange={setTestCustomPrompt}
             onDragEnd={(result) => { if (!result.destination) return; const src = result.source.index, dest = result.destination.index; if (src === dest) return; setTestGeneratedImages(prev => { const arr = [...prev]; const [moved] = arr.splice(src, 1); arr.splice(dest, 0, moved); return arr }) }}
             onRemoveFromListing={(idx) => { setTestGeneratedImages(prev => prev.filter((_, i) => i !== idx)); setTestSelectedImagesForRegen([]) }}
@@ -1541,7 +1556,7 @@ function App() {
         )}
 
         {activeTab === 'upload' && (
-          <div className="mt-8">
+          <div>
             <h2 className="mb-5 text-xl font-semibold text-gray-800">Generated Listings</h2>
 
             {loadingListings ? (
@@ -1671,7 +1686,7 @@ function App() {
         )}
 
         {activeTab === 'testing' && (
-          <div className="mt-8 rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
+          <div className="rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
             <h2 className="mb-5 text-xl font-semibold text-gray-800">Testing</h2>
             <div className="flex flex-col gap-6">
               <p className="text-gray-600">Use this section to test functions and debug code.</p>
@@ -1712,6 +1727,113 @@ function App() {
           </div>
         )}
 
+        {activeTab === 'settings' && (
+          <div className="animate-token-slide-down rounded-xl border border-gray-200 bg-white p-6 shadow-sm md:p-8">
+            <div className="mb-6 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-xl font-semibold text-gray-800">Settings</h2>
+            </div>
+            <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <h3 className="m-0 text-lg font-semibold text-gray-800">eBay Token Management</h3>
+                <button
+                  type="button"
+                  className="cursor-pointer rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-primary shadow-sm transition-all hover:-translate-y-0.5 hover:bg-gray-50 hover:shadow-md"
+                  onClick={handleOpenEbayAuth}
+                >
+                  Open eBay Auth Page
+                </button>
+              </div>
+
+              <div className="mb-4 flex flex-col gap-1.5 font-mono text-sm">
+                <span
+                  className={`rounded px-2 py-1 break-all ${
+                    tokenInfo.user_token_set ? 'bg-emerald-100 text-emerald-900' : 'bg-red-100 text-red-900'
+                  }`}
+                >
+                  user_token: {tokenInfo.user_token_set ? tokenInfo.user_token : 'not set'}
+                </span>
+                <span
+                  className={`rounded px-2 py-1 break-all ${
+                    tokenInfo.application_token_set ? 'bg-emerald-100 text-emerald-900' : 'bg-red-100 text-red-900'
+                  }`}
+                >
+                  application_token: {tokenInfo.application_token_set ? tokenInfo.application_token : 'not set'}
+                </span>
+              </div>
+
+              <div
+                className={`mb-4 rounded-md px-2.5 py-1.5 text-sm font-semibold ${
+                  isTokenStale
+                    ? 'border border-red-200 bg-red-50 text-red-800'
+                    : 'border border-emerald-200 bg-emerald-50 text-emerald-800'
+                }`}
+              >
+                Last updated:{' '}
+                {tokenLastUpdated
+                  ? `${formatTimeAgo(tokenLastUpdated)}${isTokenStale ? ' — tokens may be expired!' : ''}`
+                  : 'never'}
+              </div>
+
+              <div className="mt-3 flex flex-col gap-3">
+                <button
+                  type="button"
+                  className="cursor-pointer rounded-lg border border-gray-200 bg-white px-6 py-2.5 text-sm font-semibold text-primary shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:transform-none"
+                  onClick={handleRefreshTokens}
+                  disabled={isRefreshing}
+                >
+                  {isRefreshing ? 'Refreshing...' : 'Refresh Tokens'}
+                </button>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    className="rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 text-sm font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={handleTestAppToken}
+                    disabled={isTestingAppToken}
+                  >
+                    {isTestingAppToken ? 'Testing...' : 'Test Application Token'}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 text-sm font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+                    onClick={handleTestUserToken}
+                    disabled={isTestingUserToken}
+                  >
+                    {isTestingUserToken ? 'Testing...' : 'Test User Token'}
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-4 pt-1">
+                  {appTokenResult && (
+                    <div
+                      className={`rounded-lg border px-3 py-2 text-sm ${appTokenResult.ok ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-red-300 bg-red-50 text-red-800'}`}
+                    >
+                      <span className="font-medium">Application token:</span> {appTokenResult.message}
+                    </div>
+                  )}
+                  {userTokenResult && (
+                    <div
+                      className={`rounded-lg border px-3 py-2 text-sm ${userTokenResult.ok ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-red-300 bg-red-50 text-red-800'}`}
+                    >
+                      <span className="font-medium">User token:</span> {userTokenResult.message}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {tokenMessage && (
+                <div
+                  className={`mt-3 rounded-md px-3 py-2 text-sm font-medium ${
+                    tokenMessage.type === 'success'
+                      ? 'border border-emerald-200 bg-emerald-50 text-emerald-800'
+                      : 'border border-red-200 bg-red-50 text-red-800'
+                  }`}
+                >
+                  {tokenMessage.text}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {activeTab === 'create' && (
           <CreateWorkflow
             listingId={listingId}
@@ -1731,6 +1853,7 @@ function App() {
             isConfirming={isConfirming}
             isRegenerating={isRegenerating}
             isTrimming={isTrimming}
+            isAddingNewVersions={isAddingNewVersions}
             isCreatingListing={isCreatingListing}
             listingData={listingData}
             editableTitle={editableTitle}
@@ -1753,6 +1876,7 @@ function App() {
             onImageSelection={handleImageSelection}
             onRegenerateImages={handleRegenerateImages}
             onTrimSelected={handleTrimSelected}
+            onAddNewVersions={handleAddNewVersions}
             onCustomPromptChange={setCustomPrompt}
             onDragEnd={handleDragEnd}
             onRemoveFromListing={handleRemoveFromListing}
@@ -1771,6 +1895,7 @@ function App() {
             lightboxIndex={lightboxIndex}
           />
         )}
+        </div>
       </main>
     </div>
   )

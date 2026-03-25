@@ -189,3 +189,8 @@ limitations:
 plans:
 edited image edgecase: https://i.ebayimg.com/images/g/VKAAAOSwHpZf2Bj4/s-l1600.jpg
 professional image edgecase: bad image but white background: catagorize images with shadow, uneven lighting, bad framing, and multicolor backgrounds that arnt solid white to be bad images instead. (bad images have to have a distinct and easily recognizable product in the shot)
+- new listing photos delete button does not show up but works. please make the delete button visable and not block anything
+- format the description as html, and let me edit it
+- after the listing is done processing, instead of displaying the listing id, change the listing id to a clickable link. (https://www.ebay.com/itm/(itemid))
+
+- add the ability to directly add original photos to new listing photos

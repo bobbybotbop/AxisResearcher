@@ -442,11 +442,6 @@ def regenerate_images():
         
         print(f"[API] Regenerating {len(image_urls)} image(s) with custom prompt")
         
-        # #region agent log
-        import json as _json_debug; _log_path = r'c:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\.cursor\debug.log'
-        with open(_log_path, 'a', encoding='utf-8') as _f: _f.write(_json_debug.dumps({"location":"app.py:regenerate_images:entry","message":"Regen endpoint called","data":{"image_urls":image_urls,"prompt_length":len(prompt),"prompt_preview":prompt[:100]},"timestamp":__import__('time').time()*1000,"hypothesisId":"B"})+'\n')
-        # #endregion
-        
         generated_images = []
         errors = []
         
@@ -456,10 +451,6 @@ def regenerate_images():
             try:
                 print(f"[API] Regenerating image {idx + 1}/{len(image_urls)}...")
                 result = generate_image_from_urls([image_url], ImageType.EXPERIMENTAL, custom_prompt=prompt.strip())
-                
-                # #region agent log
-                with open(_log_path, 'a', encoding='utf-8') as _f: _f.write(_json_debug.dumps({"location":"app.py:regenerate_images:result","message":f"generate_image_from_urls result for image {idx+1}","data":{"result_type":str(type(result)),"result_value":result if result else None,"result_is_list":isinstance(result,list),"result_length":len(result) if isinstance(result,list) else 0},"timestamp":__import__('time').time()*1000,"hypothesisId":"C"})+'\n')
-                # #endregion
                 
                 if result and isinstance(result, list):
                     generated_images.extend(result)
@@ -475,13 +466,6 @@ def regenerate_images():
                 import traceback
                 traceback.print_exc()
                 errors.append(error_msg)
-                # #region agent log
-                with open(_log_path, 'a', encoding='utf-8') as _f: _f.write(_json_debug.dumps({"location":"app.py:regenerate_images:exception","message":f"Exception for image {idx+1}","data":{"error":str(e),"traceback":traceback.format_exc()},"timestamp":__import__('time').time()*1000,"hypothesisId":"C"})+'\n')
-                # #endregion
-        
-        # #region agent log
-        with open(_log_path, 'a', encoding='utf-8') as _f: _f.write(_json_debug.dumps({"location":"app.py:regenerate_images:complete","message":"Regen complete","data":{"generated_images_count":len(generated_images),"errors_count":len(errors),"errors":errors,"generated_images":generated_images},"timestamp":__import__('time').time()*1000,"hypothesisId":"A"})+'\n')
-        # #endregion
         
         print(f"[API] Regeneration complete: {len(generated_images)} images generated, {len(errors)} errors")
         
@@ -631,6 +615,59 @@ def create_listing():
     return streaming_response(generate())
 
 
+@app.route('/api/update-listing-images', methods=['POST'])
+def update_listing_images_endpoint():
+    """
+    Update only the image URLs in a listing JSON file.
+    Creates the file if it does not exist. Does not run AI title/description.
+    
+    Accepts JSON body:
+    {
+        "sku": "AXIS_XX",
+        "image_urls": ["url1", "url2", ...]
+    }
+    
+    Returns:
+        JSON with listing_data from disk, or error message
+    """
+    try:
+        print("[API] /api/update-listing-images endpoint called")
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({"error": "Request body must be JSON", "listing_data": None}), 400
+        
+        sku = data.get("sku")
+        image_urls = data.get("image_urls", [])
+        
+        if not sku or not isinstance(sku, str):
+            return jsonify({"error": "sku must be a non-empty string", "listing_data": None}), 400
+        
+        if not image_urls or not isinstance(image_urls, list):
+            return jsonify({"error": "image_urls must be a non-empty array", "listing_data": None}), 400
+        
+        from backend.copyScripts.combine_data import listing_file_exists
+        if not listing_file_exists(sku):
+            print(f"[API] Listing file not found for SKU {sku}, creating it...")
+            create_listing_with_preferences(sku=sku)
+        
+        success = update_listing_images(sku, image_urls)
+        if not success:
+            return jsonify({"error": "Failed to update listing images", "listing_data": None}), 500
+        
+        listing_data = load_listing_data(sku=sku)
+        return jsonify({"listing_data": listing_data, "error": None}), 200
+        
+    except Exception as e:
+        try:
+            error_msg = str(e)
+        except UnicodeEncodeError:
+            error_msg = "An error occurred while updating listing images (encoding error)"
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": error_msg, "listing_data": None}), 500
+
+
 @app.route('/api/trim-title', methods=['POST'])
 def trim_title():
     """
@@ -771,6 +808,61 @@ def update_title():
 
         return jsonify({
             "error": f"An error occurred while updating title: {error_msg}"
+        }), 500
+
+
+@app.route('/api/update-description', methods=['POST'])
+def update_description():
+    """
+    Update just the description of an existing listing (HTML allowed).
+
+    Accepts JSON body:
+    {
+        "sku": "AXIS_XX",
+        "description": "<p>...</p>"
+    }
+    """
+    try:
+        print("[API] /api/update-description endpoint called")
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "Request body must be JSON"}), 400
+
+        sku = data.get("sku")
+        new_description = data.get("description", "")
+        if new_description is None:
+            new_description = ""
+
+        if not sku:
+            return jsonify({"error": "sku is required"}), 400
+
+        listing_data = load_listing_data(sku=sku)
+        if not listing_data:
+            return jsonify({"error": f"Listing not found for SKU: {sku}"}), 404
+
+        current_title = listing_data.get("inventoryItem", {}).get("product", {}).get("title", "")
+        update_listing_title_description(sku, {
+            "edited_title": current_title,
+            "edited_description": new_description
+        })
+
+        print(f"[API] Updated description for {sku} ({len(new_description)} chars)")
+
+        updated_data = load_listing_data(sku=sku)
+        return jsonify({"listing_data": updated_data}), 200
+
+    except Exception as e:
+        try:
+            error_msg = str(e)
+        except UnicodeEncodeError:
+            error_msg = "An error occurred while updating description (encoding error)"
+
+        import traceback
+        traceback.print_exc()
+
+        return jsonify({
+            "error": f"An error occurred while updating description: {error_msg}"
         }), 500
 
 
@@ -1360,8 +1452,10 @@ def get_tokens():
     """Get current token values (masked) from the .env file"""
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
     tokens = {'user_token': '', 'application_token': ''}
+    token_last_updated_ms = None
 
     try:
+        token_last_updated_ms = int(os.path.getmtime(env_path) * 1000)
         with open(env_path, 'r', encoding='utf-8') as f:
             for line in f:
                 stripped = line.strip()
@@ -1383,7 +1477,8 @@ def get_tokens():
         'user_token': mask(tokens['user_token']),
         'application_token': mask(tokens['application_token']),
         'user_token_set': bool(tokens['user_token']),
-        'application_token_set': bool(tokens['application_token'])
+        'application_token_set': bool(tokens['application_token']),
+        'token_last_updated_ms': token_last_updated_ms
     })
 
 

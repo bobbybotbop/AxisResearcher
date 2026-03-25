@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import PhotoGallery from './PhotoGallery'
 import Lightbox from './Lightbox'
 import ListingDetails from './ListingDetails'
@@ -23,9 +24,11 @@ function CreateWorkflow({
   isConfirming,
   isRegenerating,
   isTrimming,
+  isAddingNewVersions,
   isCreatingListing,
   listingData,
   editableTitle,
+  editableDescription,
   uploadResult,
   isEditorOpen,
   fetchProgress,
@@ -35,6 +38,7 @@ function CreateWorkflow({
   uploadingSkus,
   isTrimmingTitle,
   isSavingTitle,
+  isSavingDescription,
   onListingIdChange,
   onSubmit,
   onCategoryChange,
@@ -45,6 +49,7 @@ function CreateWorkflow({
   onImageSelection,
   onRegenerateImages,
   onTrimSelected,
+  onAddNewVersions,
   onCustomPromptChange,
   onDragEnd,
   onRemoveFromListing,
@@ -54,6 +59,8 @@ function CreateWorkflow({
   onEditableTitleChange,
   onTrimTitle,
   onSaveTitle,
+  onEditableDescriptionChange,
+  onSaveDescription,
   onUploadToEbay,
   onEditorToggle,
   useRealEbayUpload,
@@ -64,6 +71,8 @@ function CreateWorkflow({
   lightboxOpen,
   lightboxIndex,
 }) {
+  const [descriptionEditMode, setDescriptionEditMode] = useState(false)
+
   const btnPrimary =
     'rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60'
   const btnSuccess =
@@ -232,7 +241,7 @@ function CreateWorkflow({
                           </div>
                           <button
                             type="button"
-                            className="absolute right-1.5 top-1.5 z-10 flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-lg font-bold text-white opacity-0 transition-opacity hover:bg-red-600 group-hover:opacity-100"
+                            className="pointer-events-auto absolute right-1.5 top-1.5 z-20 flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-lg font-bold text-white shadow-md transition-colors hover:bg-red-600"
                             onClick={() => onRemoveFromListing(index)}
                             title="Remove from listing"
                           >
@@ -263,31 +272,46 @@ function CreateWorkflow({
               onChange={(e) => onCustomPromptChange(e.target.value)}
               placeholder="Enter your custom prompt for image editing..."
               rows={4}
-              disabled={isRegenerating || (selectedImagesForRegen?.length ?? 0) === 0}
+              disabled={isRegenerating || isAddingNewVersions}
             />
             <div className="mt-4 flex justify-end gap-3">
+              {(() => {
+                const selCount = selectedImagesForRegen?.length ?? 0
+                const totalCount = generatedImages?.length ?? 0
+                const displayCount = selCount > 0 ? selCount : totalCount
+                return (
+                  <>
               <button
                 type="button"
                 className={btnSuccess}
                 onClick={onRegenerateImages}
-                disabled={
-                  isRegenerating ||
-                  !customPrompt?.trim() ||
-                  (selectedImagesForRegen?.length ?? 0) === 0
-                }
+                disabled={isRegenerating || !customPrompt?.trim()}
               >
                 {isRegenerating
                   ? 'Regenerating...'
-                  : `Regenerate Selected (${selectedImagesForRegen?.length ?? 0})`}
+                  : `Regenerate Selected (${displayCount})`}
               </button>
               <button
                 type="button"
                 className={btnSuccess}
                 onClick={onTrimSelected}
-                disabled={isTrimming || (selectedImagesForRegen?.length ?? 0) === 0}
+                disabled={isTrimming}
               >
-                {isTrimming ? 'Trimming...' : `Trim Selected (${selectedImagesForRegen?.length ?? 0})`}
+                {isTrimming ? 'Trimming...' : `Trim Selected (${displayCount})`}
               </button>
+              <button
+                type="button"
+                className={btnSuccess}
+                onClick={onAddNewVersions}
+                disabled={isAddingNewVersions || isRegenerating || !customPrompt?.trim()}
+              >
+                {isAddingNewVersions
+                  ? 'Generating + syncing...'
+                  : `New version + sync (${displayCount})`}
+              </button>
+                  </>
+                )
+              })()}
             </div>
           </div>
 
@@ -378,9 +402,46 @@ function CreateWorkflow({
               </div>
             </div>
             <div className="border-b border-gray-200 pb-4">
-              <strong className="text-primary">Description:</strong>
-              <div className="mt-2 whitespace-pre-wrap rounded-md bg-gray-50 p-3 text-gray-600">
-                {listingData.inventoryItem?.product?.description || 'N/A'}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <strong className="text-primary">Description:</strong>
+                <button
+                  type="button"
+                  className="rounded-lg border-2 border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-700 transition-colors hover:border-primary hover:text-primary"
+                  onClick={() => setDescriptionEditMode((v) => !v)}
+                >
+                  {descriptionEditMode ? 'Preview HTML' : 'Edit HTML'}
+                </button>
+              </div>
+              {descriptionEditMode ? (
+                <textarea
+                  className="mt-2 min-h-[200px] w-full resize-y rounded-lg border-2 border-gray-300 p-3 font-mono text-sm text-gray-800 transition-colors focus:border-primary focus:outline-none"
+                  value={editableDescription}
+                  onChange={(e) => onEditableDescriptionChange(e.target.value)}
+                  placeholder="HTML description..."
+                  rows={12}
+                  spellCheck={false}
+                />
+              ) : (
+                <div
+                  className="listing-description-html mt-2 rounded-md bg-gray-50 p-3 text-gray-600 [&_a]:text-primary [&_a]:underline [&_li]:my-0.5 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-2 [&_p:first-child]:mt-0 [&_ul]:list-disc [&_ul]:pl-6"
+                  dangerouslySetInnerHTML={{
+                    __html:
+                      (editableDescription && editableDescription.trim()) ||
+                      '<p class="text-gray-400 italic">N/A</p>',
+                  }}
+                />
+              )}
+              <div className="mt-2 flex gap-2">
+                {editableDescription !== (listingData.inventoryItem?.product?.description || '') && (
+                  <button
+                    type="button"
+                    className={btnSuccess}
+                    onClick={onSaveDescription}
+                    disabled={isSavingDescription}
+                  >
+                    {isSavingDescription ? 'Saving...' : 'Save Description'}
+                  </button>
+                )}
               </div>
             </div>
             <div className="border-b border-gray-200 pb-4">
@@ -436,7 +497,15 @@ function CreateWorkflow({
               <div className="flex flex-col gap-3">
                 {uploadResult.listingId && (
                   <div>
-                    <strong>Listing ID:</strong> {uploadResult.listingId}
+                    <strong>Listing ID:</strong>{' '}
+                    <a
+                      href={`https://www.ebay.com/itm/${uploadResult.listingId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold underline hover:no-underline"
+                    >
+                      {uploadResult.listingId}
+                    </a>
                   </div>
                 )}
                 {uploadResult.ebayId && (

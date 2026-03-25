@@ -18,14 +18,6 @@ import json
 import time
 from datetime import datetime
 import sys
-import importlib.util
-
-# Import single_functions module (handles unused folder - keeping dynamic import for now)
-single_functions_spec = importlib.util.spec_from_file_location("single_functions", "unused/single_functions.py")
-single_functions_module = importlib.util.module_from_spec(single_functions_spec)
-single_functions_spec.loader.exec_module(single_functions_module)
-singleSearch = single_functions_module.singleSearch
-single_search_by_seller = single_functions_module.single_search_by_seller
 
 from backend.helper_functions import remove_html_tags, helper_get_valid_token, handle_http_error, refreshToken
 
@@ -50,6 +42,177 @@ REFRESH_TOKEN = os.getenv('refresh_token')
 OPENROUTER_API_KEY = os.getenv('openrouter_api_key')
 
 ZIP_CODE = 14853
+
+
+def _project_root_env_path():
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+
+
+def _reload_dotenv_from_disk():
+    load_dotenv(_project_root_env_path(), override=True)
+
+
+def _refresh_application_token_and_retry():
+    """Mint a new application token and reload .env into os.environ. Returns new token or None."""
+    from backend.refreshToken import mint_application_token
+    if not mint_application_token():
+        return None
+    _reload_dotenv_from_disk()
+    return os.getenv('application_token')
+
+
+def browse_api_headers(token):
+    return {
+        'X-EBAY-C-ENDUSERCTX': f'contextualLocation=country=US,zip={ZIP_CODE}',
+        'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json',
+    }
+
+
+def singleSearch(query):
+    """
+    Search for items on eBay using the Browse API.
+    Prints results to the console.
+    """
+    valid_token = helper_get_valid_token()
+    if not valid_token:
+        print("❌ Error: Could not get valid access token")
+        return
+
+    url = "https://api.ebay.com/buy/browse/v1/item_summary/search"
+    params = {
+        'q': query,
+        'limit': 10,
+        'offset': 0,
+        'fieldgroups': 'EXTENDED',
+        'sort': 'BEST_MATCH',
+        'filter': 'buyingOptions:{FIXED_PRICE}',
+    }
+
+    def _print_browse_results(data):
+        print("✅ Success! Browse API Response:")
+        total = data.get('total', 0)
+        items = data.get('itemSummaries', [])
+        print(f"Total items found: {total}")
+        print(f"Items returned: {len(items)}")
+        print("\nFirst few items:")
+        for i, item in enumerate(items[:3]):
+            print(f"\nItem {i + 1}:")
+            print(f"  Title: {item.get('title', 'N/A')}")
+            print(f"  Price: {item.get('price', {}).get('value', 'N/A')} {item.get('price', {}).get('currency', '')}")
+            print(f"  Condition: {item.get('condition', 'N/A')}")
+            print(f"  Seller: {item.get('seller', {}).get('username', 'N/A')}")
+            print(f"  Item URL: {item.get('itemWebUrl', 'N/A')}")
+        print(f"\nFull response structure:")
+        print(f"Keys in response: {list(data.keys())}")
+
+    try:
+        headers = browse_api_headers(valid_token)
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+
+        if response.status_code == 200:
+            _print_browse_results(response.json())
+        elif response.status_code == 401:
+            print("🔄 Token expired, refreshing...")
+            new_token = _refresh_application_token_and_retry()
+            if not new_token:
+                print("❌ Could not refresh token")
+                return
+            headers = browse_api_headers(new_token)
+            response = requests.get(url, headers=headers, params=params, timeout=30)
+            if response.status_code == 200:
+                _print_browse_results(response.json())
+            else:
+                print(f"❌ Still failed after refresh: {response.status_code}")
+                print(f"Response: {response.text[:500]}")
+        else:
+            print(f"❌ Error occurred: {response.status_code}")
+            print(f"Response: {response.text}")
+
+    except Exception as e:
+        print(f"❌ Request failed: {e}")
+
+
+def _print_and_pack_seller_search(data, seller_username, query):
+    """Print seller search results and return the same dict as single_search_by_seller."""
+    total = data.get('total', 0)
+    items = data.get('itemSummaries', [])
+    print(data)
+    print(f"✅ Found {total} total items from {seller_username}")
+    print(f"📦 Retrieved {len(items)} items in this response")
+    if items:
+        print(f"\n📋 First few items from {seller_username}:")
+        for i, item in enumerate(items[:5]):
+            print(f"\nItem {i + 1}:")
+            print(f"  Title: {item.get('title', 'N/A')}")
+            print(f"  Price: {item.get('price', {}).get('value', 'N/A')} {item.get('price', {}).get('currency', '')}")
+            print(f"  Condition: {item.get('condition', 'N/A')}")
+            print(f"  Item ID: {item.get('itemId', 'N/A')}")
+            print(f"  Item URL: {item.get('itemWebUrl', 'N/A')}")
+    return {
+        'total_items': total,
+        'items': items,
+        'seller': seller_username,
+        'query': query,
+        'has_more': len(items) < total,
+    }
+
+
+def single_search_by_seller(seller_username, query="", limit=50, offset=0):
+    """
+    Search for items from a specific eBay seller via the Browse API.
+
+    Returns:
+        dict with total_items, items, seller, query, has_more; or None on failure.
+    """
+    valid_token = helper_get_valid_token()
+    if not valid_token:
+        print("❌ Error: Could not get valid access token")
+        return None
+
+    url = "https://api.ebay.com/buy/browse/v1/item_summary/search"
+    params = {
+        'limit': min(limit, 200),
+        'offset': offset,
+        'fieldgroups': 'EXTENDED',
+        'sort': 'BEST_MATCH',
+        'filter': f'sellers:{{{seller_username}}}',
+    }
+    if query:
+        params['q'] = query
+
+    try:
+        print(f"🔍 Searching items from seller: {seller_username}")
+        if query:
+            print(f"🔍 With keyword filter: {query}")
+
+        headers = browse_api_headers(valid_token)
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+
+        if response.status_code == 200:
+            return _print_and_pack_seller_search(response.json(), seller_username, query)
+
+        if response.status_code == 401:
+            print("🔄 Token expired, refreshing...")
+            new_token = _refresh_application_token_and_retry()
+            if not new_token:
+                print("❌ Could not refresh token")
+                return None
+            headers = browse_api_headers(new_token)
+            response = requests.get(url, headers=headers, params=params, timeout=30)
+            if response.status_code == 200:
+                return _print_and_pack_seller_search(response.json(), seller_username, query)
+            print(f"❌ Still failed after refresh: {response.status_code}")
+            return None
+
+        print(f"❌ Error occurred: {response.status_code}")
+        print(f"Response: {response.text}")
+        return None
+
+    except Exception as e:
+        print(f"❌ Error searching by seller: {e}")
+        return None
 
 
 def call_openrouter_llm(prompt):
