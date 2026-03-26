@@ -194,3 +194,6 @@ professional image edgecase: bad image but white background: catagorize images w
 - after the listing is done processing, instead of displaying the listing id, change the listing id to a clickable link. (https://www.ebay.com/itm/(itemid))
 
 - add the ability to directly add original photos to new listing photos
+- change the text model to something more reasonably fast
+
+- change the workflow to a listing -> edit with ai buttons or something instead of an infinite scroller :sob:

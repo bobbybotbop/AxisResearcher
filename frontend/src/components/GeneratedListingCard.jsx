@@ -133,6 +133,9 @@ export default function GeneratedListingCard({
     categoryId.length > 10 ? `${categoryId.slice(0, 8)}…` : categoryId;
 
   const ebayListingId = String(listing.ebayListingId ?? "").trim();
+  const ebayItemUrl = ebayListingId
+    ? `https://www.ebay.com/itm/${ebayListingId}`
+    : "";
 
   const descriptionHtml =
     typeof listing.description === "string" ? listing.description.trim() : "";
@@ -175,10 +178,10 @@ export default function GeneratedListingCard({
                   key={i}
                   type="button"
                   aria-label={`Show image ${i + 1}`}
-                  className={`h-1.5 w-1.5 rounded-full transition-all ${
+                  className={`h-1.5 w-1.5 rounded-full ring-1 ring-white ring-offset-0 transition-all ${
                     i === safeIndex
-                      ? "w-4 bg-white"
-                      : "bg-white/60 hover:bg-white/90"
+                      ? "w-4 bg-black"
+                      : "bg-black/50 hover:bg-black/80"
                   }`}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -195,14 +198,26 @@ export default function GeneratedListingCard({
           onKeyDown={(e) => e.stopPropagation()}
         >
           <div className="flex flex-col gap-2">
-            <button
-              type="button"
-              className={`w-full ${btnPill} disabled:transform-none`}
-              onClick={() => onUpload?.(listing)}
-              disabled={isUploading}
-            >
-              {isUploading ? "Uploading..." : "Upload to eBay"}
-            </button>
+            {ebayItemUrl ? (
+              <a
+                href={ebayItemUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`inline-flex w-full items-center justify-center no-underline ${btnPill}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                View on eBay
+              </a>
+            ) : (
+              <button
+                type="button"
+                className={`w-full ${btnPill} disabled:transform-none`}
+                onClick={() => onUpload?.(listing)}
+                disabled={isUploading}
+              >
+                {isUploading ? "Uploading..." : "Upload to eBay"}
+              </button>
+            )}
             {uploadResult && (
               <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-white p-3">
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-green-700 bg-white text-lg font-bold text-green-800">
@@ -275,20 +290,6 @@ export default function GeneratedListingCard({
               >
                 {categoryShort === "—" ? "—" : `Cat ${categoryShort}`}
               </span>
-              {ebayListingId ? (
-                <>
-                  <span className="text-gray-300">·</span>
-                  <a
-                    href={`https://www.ebay.com/itm/${ebayListingId}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-semibold text-primary underline hover:no-underline"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    View on eBay
-                  </a>
-                </>
-              ) : null}
             </p>
           </div>
           <div className="shrink-0 text-left sm:text-right">
@@ -299,7 +300,7 @@ export default function GeneratedListingCard({
         </div>
 
         <div
-          className={`flex min-h-0 flex-col gap-3 border-t border-gray-100 pt-4 ${descriptionHtml ? "min-h-[min(40vh,14rem)] flex-1 md:min-h-0" : ""}`}
+          className="flex min-h-0 flex-1 flex-col gap-3 border-t border-gray-100 pt-4"
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
@@ -310,10 +311,12 @@ export default function GeneratedListingCard({
           />
 
           {descriptionHtml ? (
-            <div
-              className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-gray-100 bg-gray-50/90 p-3 text-left text-sm leading-relaxed text-gray-800 md:min-h-0 [&_a]:text-primary [&_a]:underline [&_h1]:mb-2 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:text-sm [&_h2]:font-semibold [&_img]:h-auto [&_img]:max-w-full [&_li]:my-0.5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_p]:first:mt-0 [&_table]:my-2 [&_table]:max-w-full [&_td]:border [&_td]:border-gray-200 [&_td]:p-1.5 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
-              dangerouslySetInnerHTML={{ __html: descriptionHtml }}
-            />
+            <div className="rounded-lg border border-gray-100 bg-gray-50/90 p-3">
+              <div
+                className="max-h-[calc(1.625em*6)] min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain text-left text-sm leading-relaxed text-gray-800 [&_a]:text-primary [&_a]:underline [&_h1]:mb-2 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:text-sm [&_h2]:font-semibold [&_img]:h-auto [&_img]:max-w-full [&_li]:my-0.5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_p]:first:mt-0 [&_table]:my-2 [&_table]:max-w-full [&_td]:border [&_td]:border-gray-200 [&_td]:p-1.5 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
+                dangerouslySetInnerHTML={{ __html: descriptionHtml }}
+              />
+            </div>
           ) : null}
         </div>
       </div>

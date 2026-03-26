@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   FilePlus,
-  Upload,
+  History,
   Route,
   FlaskConical,
   Settings,
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
 import CreateWorkflow from "./components/CreateWorkflow";
 import GeneratedListingCard from "./components/GeneratedListingCard";
 import UploadListingsToolbar from "./components/UploadListingsToolbar";
@@ -113,7 +114,32 @@ function App() {
   const [listingData, setListingData] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
-  const [activeTab, setActiveTab] = useState("create"); // 'create' | 'upload' | 'test-workflow' | 'testing' | 'settings'
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const tabPaths = {
+    create: "/create",
+    upload: "/history",
+    "test-workflow": "/test-workflow",
+    testing: "/testing",
+    settings: "/settings",
+  };
+
+  const normalizePathname = (pathname) => {
+    if (!pathname) return "/";
+    if (pathname === "/") return "/";
+    return pathname.replace(/\/+$/, "");
+  };
+
+  const activeTab = (() => {
+    const p = normalizePathname(location.pathname);
+    if (p === "/" || p === tabPaths.create) return "create";
+    if (p === tabPaths.upload) return "upload";
+    if (p === tabPaths["test-workflow"]) return "test-workflow";
+    if (p === tabPaths.testing) return "testing";
+    if (p === tabPaths.settings) return "settings";
+    return "create";
+  })(); // 'create' | 'upload' | 'test-workflow' | 'testing' | 'settings'
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
       return localStorage.getItem("axisSidebarCollapsed") === "true";
@@ -132,6 +158,8 @@ function App() {
   const [uploadListingsSearch, setUploadListingsSearch] = useState("");
   const [uploadListingsShowIncomplete, setUploadListingsShowIncomplete] =
     useState(false);
+  const [uploadListingsDateFrom, setUploadListingsDateFrom] = useState("");
+  const [uploadListingsDateTo, setUploadListingsDateTo] = useState("");
   const [loadingListings, setLoadingListings] = useState(false);
   const [uploadingSkus, setUploadingSkus] = useState(new Set());
   const [uploadResults, setUploadResults] = useState({});
@@ -213,6 +241,20 @@ function App() {
       // ignore
     }
   }, [sidebarCollapsed]);
+
+  // Keep URLs aligned with tab state. Each tab has its own path.
+  useEffect(() => {
+    const p = normalizePathname(location.pathname);
+    if (p === "/") {
+      navigate(tabPaths.create, { replace: true });
+      return;
+    }
+
+    const knownPaths = new Set(Object.values(tabPaths));
+    if (!knownPaths.has(p)) {
+      navigate(tabPaths.create, { replace: true });
+    }
+  }, [location.pathname, navigate]);
 
   const TOKEN_STALE_MS = 2 * 60 * 60 * 1000; // 2 hours
 
@@ -415,6 +457,24 @@ function App() {
     const list = allListings.filter((l) => {
       if (!uploadListingsShowIncomplete && isIncomplete(l)) return false;
       if (q && !(l.title || "").toLowerCase().includes(q)) return false;
+      if (uploadListingsDateFrom || uploadListingsDateTo) {
+        const raw = l.createdDateTime;
+        const listingDate = raw ? new Date(raw) : null;
+        if (
+          !listingDate ||
+          Number.isNaN(listingDate.getTime())
+        ) {
+          return false;
+        }
+        if (uploadListingsDateFrom) {
+          const start = new Date(`${uploadListingsDateFrom}T00:00:00`);
+          if (listingDate < start) return false;
+        }
+        if (uploadListingsDateTo) {
+          const end = new Date(`${uploadListingsDateTo}T23:59:59.999`);
+          if (listingDate > end) return false;
+        }
+      }
       return true;
     });
     if (uploadListingsShowIncomplete) {
@@ -426,7 +486,13 @@ function App() {
       });
     }
     return list;
-  }, [allListings, uploadListingsSearch, uploadListingsShowIncomplete]);
+  }, [
+    allListings,
+    uploadListingsSearch,
+    uploadListingsShowIncomplete,
+    uploadListingsDateFrom,
+    uploadListingsDateTo,
+  ]);
 
   useEffect(() => {
     const hasWorkflowLink =
@@ -1341,15 +1407,19 @@ function App() {
 
   // Fetch listings when upload tab is activated
   const handleTabChange = (tab) => {
-    setActiveTab(tab);
-    if (tab === "upload") {
-      fetchAllListings();
-    }
-    if (tab === "settings") {
+    navigate(tabPaths[tab] ?? tabPaths.create);
+  };
+
+  // Tab entry side-effects (also covers back/forward navigation).
+  useEffect(() => {
+    if (activeTab === "upload") fetchAllListings();
+  }, [activeTab]);
+  useEffect(() => {
+    if (activeTab === "settings") {
       fetchTokenInfo();
       setTokenMessage(null);
     }
-  };
+  }, [activeTab]);
 
   const navItemClass = (tab, collapsed) =>
     `flex w-full items-center rounded-lg py-2 text-left text-sm transition-colors ${
@@ -1825,10 +1895,10 @@ function App() {
               type="button"
               className={navItemClass("upload", sidebarCollapsed)}
               onClick={() => handleTabChange("upload")}
-              title={sidebarCollapsed ? "Upload Listings" : undefined}
+              title={sidebarCollapsed ? "History" : undefined}
             >
-              <Upload size={20} strokeWidth={1.75} className="shrink-0" />
-              {!sidebarCollapsed && <span>Upload Listings</span>}
+              <History size={20} strokeWidth={1.75} className="shrink-0" />
+              {!sidebarCollapsed && <span>History</span>}
             </button>
             <button
               type="button"
@@ -2050,23 +2120,27 @@ function App() {
                 onSearchChange={setUploadListingsSearch}
                 showIncompleteListings={uploadListingsShowIncomplete}
                 onShowIncompleteListingsChange={setUploadListingsShowIncomplete}
+                dateFrom={uploadListingsDateFrom}
+                dateTo={uploadListingsDateTo}
+                onDateFromChange={setUploadListingsDateFrom}
+                onDateToChange={setUploadListingsDateTo}
               />
 
               {loadingListings ? (
                 <div className="flex flex-col items-center justify-center gap-4 py-12">
                   <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200 border-t-primary" />
-                  <p className="text-gray-600">Loading listings...</p>
+                  <p className="text-gray-600">Loading history...</p>
                 </div>
               ) : allListings.length === 0 ? (
                 <div className="rounded-xl border border-gray-200 bg-gray-50 p-8 text-center">
                   <p className="text-gray-600">
-                    No generated listings found. Create a listing first!
+                    No history items found. Create a listing first!
                   </p>
                 </div>
               ) : filteredUploadListings.length === 0 ? (
                 <div className="rounded-xl border border-gray-200 bg-gray-50 p-8 text-center">
                   <p className="text-gray-600">
-                    No listings match your search or filters.
+                    No history items match your search or filters.
                   </p>
                 </div>
               ) : (
