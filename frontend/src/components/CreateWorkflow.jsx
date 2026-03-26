@@ -1,13 +1,15 @@
-import { useState } from 'react'
-import PhotoGallery from './PhotoGallery'
-import Lightbox from './Lightbox'
-import ListingDetails from './ListingDetails'
-import ProgressIndicator from './ProgressIndicator'
-import ImageCanvas from './ImageCanvas'
-import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd'
+import { useState } from "react";
+import PhotoGallery from "./PhotoGallery";
+import MessageBarInput from "./MessageBarInput";
+import Lightbox from "./Lightbox";
+import ListingDetails from "./ListingDetails";
+import ProgressIndicator from "./ProgressIndicator";
+import ImageCanvas from "./ImageCanvas";
+import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 
 function CreateWorkflow({
   listingId,
+  listingLinkSubmitted = false,
   photos,
   categories,
   editableCategories,
@@ -71,30 +73,46 @@ function CreateWorkflow({
   lightboxOpen,
   lightboxIndex,
 }) {
-  const [descriptionEditMode, setDescriptionEditMode] = useState(false)
+  const [descriptionEditMode, setDescriptionEditMode] = useState(false);
 
   const btnPrimary =
-    'rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60'
+    "rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60";
   const btnSuccess =
-    'rounded-lg bg-gradient-to-br from-success to-emerald-600 px-4 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60'
+    "rounded-lg bg-gradient-to-br from-success to-emerald-600 px-4 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60";
   const btnDanger =
-    'rounded-lg bg-gradient-to-br from-red-500 to-red-600 px-4 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60'
+    "rounded-lg bg-gradient-to-br from-red-500 to-red-600 px-4 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60";
 
   return (
     <>
-      <form onSubmit={onSubmit} className="mb-8 flex flex-wrap gap-4">
-        <input
-          type="text"
-          value={listingId}
-          onChange={(e) => onListingIdChange(e.target.value)}
-          placeholder="eBay listing ID or URL (e.g., 123456789 or https://www.ebay.com/itm/123456789)"
-          className="min-w-[250px] flex-1 rounded-lg border-2 border-gray-300 px-4 py-3 text-base transition-colors focus:border-primary focus:outline-none disabled:cursor-not-allowed disabled:bg-gray-100"
-          disabled={loading}
-        />
-        <button type="submit" className={btnPrimary} disabled={loading}>
-          {loading ? 'Loading...' : 'Fetch Photos'}
-        </button>
-      </form>
+      <div
+        className={`transition-[margin,padding,background-color,box-shadow,border-color,backdrop-filter] duration-500 ease-out ${
+          listingLinkSubmitted
+            ? "sticky top-0 z-30 -mx-6 mb-6 flex w-full flex-col items-center border-b border-gray-200/90 bg-gray-50/90 px-6 py-3 shadow-sm backdrop-blur-md md:-mx-8 md:px-8"
+            : "mx-auto mb-8 flex min-h-[min(42vh,320px)] w-full max-w-4xl flex-col items-center justify-end pt-4"
+        }`}
+      >
+        {!listingLinkSubmitted && (
+          <h1 className="mb-10 text-center text-6xl font-light tracking-tight text-gray-900 md:mb-12 md:text-6xl">
+            Reimagine Any Listing
+          </h1>
+        )}
+        <form
+          onSubmit={onSubmit}
+          className={`mx-auto flex w-full max-w-[min(42rem,100%)] justify-center ${
+            !listingLinkSubmitted ? "mt-12 md:mt-16" : ""
+          }`}
+        >
+          <MessageBarInput
+            fullWidth
+            value={listingId}
+            onChange={onListingIdChange}
+            placeholder="Paste any eBay link"
+            disabled={loading}
+            loading={loading}
+            aria-label="eBay listing URL or ID"
+          />
+        </form>
+      </div>
 
       {error && (
         <div className="mb-8 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
@@ -141,10 +159,13 @@ function CreateWorkflow({
           />
           {isConfirming && imageGenProgress?.isActive && (
             <div className="my-5 rounded-lg border border-gray-200 bg-gray-50 p-4">
-              <h3 className="mb-2.5 text-lg text-gray-800">Generating Images</h3>
+              <h3 className="mb-2.5 text-lg text-gray-800">
+                Generating Images
+              </h3>
               <div className="mt-2.5">
                 <p className="text-gray-600">
-                  Progress: {imageGenProgress.completed} of {imageGenProgress.total} images complete
+                  Progress: {imageGenProgress.completed} of{" "}
+                  {imageGenProgress.total} images complete
                 </p>
                 {imageGenProgress.total > 0 && (
                   <div className="relative mt-2.5 h-5 w-full overflow-hidden rounded bg-gray-200">
@@ -167,7 +188,7 @@ function CreateWorkflow({
               onClick={onEditorToggle}
             >
               <span
-                className={`inline-block text-sm text-primary transition-transform ${isEditorOpen ? 'rotate-90' : ''}`}
+                className={`inline-block text-sm text-primary transition-transform ${isEditorOpen ? "rotate-90" : ""}`}
               >
                 &#9654;
               </span>
@@ -180,7 +201,9 @@ function CreateWorkflow({
                     <input
                       type="checkbox"
                       checked={useRealEbayUpload ?? false}
-                      onChange={(e) => onUseRealEbayUploadChange(e.target.checked)}
+                      onChange={(e) =>
+                        onUseRealEbayUploadChange(e.target.checked)
+                      }
                       className="rounded"
                     />
                     <span>Upload to eBay when adding from canvas</span>
@@ -191,7 +214,11 @@ function CreateWorkflow({
                   onAddToOriginalPhotos={onAddToOriginalPhotos}
                   originalPhotos={photos}
                   generatedImages={generatedImages}
-                  useRealUpload={onUseRealEbayUploadChange != null ? (useRealEbayUpload ?? false) : true}
+                  useRealUpload={
+                    onUseRealEbayUploadChange != null
+                      ? (useRealEbayUpload ?? false)
+                      : true
+                  }
                 />
               </div>
             )}
@@ -201,7 +228,9 @@ function CreateWorkflow({
 
       {generatedImages?.length > 0 && (
         <div className="mt-8 rounded-2xl border border-green-200 bg-green-50/50 p-6">
-          <h2 className="mb-5 text-xl font-semibold text-gray-800">New Listing Photos</h2>
+          <h2 className="mb-5 text-xl font-semibold text-gray-800">
+            New Listing Photos
+          </h2>
           <DragDropContext onDragEnd={onDragEnd}>
             <Droppable droppableId="new-listing-photos" direction="horizontal">
               {(provided) => (
@@ -211,13 +240,17 @@ function CreateWorkflow({
                   {...provided.droppableProps}
                 >
                   {generatedImages.map((imageUrl, index) => (
-                    <Draggable key={`img-${imageUrl}-${index}`} draggableId={`img-${imageUrl}-${index}`} index={index}>
+                    <Draggable
+                      key={`img-${imageUrl}-${index}`}
+                      draggableId={`img-${imageUrl}-${index}`}
+                      index={index}
+                    >
                       {(provided, snapshot) => (
                         <div
                           ref={provided.innerRef}
                           {...provided.draggableProps}
                           className={`group relative aspect-square overflow-hidden rounded-xl transition-all ${
-                            snapshot.isDragging ? 'opacity-80 shadow-lg' : ''
+                            snapshot.isDragging ? "opacity-80 shadow-lg" : ""
                           }`}
                         >
                           <div
@@ -264,8 +297,12 @@ function CreateWorkflow({
           </DragDropContext>
 
           <div className="mt-8 rounded-xl bg-white p-6 shadow-sm">
-            <h3 className="mb-2 text-xl text-gray-800">Optional: Edit Images Further</h3>
-            <p className="mb-4 text-gray-600">Enter a custom prompt to regenerate selected images</p>
+            <h3 className="mb-2 text-xl text-gray-800">
+              Optional: Edit Images Further
+            </h3>
+            <p className="mb-4 text-gray-600">
+              Enter a custom prompt to regenerate selected images
+            </p>
             <textarea
               className="w-full resize-y rounded-lg border-2 border-gray-300 p-3 text-base transition-colors focus:border-primary focus:outline-none disabled:cursor-not-allowed disabled:bg-gray-100"
               value={customPrompt}
@@ -276,41 +313,47 @@ function CreateWorkflow({
             />
             <div className="mt-4 flex justify-end gap-3">
               {(() => {
-                const selCount = selectedImagesForRegen?.length ?? 0
-                const totalCount = generatedImages?.length ?? 0
-                const displayCount = selCount > 0 ? selCount : totalCount
+                const selCount = selectedImagesForRegen?.length ?? 0;
+                const totalCount = generatedImages?.length ?? 0;
+                const displayCount = selCount > 0 ? selCount : totalCount;
                 return (
                   <>
-              <button
-                type="button"
-                className={btnSuccess}
-                onClick={onRegenerateImages}
-                disabled={isRegenerating || !customPrompt?.trim()}
-              >
-                {isRegenerating
-                  ? 'Regenerating...'
-                  : `Regenerate Selected (${displayCount})`}
-              </button>
-              <button
-                type="button"
-                className={btnSuccess}
-                onClick={onTrimSelected}
-                disabled={isTrimming}
-              >
-                {isTrimming ? 'Trimming...' : `Trim Selected (${displayCount})`}
-              </button>
-              <button
-                type="button"
-                className={btnSuccess}
-                onClick={onAddNewVersions}
-                disabled={isAddingNewVersions || isRegenerating || !customPrompt?.trim()}
-              >
-                {isAddingNewVersions
-                  ? 'Generating + syncing...'
-                  : `New version + sync (${displayCount})`}
-              </button>
+                    <button
+                      type="button"
+                      className={btnSuccess}
+                      onClick={onRegenerateImages}
+                      disabled={isRegenerating || !customPrompt?.trim()}
+                    >
+                      {isRegenerating
+                        ? "Regenerating..."
+                        : `Regenerate Selected (${displayCount})`}
+                    </button>
+                    <button
+                      type="button"
+                      className={btnSuccess}
+                      onClick={onTrimSelected}
+                      disabled={isTrimming}
+                    >
+                      {isTrimming
+                        ? "Trimming..."
+                        : `Trim Selected (${displayCount})`}
+                    </button>
+                    <button
+                      type="button"
+                      className={btnSuccess}
+                      onClick={onAddNewVersions}
+                      disabled={
+                        isAddingNewVersions ||
+                        isRegenerating ||
+                        !customPrompt?.trim()
+                      }
+                    >
+                      {isAddingNewVersions
+                        ? "Generating + syncing..."
+                        : `New version + sync (${displayCount})`}
+                    </button>
                   </>
-                )
+                );
               })()}
             </div>
           </div>
@@ -322,7 +365,9 @@ function CreateWorkflow({
               onClick={onConfirmAndEditText}
               disabled={isCreatingListing}
             >
-              {isCreatingListing ? 'Updating Listing...' : 'Confirm and Edit Text'}
+              {isCreatingListing
+                ? "Updating Listing..."
+                : "Confirm and Edit Text"}
             </button>
           </div>
           {isCreatingListing &&
@@ -341,7 +386,9 @@ function CreateWorkflow({
 
       {listingData && (
         <div className="mt-8">
-          <h2 className="mb-4 text-xl font-semibold text-gray-800">Generated Listing</h2>
+          <h2 className="mb-4 text-xl font-semibold text-gray-800">
+            Generated Listing
+          </h2>
           <div className="space-y-4">
             <div className="border-b border-gray-200 pb-4">
               <strong className="text-primary">SKU:</strong> {listingData.sku}
@@ -352,22 +399,24 @@ function CreateWorkflow({
                 <span
                   className={`rounded-full px-2.5 py-1 text-sm font-semibold ${
                     editableTitle?.length > 80
-                      ? 'bg-red-100 text-red-700'
-                      : editableTitle?.length >= 73 && editableTitle?.length <= 80
-                        ? 'bg-green-100 text-green-700'
-                        : 'bg-primary/10 text-primary'
+                      ? "bg-red-100 text-red-700"
+                      : editableTitle?.length >= 73 &&
+                          editableTitle?.length <= 80
+                        ? "bg-green-100 text-green-700"
+                        : "bg-primary/10 text-primary"
                   }`}
                 >
                   {editableTitle?.length ?? 0} / 80
-                  {editableTitle?.length > 80 && ` (${editableTitle.length - 80} over)`}
+                  {editableTitle?.length > 80 &&
+                    ` (${editableTitle.length - 80} over)`}
                 </span>
               </div>
               <input
                 type="text"
                 className={`w-full rounded-lg border-2 px-3 py-2.5 transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20 ${
                   editableTitle?.length > 80
-                    ? 'border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500/20'
-                    : 'border-gray-300 focus:border-primary'
+                    ? "border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500/20"
+                    : "border-gray-300 focus:border-primary"
                 }`}
                 value={editableTitle}
                 onChange={(e) => onEditableTitleChange(e.target.value)}
@@ -375,7 +424,8 @@ function CreateWorkflow({
               />
               {editableTitle?.length > 80 && (
                 <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                  Title exceeds 80 characters. Edit manually or use AI to trim it.
+                  Title exceeds 80 characters. Edit manually or use AI to trim
+                  it.
                 </div>
               )}
               <div className="flex gap-2">
@@ -386,17 +436,18 @@ function CreateWorkflow({
                     onClick={onTrimTitle}
                     disabled={isTrimmingTitle}
                   >
-                    {isTrimmingTitle ? 'Trimming...' : 'AI Trim Title'}
+                    {isTrimmingTitle ? "Trimming..." : "AI Trim Title"}
                   </button>
                 )}
-                {editableTitle !== (listingData.inventoryItem?.product?.title || '') && (
+                {editableTitle !==
+                  (listingData.inventoryItem?.product?.title || "") && (
                   <button
                     type="button"
                     className={btnSuccess}
                     onClick={onSaveTitle}
                     disabled={isSavingTitle}
                   >
-                    {isSavingTitle ? 'Saving...' : 'Save Title'}
+                    {isSavingTitle ? "Saving..." : "Save Title"}
                   </button>
                 )}
               </div>
@@ -409,7 +460,7 @@ function CreateWorkflow({
                   className="rounded-lg border-2 border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-700 transition-colors hover:border-primary hover:text-primary"
                   onClick={() => setDescriptionEditMode((v) => !v)}
                 >
-                  {descriptionEditMode ? 'Preview HTML' : 'Edit HTML'}
+                  {descriptionEditMode ? "Preview HTML" : "Edit HTML"}
                 </button>
               </div>
               {descriptionEditMode ? (
@@ -432,40 +483,48 @@ function CreateWorkflow({
                 />
               )}
               <div className="mt-2 flex gap-2">
-                {editableDescription !== (listingData.inventoryItem?.product?.description || '') && (
+                {editableDescription !==
+                  (listingData.inventoryItem?.product?.description || "") && (
                   <button
                     type="button"
                     className={btnSuccess}
                     onClick={onSaveDescription}
                     disabled={isSavingDescription}
                   >
-                    {isSavingDescription ? 'Saving...' : 'Save Description'}
+                    {isSavingDescription ? "Saving..." : "Save Description"}
                   </button>
                 )}
               </div>
             </div>
             <div className="border-b border-gray-200 pb-4">
               <strong className="text-primary">Price:</strong> $
-              {listingData.offer?.pricingSummary?.price?.value || 'N/A'}
+              {listingData.offer?.pricingSummary?.price?.value || "N/A"}
             </div>
             <div className="border-b border-gray-200 pb-4">
-              <strong className="text-primary">Category ID:</strong>{' '}
-              {listingData.offer?.categoryId || 'N/A'}
+              <strong className="text-primary">Category ID:</strong>{" "}
+              {listingData.offer?.categoryId || "N/A"}
             </div>
             <div className="border-b border-gray-200 pb-4">
               <strong className="text-primary">
-                Images ({listingData.inventoryItem?.product?.imageUrls?.length || 0}):
+                Images (
+                {listingData.inventoryItem?.product?.imageUrls?.length || 0}):
               </strong>
               <div className="mt-2 space-y-2">
-                {listingData.inventoryItem?.product?.imageUrls?.map((url, idx) => (
-                  <div key={idx} className="rounded-md bg-gray-50 p-2 text-sm text-gray-600 break-all">
-                    {idx + 1}. {url}
-                  </div>
-                )) || 'No images'}
+                {listingData.inventoryItem?.product?.imageUrls?.map(
+                  (url, idx) => (
+                    <div
+                      key={idx}
+                      className="rounded-md bg-gray-50 p-2 text-sm text-gray-600 break-all"
+                    >
+                      {idx + 1}. {url}
+                    </div>
+                  ),
+                ) || "No images"}
               </div>
             </div>
             <div className="border-b border-gray-200 pb-4">
-              <strong className="text-primary">Created:</strong> {listingData.createdDateTime || 'N/A'}
+              <strong className="text-primary">Created:</strong>{" "}
+              {listingData.createdDateTime || "N/A"}
             </div>
           </div>
 
@@ -474,9 +533,13 @@ function CreateWorkflow({
               type="button"
               className="rounded-lg bg-gradient-to-br from-red-500 to-red-600 px-10 py-4 text-lg font-bold text-white shadow-lg transition-all hover:-translate-y-0.5 hover:shadow-xl disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
               onClick={() => onUploadToEbay(listingData.sku, listingData)}
-              disabled={uploadingSkus?.has(listingData?.sku) || !listingData?.sku}
+              disabled={
+                uploadingSkus?.has(listingData?.sku) || !listingData?.sku
+              }
             >
-              {uploadingSkus?.has(listingData?.sku) ? 'Uploading to eBay...' : 'Upload to eBay'}
+              {uploadingSkus?.has(listingData?.sku)
+                ? "Uploading to eBay..."
+                : "Upload to eBay"}
             </button>
           </div>
           {uploadingSkus?.has(listingData?.sku) &&
@@ -493,11 +556,13 @@ function CreateWorkflow({
 
           {uploadResult && (
             <div className="mt-8 rounded-xl bg-gradient-to-br from-success to-emerald-600 p-6 text-white">
-              <h3 className="mb-4 text-2xl font-semibold">Upload Successful!</h3>
+              <h3 className="mb-4 text-2xl font-semibold">
+                Upload Successful!
+              </h3>
               <div className="flex flex-col gap-3">
                 {uploadResult.listingId && (
                   <div>
-                    <strong>Listing ID:</strong>{' '}
+                    <strong>Listing ID:</strong>{" "}
                     <a
                       href={`https://www.ebay.com/itm/${uploadResult.listingId}`}
                       target="_blank"
@@ -515,7 +580,7 @@ function CreateWorkflow({
                 )}
                 {uploadResult.href && (
                   <div>
-                    <strong>Listing URL:</strong>{' '}
+                    <strong>Listing URL:</strong>{" "}
                     <a
                       href={uploadResult.href}
                       target="_blank"
@@ -546,7 +611,7 @@ function CreateWorkflow({
         />
       )}
     </>
-  )
+  );
 }
 
-export default CreateWorkflow
+export default CreateWorkflow;

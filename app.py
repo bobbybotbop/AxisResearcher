@@ -15,6 +15,7 @@ if sys.platform == 'win32':
 
 from flask import Flask, jsonify, request, Response, stream_with_context
 from flask_cors import CORS
+from werkzeug.serving import WSGIRequestHandler
 from backend.copyScripts.CopyListingMain import copy_listing_main, testing_function
 from backend.copyScripts.create_image import generate_image_from_urls, ImageType, categorize_images
 from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects
@@ -912,13 +913,13 @@ def list_all_listings():
                     listings.append({
                         'sku': sku,
                         'title': title,
-                        'description': description[:200] + "..." if len(description) > 200 else description,
+                        'description': description,
                         'price': price,
                         'currency': currency,
                         'categoryId': category_id,
                         'createdDateTime': created_date,
                         'imageCount': image_count,
-                        'imageUrls': image_urls[:3],  # First 3 images for preview
+                        'imageUrls': image_urls,
                         'quantity': quantity,
                         'filename': filename,
                         'fileSku': filename.replace('.json', '')  # SKU derived from filename
@@ -1568,5 +1569,16 @@ def health_check():
     """Health check endpoint"""
     return jsonify({"status": "ok"}), 200
 
+
+class _QuietTokensRequestHandler(WSGIRequestHandler):
+    """Omit access-log lines for frequent GET /api/tokens status polls."""
+
+    def log_request(self, code="-", size="-"):
+        path = self.path.split("?", 1)[0]
+        if path == "/api/tokens":
+            return
+        super().log_request(code, size)
+
+
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=5000, request_handler=_QuietTokensRequestHandler)

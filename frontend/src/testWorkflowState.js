@@ -30,6 +30,8 @@ export function createTestWorkflowState() {
     editableTitle: '',
     isTrimmingTitle: false,
     isSavingTitle: false,
+    editableDescription: '',
+    isSavingDescription: false,
     lightboxOpen: false,
     lightboxIndex: 0,
     fetchProgress: {
