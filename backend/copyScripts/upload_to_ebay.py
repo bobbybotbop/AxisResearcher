@@ -47,7 +47,8 @@ from backend.copyScripts.combine_data import (
     TEST_INVENTORY_ITEM_DATA,
     TEST_OFFER_DATA,
     load_listing_data,
-    get_listing_policies
+    get_listing_policies,
+    save_ebay_listing_id,
 )
 
 
@@ -567,6 +568,11 @@ def create_test_listing(locale="en-US", use_user_token=True, sku=None, listing_f
         if listing_id:
             print(f"\n🎉 Listing is now live on eBay!")
             print(f"🔗 View it at: https://www.ebay.com/itm/{listing_id}")
+            save_ebay_listing_id(
+                sku=listing_sku,
+                filename=listing_filename,
+                ebay_listing_id=listing_id,
+            )
         else:
             print(f"✅ Listing workflow completed successfully")
     else:

@@ -278,6 +278,7 @@ def create_listing_with_preferences(
     listing_object = {
         "sku": sku,
         "createdDateTime": created_datetime,
+        "ebayListingId": "",
         "inventoryItem": inventory_item_data,
         "offer": offer_data
     }
@@ -355,6 +356,103 @@ def load_listing_data(sku=None, filename=None):
     except Exception as e:
         print(f"❌ Error loading listing data file: {e}")
         return None
+
+
+def _get_generated_listings_dir():
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(base_dir, "Generated_Listings")
+
+
+def resolve_listing_json_path(sku=None, filename=None):
+    """
+    Absolute path to a listing JSON file; same resolution rules as load_listing_data.
+    The file may or may not exist yet.
+    """
+    output_dir = _get_generated_listings_dir()
+    if filename:
+        filepath = os.path.join(output_dir, filename)
+        if not filepath.endswith(".json"):
+            filepath += ".json"
+    else:
+        if sku is None:
+            sku = get_current_sku()
+        filepath = os.path.join(output_dir, f"{sku}.json")
+    return filepath
+
+
+def save_ebay_listing_id(sku=None, filename=None, ebay_listing_id=None):
+    """
+    Persist the live eBay listing id to the listing JSON file.
+
+    Args:
+        sku: Used with load_listing_data rules when filename is None.
+        filename: Optional explicit file under Generated_Listings (same as load_listing_data).
+        ebay_listing_id: Value from publish response listingId (stringified).
+
+    Returns:
+        bool: True if written successfully.
+    """
+    if ebay_listing_id is None:
+        print("❌ save_ebay_listing_id: ebay_listing_id is required")
+        return False
+    lid = str(ebay_listing_id).strip()
+    if not lid:
+        print("❌ save_ebay_listing_id: ebay_listing_id is empty")
+        return False
+
+    filepath = resolve_listing_json_path(sku=sku, filename=filename)
+    if not os.path.exists(filepath):
+        print(f"⚠️  save_ebay_listing_id: file not found: {filepath}")
+        return False
+
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            listing_data = json.load(f)
+        listing_data["ebayListingId"] = lid
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(listing_data, f, indent=2, ensure_ascii=False)
+        print(f"✅ Saved ebayListingId to {os.path.basename(filepath)}")
+        return True
+    except Exception as e:
+        print(f"❌ save_ebay_listing_id error: {e}")
+        return False
+
+
+def backfill_ebay_listing_id_on_all_files():
+    """
+    Add ebayListingId: \"\" to each Generated_Listings/*.json that lacks the key.
+    Skips files that already define ebayListingId (preserves published ids).
+
+    Returns:
+        dict: counts updated, skipped, errors
+    """
+    output_dir = _get_generated_listings_dir()
+    if not os.path.isdir(output_dir):
+        return {"updated": 0, "skipped": 0, "errors": 0}
+
+    updated = 0
+    skipped = 0
+    errors = 0
+    for name in os.listdir(output_dir):
+        if not name.endswith(".json"):
+            continue
+        filepath = os.path.join(output_dir, name)
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                listing_data = json.load(f)
+            if "ebayListingId" in listing_data:
+                skipped += 1
+                continue
+            listing_data["ebayListingId"] = ""
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(listing_data, f, indent=2, ensure_ascii=False)
+            updated += 1
+        except Exception as e:
+            print(f"❌ backfill error {name}: {e}")
+            errors += 1
+
+    print(f"Backfill ebayListingId: updated={updated}, skipped={skipped}, errors={errors}")
+    return {"updated": updated, "skipped": skipped, "errors": errors}
 
 
 def listing_file_exists(sku):
@@ -784,3 +882,13 @@ def update_listing_with_aspects(sku, localizedAspects=None):
     except Exception as e:
         print(f"❌ Error updating listing data file: {e}")
         return False
+
+
+if __name__ == "__main__":
+    # Run: python backend/copyScripts/combine_data.py backfill-ebay-listing-id
+    import sys
+
+    if len(sys.argv) >= 2 and sys.argv[1] == "backfill-ebay-listing-id":
+        backfill_ebay_listing_id_on_all_files()
+    else:
+        print("Usage: python backend/copyScripts/combine_data.py backfill-ebay-listing-id")

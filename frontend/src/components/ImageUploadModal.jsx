@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { btnPillSm } from "../styles/buttonPill";
 
 export default function ImageUploadModal({
   isOpen,
@@ -36,7 +37,9 @@ export default function ImageUploadModal({
   }, [isOpen, onClose]);
 
   const addFilesToPending = useCallback((files) => {
-    const imageFiles = Array.from(files || []).filter((f) => f.type?.startsWith("image/"));
+    const imageFiles = Array.from(files || []).filter((f) =>
+      f.type?.startsWith("image/"),
+    );
     if (imageFiles.length === 0) return;
     const promises = imageFiles.map(
       (file) =>
@@ -136,7 +139,10 @@ export default function ImageUploadModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="border-b border-gray-200 p-4">
-          <h2 id="upload-modal-title" className="text-lg font-semibold text-gray-800">
+          <h2
+            id="upload-modal-title"
+            className="text-lg font-semibold text-gray-800"
+          >
             Add Images
           </h2>
         </div>
@@ -144,7 +150,9 @@ export default function ImageUploadModal({
         <div className="flex-1 overflow-auto p-4">
           <div
             className={`mb-4 rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
-              isDragging ? "border-primary bg-primary/5" : "border-gray-300 bg-gray-50"
+              isDragging
+                ? "border-primary bg-primary/5"
+                : "border-gray-300 bg-gray-50"
             }`}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
@@ -186,7 +194,9 @@ export default function ImageUploadModal({
                     onChange={() => setDestination("pool")}
                     className="rounded"
                   />
-                  <span className="text-sm">Image Pool (for canvas editing)</span>
+                  <span className="text-sm">
+                    Image Pool (for canvas editing)
+                  </span>
                 </label>
                 <label className="flex cursor-pointer items-center gap-2">
                   <input
@@ -197,7 +207,9 @@ export default function ImageUploadModal({
                     onChange={() => setDestination("original")}
                     className="rounded"
                   />
-                  <span className="text-sm">Original Photos (for AI processing)</span>
+                  <span className="text-sm">
+                    Original Photos (for AI processing)
+                  </span>
                 </label>
               </div>
             </div>
@@ -206,7 +218,8 @@ export default function ImageUploadModal({
           {pendingImages.length > 0 && (
             <div>
               <p className="mb-2 text-sm font-medium text-gray-700">
-                Preview ({pendingImages.length} image{pendingImages.length !== 1 ? "s" : ""})
+                Preview ({pendingImages.length} image
+                {pendingImages.length !== 1 ? "s" : ""})
               </p>
               <div className="flex flex-wrap gap-2">
                 {pendingImages.map((img, i) => (
@@ -247,7 +260,7 @@ export default function ImageUploadModal({
           </button>
           <button
             type="button"
-            className="rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 text-sm font-semibold text-white shadow transition-all hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+            className={btnPillSm}
             onClick={handleConfirm}
             disabled={pendingImages.length === 0}
           >

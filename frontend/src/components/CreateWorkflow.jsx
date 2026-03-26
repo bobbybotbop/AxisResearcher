@@ -6,6 +6,7 @@ import ListingDetails from "./ListingDetails";
 import ProgressIndicator from "./ProgressIndicator";
 import ImageCanvas from "./ImageCanvas";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
+import { btnPillLg, btnPillSm } from "../styles/buttonPill";
 
 function CreateWorkflow({
   listingId,
@@ -75,31 +76,31 @@ function CreateWorkflow({
 }) {
   const [descriptionEditMode, setDescriptionEditMode] = useState(false);
 
-  const btnPrimary =
-    "rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60";
-  const btnSuccess =
-    "rounded-lg bg-gradient-to-br from-success to-emerald-600 px-4 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60";
-  const btnDanger =
-    "rounded-lg bg-gradient-to-br from-red-500 to-red-600 px-4 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60";
-
   return (
     <>
       <div
-        className={`transition-[margin,padding,background-color,box-shadow,border-color,backdrop-filter] duration-500 ease-out ${
+        className={`flex w-full flex-col items-center transition-[margin,padding,min-height,background-color,box-shadow,border-color,backdrop-filter] duration-500 ease-in-out ${
           listingLinkSubmitted
-            ? "sticky top-0 z-30 -mx-6 mb-6 flex w-full flex-col items-center border-b border-gray-200/90 bg-gray-50/90 px-6 py-3 shadow-sm backdrop-blur-md md:-mx-8 md:px-8"
-            : "mx-auto mb-8 flex min-h-[min(42vh,320px)] w-full max-w-4xl flex-col items-center justify-end pt-4"
+            ? "sticky top-4 z-30 mb-6 min-h-0 self-stretch justify-center bg-gray-50/90 px-6 py-3 md:px-8"
+            : "mb-[15%] min-h-[min(42vh,320px)] max-w-4xl self-center justify-center border-b border-transparent bg-transparent shadow-none backdrop-blur-none"
         }`}
       >
-        {!listingLinkSubmitted && (
-          <h1 className="mb-10 text-center text-6xl font-light tracking-tight text-gray-900 md:mb-12 md:text-6xl">
+        <div
+          className={`w-full overflow-hidden transition-[max-height,opacity,margin] duration-500 ease-in-out ${
+            listingLinkSubmitted
+              ? "pointer-events-none mb-0 max-h-0 opacity-0"
+              : "mb-4 pb-1 opacity-100 md:mb-4"
+          }`}
+          aria-hidden={listingLinkSubmitted}
+        >
+          <h1 className="text-center text-6xl font-light leading-snug tracking-tight text-gray-900 md:text-6xl">
             Reimagine Any Listing
           </h1>
-        )}
+        </div>
         <form
           onSubmit={onSubmit}
-          className={`mx-auto flex w-full max-w-[min(42rem,100%)] justify-center ${
-            !listingLinkSubmitted ? "mt-12 md:mt-16" : ""
+          className={`mx-auto flex w-full max-w-[min(42rem,100%)] transition-[margin] duration-500 ease-in-out ${
+            listingLinkSubmitted ? "mt-0" : "mt-12 md:mt-16"
           }`}
         >
           <MessageBarInput
@@ -320,7 +321,7 @@ function CreateWorkflow({
                   <>
                     <button
                       type="button"
-                      className={btnSuccess}
+                      className={btnPillSm}
                       onClick={onRegenerateImages}
                       disabled={isRegenerating || !customPrompt?.trim()}
                     >
@@ -330,7 +331,7 @@ function CreateWorkflow({
                     </button>
                     <button
                       type="button"
-                      className={btnSuccess}
+                      className={btnPillSm}
                       onClick={onTrimSelected}
                       disabled={isTrimming}
                     >
@@ -340,7 +341,7 @@ function CreateWorkflow({
                     </button>
                     <button
                       type="button"
-                      className={btnSuccess}
+                      className={btnPillSm}
                       onClick={onAddNewVersions}
                       disabled={
                         isAddingNewVersions ||
@@ -361,7 +362,7 @@ function CreateWorkflow({
           <div className="mt-8 flex justify-center">
             <button
               type="button"
-              className={btnPrimary}
+              className={btnPillLg}
               onClick={onConfirmAndEditText}
               disabled={isCreatingListing}
             >
@@ -432,7 +433,7 @@ function CreateWorkflow({
                 {editableTitle?.length > 80 && (
                   <button
                     type="button"
-                    className="rounded-lg bg-gradient-to-br from-amber-500 to-amber-600 px-4 py-2 font-semibold text-white transition-all hover:-translate-y-0.5 disabled:opacity-60"
+                    className={btnPillSm}
                     onClick={onTrimTitle}
                     disabled={isTrimmingTitle}
                   >
@@ -443,7 +444,7 @@ function CreateWorkflow({
                   (listingData.inventoryItem?.product?.title || "") && (
                   <button
                     type="button"
-                    className={btnSuccess}
+                    className={btnPillSm}
                     onClick={onSaveTitle}
                     disabled={isSavingTitle}
                   >
@@ -487,7 +488,7 @@ function CreateWorkflow({
                   (listingData.inventoryItem?.product?.description || "") && (
                   <button
                     type="button"
-                    className={btnSuccess}
+                    className={btnPillSm}
                     onClick={onSaveDescription}
                     disabled={isSavingDescription}
                   >
@@ -531,7 +532,7 @@ function CreateWorkflow({
           <div className="mt-8 flex justify-center border-t-2 border-gray-200 pt-8">
             <button
               type="button"
-              className="rounded-lg bg-gradient-to-br from-red-500 to-red-600 px-10 py-4 text-lg font-bold text-white shadow-lg transition-all hover:-translate-y-0.5 hover:shadow-xl disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60"
+              className={btnPillLg}
               onClick={() => onUploadToEbay(listingData.sku, listingData)}
               disabled={
                 uploadingSkus?.has(listingData?.sku) || !listingData?.sku

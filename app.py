@@ -18,7 +18,7 @@ from flask_cors import CORS
 from werkzeug.serving import WSGIRequestHandler
 from backend.copyScripts.CopyListingMain import copy_listing_main, testing_function
 from backend.copyScripts.create_image import generate_image_from_urls, ImageType, categorize_images
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, save_ebay_listing_id
 from backend.helper_functions import remove_html_tags
 import os
 import json
@@ -922,7 +922,8 @@ def list_all_listings():
                         'imageUrls': image_urls,
                         'quantity': quantity,
                         'filename': filename,
-                        'fileSku': filename.replace('.json', '')  # SKU derived from filename
+                        'fileSku': filename.replace('.json', ''),  # SKU derived from filename
+                        'ebayListingId': str(listing_data.get('ebayListingId') or '').strip(),
                     })
                 except Exception as e:
                     print(f"[API] Error reading {filename}: {e}")
@@ -1092,6 +1093,12 @@ def upload_listing():
 
             print(f"[API] Successfully uploaded listing to eBay")
             print(f"[API] Upload result: {upload_result}")
+
+            lid = upload_result.get("listingId")
+            if lid:
+                save_ebay_listing_id(sku=sku, filename=filename, ebay_listing_id=lid)
+            else:
+                print("[API] Warning: publish succeeded but listingId missing; ebayListingId not saved to JSON")
 
             yield progress_event('Uploading to eBay', 'completed')
 

@@ -1,6 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-
-const TITLE_MAX = 80;
+import { btnPill } from "../styles/buttonPill";
 
 const THUMB_PX = 80;
 const THUMB_GAP = 8;
@@ -57,11 +56,7 @@ function RestGalleryStrip({ urls, heroIndex, onPickIndex }) {
             onPickIndex(i);
           }}
         >
-          <img
-            src={url}
-            alt=""
-            className="h-full w-full object-cover"
-          />
+          <img src={url} alt="" className="h-full w-full object-cover" />
         </button>
       ))}
       {overflow && overflowPeek && (
@@ -132,11 +127,12 @@ export default function GeneratedListingCard({
 
   const safeIndex = urls.length ? imageIndex % urls.length : 0;
   const title = listing.title || "No title";
-  const titleLen = title.length;
   const imageCount = listing.imageCount ?? urls.length ?? 0;
   const categoryId = String(listing.categoryId ?? "—");
   const categoryShort =
     categoryId.length > 10 ? `${categoryId.slice(0, 8)}…` : categoryId;
+
+  const ebayListingId = String(listing.ebayListingId ?? "").trim();
 
   const descriptionHtml =
     typeof listing.description === "string" ? listing.description.trim() : "";
@@ -152,126 +148,67 @@ export default function GeneratedListingCard({
           onCardClick?.(listing);
         }
       }}
-      className="flex w-full cursor-pointer flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md md:flex-row"
+      className="flex w-full cursor-pointer flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md md:flex-row md:items-stretch"
     >
-      {/* Image column — square frame, full image visible (letterboxed); dots stop propagation */}
-      <div className="relative w-full shrink-0 md:w-[30%] md:max-w-md">
-        <div className="aspect-square w-full border-b border-gray-200 bg-gray-100 md:border-b-0 md:border-r">
-          {urls.length > 0 ? (
-            <div className="flex h-full w-full items-center justify-center">
-              <img
-                src={urls[safeIndex]}
-                alt={title}
-                className="max-h-full max-w-full object-contain"
-              />
-            </div>
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-gray-400">
-              No image
+      {/* Image column — hero + dots + upload below image */}
+      <div className="flex w-full shrink-0 flex-col border-b border-gray-200 md:w-[30%] md:max-w-md md:border-b-0 md:border-r md:border-gray-200">
+        <div className="relative w-full">
+          <div className="aspect-square w-full border-b border-gray-200 bg-gray-100 md:border-b-0">
+            {urls.length > 0 ? (
+              <div className="flex h-full w-full items-center justify-center">
+                <img
+                  src={urls[safeIndex]}
+                  alt={title}
+                  className="max-h-full max-w-full object-contain"
+                />
+              </div>
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-gray-400">
+                No image
+              </div>
+            )}
+          </div>
+          {urls.length > 1 && (
+            <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5">
+              {urls.map((_, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  aria-label={`Show image ${i + 1}`}
+                  className={`h-1.5 w-1.5 rounded-full transition-all ${
+                    i === safeIndex
+                      ? "w-4 bg-white"
+                      : "bg-white/60 hover:bg-white/90"
+                  }`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setImageIndex(i);
+                  }}
+                />
+              ))}
             </div>
           )}
         </div>
-        {urls.length > 1 && (
-          <div className="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5">
-            {urls.map((_, i) => (
-              <button
-                key={i}
-                type="button"
-                aria-label={`Show image ${i + 1}`}
-                className={`h-1.5 w-1.5 rounded-full transition-all ${
-                  i === safeIndex ? "w-4 bg-white" : "bg-white/60 hover:bg-white/90"
-                }`}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setImageIndex(i);
-                }}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Content column */}
-      <div className="flex min-w-0 flex-1 flex-col gap-4 p-4 sm:p-5">
-        {/* Header */}
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="line-clamp-2 text-lg font-bold leading-tight text-gray-900 sm:text-xl">
-                {title}
-              </h3>
-            </div>
-            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-500">
-              <span className="font-mono text-gray-600">{listing.sku}</span>
-              {listing.createdDateTime && (
-                <>
-                  <span className="text-gray-300">·</span>
-                  <span>{formatListingDateTime(listing.createdDateTime)}</span>
-                </>
-              )}
-              <span className="text-gray-300">·</span>
-              <span
-                className="whitespace-nowrap"
-                title="Number of images on the listing"
-              >
-                {imageCount} {imageCount === 1 ? "image" : "images"}
-              </span>
-              <span className="text-gray-300">·</span>
-              <span
-                className="whitespace-nowrap"
-                title={`eBay title length; ${TITLE_MAX} characters is the typical limit`}
-              >
-                {titleLen} title chars
-              </span>
-              <span className="text-gray-300">·</span>
-              <span
-                className="whitespace-nowrap font-medium text-gray-600"
-                title={categoryId !== "—" ? `Category ID: ${categoryId}` : undefined}
-              >
-                {categoryShort === "—" ? "—" : `Cat ${categoryShort}`}
-              </span>
-            </p>
-          </div>
-          <div className="shrink-0 text-left sm:text-right">
-            <div className="text-xl font-bold text-gray-900 sm:text-2xl">
-              {formatPrice(listing.price, listing.currency)}
-            </div>
-          </div>
-        </div>
-
         <div
-          className="flex flex-col gap-3 border-t border-gray-100 pt-4"
+          className="border-t border-gray-200 bg-white p-3 sm:p-4"
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
-          <RestGalleryStrip
-            urls={urls}
-            heroIndex={safeIndex}
-            onPickIndex={setImageIndex}
-          />
-
-          {descriptionHtml ? (
-            <div
-              className="max-h-[min(20vh,11rem)] overflow-y-auto rounded-lg border border-gray-100 bg-gray-50/90 p-3 text-left text-sm leading-relaxed text-gray-800 [&_a]:text-primary [&_a]:underline [&_h1]:mb-2 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:text-sm [&_h2]:font-semibold [&_img]:h-auto [&_img]:max-w-full [&_li]:my-0.5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_p]:first:mt-0 [&_table]:my-2 [&_table]:max-w-full [&_td]:border [&_td]:border-gray-200 [&_td]:p-1.5 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
-              dangerouslySetInnerHTML={{ __html: descriptionHtml }}
-            />
-          ) : null}
-
           <div className="flex flex-col gap-2">
             <button
               type="button"
-              className="w-full rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2.5 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60 disabled:transform-none sm:w-auto sm:self-end"
+              className={`w-full ${btnPill} disabled:transform-none`}
               onClick={() => onUpload?.(listing)}
               disabled={isUploading}
             >
               {isUploading ? "Uploading..." : "Upload to eBay"}
             </button>
             {uploadResult && (
-              <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 p-3">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-500 text-lg font-bold text-white">
+              <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-white p-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-green-700 bg-white text-lg font-bold text-green-800">
                   ✓
                 </div>
-                <div className="min-w-0 flex-1 text-sm">
+                <div className="min-w-0 flex-1 text-sm text-gray-800">
                   {uploadResult.listingId && (
                     <div>
                       <strong>Listing ID:</strong>{" "}
@@ -301,6 +238,83 @@ export default function GeneratedListingCard({
               </div>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Content column — capped to the left column's height on md; description scrolls */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 p-4 sm:p-5 md:overflow-hidden">
+        {/* Header */}
+        <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="line-clamp-2 text-lg font-bold leading-tight text-gray-900 sm:text-xl">
+                {title}
+              </h3>
+            </div>
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-500">
+              <span className="font-mono text-gray-600">{listing.sku}</span>
+              {listing.createdDateTime && (
+                <>
+                  <span className="text-gray-300">·</span>
+                  <span>{formatListingDateTime(listing.createdDateTime)}</span>
+                </>
+              )}
+              <span className="text-gray-300">·</span>
+              <span
+                className="whitespace-nowrap"
+                title="Number of images on the listing"
+              >
+                {imageCount} {imageCount === 1 ? "image" : "images"}
+              </span>
+              <span className="text-gray-300">·</span>
+              <span
+                className="whitespace-nowrap font-medium text-gray-600"
+                title={
+                  categoryId !== "—" ? `Category ID: ${categoryId}` : undefined
+                }
+              >
+                {categoryShort === "—" ? "—" : `Cat ${categoryShort}`}
+              </span>
+              {ebayListingId ? (
+                <>
+                  <span className="text-gray-300">·</span>
+                  <a
+                    href={`https://www.ebay.com/itm/${ebayListingId}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-semibold text-primary underline hover:no-underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    View on eBay
+                  </a>
+                </>
+              ) : null}
+            </p>
+          </div>
+          <div className="shrink-0 text-left sm:text-right">
+            <div className="text-xl font-bold text-gray-900 sm:text-2xl">
+              {formatPrice(listing.price, listing.currency)}
+            </div>
+          </div>
+        </div>
+
+        <div
+          className={`flex min-h-0 flex-col gap-3 border-t border-gray-100 pt-4 ${descriptionHtml ? "min-h-[min(40vh,14rem)] flex-1 md:min-h-0" : ""}`}
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <RestGalleryStrip
+            urls={urls}
+            heroIndex={safeIndex}
+            onPickIndex={setImageIndex}
+          />
+
+          {descriptionHtml ? (
+            <div
+              className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-gray-100 bg-gray-50/90 p-3 text-left text-sm leading-relaxed text-gray-800 md:min-h-0 [&_a]:text-primary [&_a]:underline [&_h1]:mb-2 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:text-sm [&_h2]:font-semibold [&_img]:h-auto [&_img]:max-w-full [&_li]:my-0.5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_p]:first:mt-0 [&_table]:my-2 [&_table]:max-w-full [&_td]:border [&_td]:border-gray-200 [&_td]:p-1.5 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
+              dangerouslySetInnerHTML={{ __html: descriptionHtml }}
+            />
+          ) : null}
         </div>
       </div>
     </div>

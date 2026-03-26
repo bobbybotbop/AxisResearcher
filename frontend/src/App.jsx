@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   FilePlus,
   Upload,
@@ -10,9 +10,12 @@ import {
 } from "lucide-react";
 import CreateWorkflow from "./components/CreateWorkflow";
 import GeneratedListingCard from "./components/GeneratedListingCard";
+import UploadListingsToolbar from "./components/UploadListingsToolbar";
 import { MOCK_DATA } from "./mockData";
 import { createTestWorkflowState } from "./testWorkflowState";
 import { trimTransparentPadding } from "./utils/trimImage";
+import { isIncomplete } from "./utils/listingStatus";
+import { btnPill, btnPillSm } from "./styles/buttonPill";
 
 /**
  * Fetch with streaming progress support.
@@ -126,6 +129,9 @@ function App() {
   const [userTokenResult, setUserTokenResult] = useState(null);
   const [isTestingUserToken, setIsTestingUserToken] = useState(false);
   const [allListings, setAllListings] = useState([]);
+  const [uploadListingsSearch, setUploadListingsSearch] = useState("");
+  const [uploadListingsShowIncomplete, setUploadListingsShowIncomplete] =
+    useState(false);
   const [loadingListings, setLoadingListings] = useState(false);
   const [uploadingSkus, setUploadingSkus] = useState(new Set());
   const [uploadResults, setUploadResults] = useState({});
@@ -402,6 +408,25 @@ function App() {
     uploadProgress: testUploadProgress,
     uploadingSkus: testUploadingSkus,
   } = testWf;
+
+  const filteredUploadListings = useMemo(() => {
+    const order = new Map(allListings.map((l, i) => [l.sku, i]));
+    const q = uploadListingsSearch.trim().toLowerCase();
+    const list = allListings.filter((l) => {
+      if (!uploadListingsShowIncomplete && isIncomplete(l)) return false;
+      if (q && !(l.title || "").toLowerCase().includes(q)) return false;
+      return true;
+    });
+    if (uploadListingsShowIncomplete) {
+      list.sort((a, b) => {
+        const ia = isIncomplete(a) ? 1 : 0;
+        const ib = isIncomplete(b) ? 1 : 0;
+        if (ia !== ib) return ia - ib;
+        return (order.get(a.sku) ?? 0) - (order.get(b.sku) ?? 0);
+      });
+    }
+    return list;
+  }, [allListings, uploadListingsSearch, uploadListingsShowIncomplete]);
 
   useEffect(() => {
     const hasWorkflowLink =
@@ -1293,6 +1318,8 @@ function App() {
         setUploadResult(data.upload_result);
       }
 
+      fetchAllListings();
+
       console.log("Upload successful:", data.upload_result);
     } catch (err) {
       console.error("Error uploading listing:", err);
@@ -1854,7 +1881,7 @@ function App() {
 
       <main className="min-h-screen flex-1 overflow-auto bg-gray-50">
         <div
-          className={`mx-auto flex w-full flex-col px-6 md:px-8 ${
+          className={`mx-auto flex w-full h-full flex-col justify-center px-6 md:px-8 ${
             activeTab === "upload" ? "max-w-7xl" : "max-w-[1200px]"
           }`}
         >
@@ -2018,9 +2045,12 @@ function App() {
 
           {activeTab === "upload" && (
             <div>
-              <h2 className="mb-5 text-xl font-semibold text-gray-800">
-                Generated Listings
-              </h2>
+              <UploadListingsToolbar
+                searchQuery={uploadListingsSearch}
+                onSearchChange={setUploadListingsSearch}
+                showIncompleteListings={uploadListingsShowIncomplete}
+                onShowIncompleteListingsChange={setUploadListingsShowIncomplete}
+              />
 
               {loadingListings ? (
                 <div className="flex flex-col items-center justify-center gap-4 py-12">
@@ -2033,9 +2063,15 @@ function App() {
                     No generated listings found. Create a listing first!
                   </p>
                 </div>
+              ) : filteredUploadListings.length === 0 ? (
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-8 text-center">
+                  <p className="text-gray-600">
+                    No listings match your search or filters.
+                  </p>
+                </div>
               ) : (
                 <div className="flex flex-col gap-4">
-                  {allListings.map((listing) => (
+                  {filteredUploadListings.map((listing) => (
                     <GeneratedListingCard
                       key={listing.sku}
                       listing={listing}
@@ -2121,7 +2157,7 @@ function App() {
                 </div>
                 <button
                   type="button"
-                  className="w-fit rounded-lg bg-gradient-to-br from-primary to-primary-dark px-6 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+                  className={`w-fit ${btnPill}`}
                   onClick={handleTestingFunction}
                   disabled={isTesting}
                 >
@@ -2216,7 +2252,7 @@ function App() {
                   <div className="flex flex-wrap gap-3">
                     <button
                       type="button"
-                      className="rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 text-sm font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+                      className={btnPillSm}
                       onClick={handleTestAppToken}
                       disabled={isTestingAppToken}
                     >
@@ -2226,7 +2262,7 @@ function App() {
                     </button>
                     <button
                       type="button"
-                      className="rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 text-sm font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-60"
+                      className={btnPillSm}
                       onClick={handleTestUserToken}
                       disabled={isTestingUserToken}
                     >

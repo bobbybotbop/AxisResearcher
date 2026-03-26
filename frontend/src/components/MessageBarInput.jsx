@@ -37,7 +37,7 @@ const MessageBarInput = ({
                 strokeLinejoin="round"
                 strokeLinecap="round"
                 strokeWidth="33.67"
-                stroke="#6b7280"
+                stroke="currentColor"
                 d="M646.293 331.888L17.7538 17.6187L155.245 331.888M646.293 331.888L17.753 646.157L155.245 331.888M646.293 331.888L318.735 330.228L155.245 331.888"
               />
             </svg>
@@ -61,6 +61,10 @@ const StyledWrapper = styled.div`
     padding: 0 18px 0 24px;
     border-radius: 9999px;
     border: 1px solid #d1d5db;
+    transition: border-color 0.2s ease;
+  }
+  .messageBox:focus-within:not(:has(.messageInput:disabled)) {
+    border-color: #000000;
   }
   .messageInput {
     width: 200px;
@@ -85,6 +89,7 @@ const StyledWrapper = styled.div`
   .sendButton {
     width: fit-content;
     height: 100%;
+    color: #6b7280;
     background-color: transparent;
     outline: none;
     border: none;
@@ -93,7 +98,10 @@ const StyledWrapper = styled.div`
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.3s;
+    transition: color 0.2s ease, opacity 0.2s ease;
+  }
+  .messageBox:focus-within:not(:has(.messageInput:disabled)) .sendButton {
+    color: #000000;
   }
   .sendButton:disabled {
     cursor: not-allowed;
@@ -110,7 +118,7 @@ const StyledWrapper = styled.div`
   .sendSpinner {
     height: 24px;
     width: 24px;
-    color: #000000;
+    color: currentColor;
     animation: spin 0.8s linear infinite;
   }
   @keyframes spin {

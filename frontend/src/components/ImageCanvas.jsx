@@ -16,6 +16,7 @@ import {
 } from "@mynaui/icons-react";
 import { trimTransparentPadding } from "../utils/trimImage";
 import ImageUploadModal from "./ImageUploadModal";
+import { btnPill, btnPillSecondary, btnPillSm } from "../styles/buttonPill";
 
 const DISPLAY_MAX = 324; // 30% of 1080 for on-screen canvas display
 let imageIdCounter = 0;
@@ -553,13 +554,6 @@ export default function ImageCanvas({
 
   const selectedCount = selectedIds.size;
 
-  const btnPrimary =
-    "rounded-lg bg-gradient-to-br from-primary to-primary-dark px-4 py-2 font-semibold text-white shadow transition-all hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60";
-  const btnSecondary =
-    "rounded-lg border-2 border-primary bg-white px-4 py-2 font-semibold text-primary transition-all hover:-translate-y-0.5 hover:shadow-md disabled:translate-y-0 disabled:cursor-not-allowed disabled:opacity-60";
-  const btnDanger =
-    "rounded-lg bg-red-500 px-4 py-2 font-semibold text-white transition-all hover:bg-red-600 disabled:opacity-60";
-
   const iconBtn =
     "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-gray-100 text-gray-700 transition-colors hover:bg-gray-200";
   const iconBtnPool =
@@ -607,7 +601,12 @@ export default function ImageCanvas({
                   <select
                     value={textFontWeight}
                     onChange={(e) => setTextFontWeight(e.target.value)}
-                    className="rounded border border-gray-300 px-2 py-1 text-sm"
+                    className="appearance-none rounded border border-gray-300 bg-white px-2 py-1 pr-7 text-sm accent-black"
+                    style={{
+                      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23000' d='M6 9L1 4h10z'/%3E%3C/svg%3E")`,
+                      backgroundRepeat: "no-repeat",
+                      backgroundPosition: "right 0.35rem center",
+                    }}
                   >
                     <option value="normal">Normal</option>
                     <option value="bold">Bold</option>
@@ -617,7 +616,7 @@ export default function ImageCanvas({
                 </div>
                 <button
                   type="button"
-                  className={btnPrimary}
+                  className={`w-full ${btnPillSm}`}
                   onClick={() => {
                     handleAddText();
                     setShowTextOptions(false);
@@ -720,7 +719,7 @@ export default function ImageCanvas({
                 </div>
                 <button
                   type="button"
-                  className={btnPrimary}
+                  className={`w-full ${btnPillSm}`}
                   onClick={applySettings}
                 >
                   Apply
@@ -747,17 +746,17 @@ export default function ImageCanvas({
                 ` (displayed at ${Math.round(displayScale * 100)}%)`}
             </p>
 
-            <div className="mt-4 flex gap-3">
+            <div className="mt-4 flex flex-wrap gap-3">
               <button
                 type="button"
-                className={btnSecondary}
+                className={btnPillSecondary}
                 onClick={handleDownload}
               >
                 Download
               </button>
               <button
                 type="button"
-                className={btnPrimary}
+                className={btnPill}
                 onClick={handleAddToListing}
                 disabled={isCompiling}
               >
