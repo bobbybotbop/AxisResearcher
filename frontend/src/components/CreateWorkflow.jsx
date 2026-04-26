@@ -76,6 +76,7 @@ function CreateWorkflow({
   onNavigateLightbox,
   lightboxOpen,
   lightboxIndex,
+  classifyImagesEnabled = true,
 }) {
   const [descriptionEditMode, setDescriptionEditMode] = useState(false);
   const [isHoveringBarZone, setIsHoveringBarZone] = useState(false);
@@ -215,6 +216,7 @@ function CreateWorkflow({
             onPromptModifierChange={onPromptModifierChange}
             onAddToOriginalPhotos={onAddToOriginalPhotos}
             onOpenEditor={onEditorToggle}
+            showClassification={classifyImagesEnabled}
           />
           {isConfirming && imageGenProgress?.isActive && (
             <div className="my-5 rounded-lg border border-border-default bg-surface-muted p-4">

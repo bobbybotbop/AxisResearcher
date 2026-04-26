@@ -637,11 +637,13 @@ function App() {
     setUseOriginalPhotos(new Set());
 
     // Initialize progress tracking
-    const steps = [
-      "Fetching listing from eBay",
-      "Creating initial JSON file",
-      "Categorizing images",
-    ];
+    const steps = classifyImagesEnabled
+      ? [
+          "Fetching listing from eBay",
+          "Creating initial JSON file",
+          "Categorizing images",
+        ]
+      : ["Fetching listing from eBay", "Creating initial JSON file"];
     setFetchProgress({
       isActive: true,
       currentStep: null,
@@ -651,8 +653,11 @@ function App() {
 
     try {
       // Stream progress from backend as each step actually completes
+      const photosUrl = classifyImagesEnabled
+        ? `/api/photos/${encodeURIComponent(listingId.trim())}?classifier_model=${encodeURIComponent(classifierModel)}`
+        : `/api/photos/${encodeURIComponent(listingId.trim())}?classify=false`;
       const data = await fetchWithProgress(
-        `/api/photos/${encodeURIComponent(listingId.trim())}?classifier_model=${encodeURIComponent(classifierModel)}`,
+        photosUrl,
         {},
         (event) => {
           setFetchProgress((prev) => {
@@ -674,7 +679,12 @@ function App() {
       );
 
       setPhotos(data.photos || []);
-      const initialCategories = data.categories || {};
+      const initialCategories = classifyImagesEnabled
+        ? data.categories || {}
+        : (data.photos || []).reduce((acc, url) => {
+            acc[url] = "bad_image";
+            return acc;
+          }, {});
       setCategories(initialCategories);
       setEditableCategories({ ...initialCategories });
       setListing(data.listing || null);
@@ -682,10 +692,13 @@ function App() {
       setGeneratedImages([]);
 
       // Auto-skip images categorized as real_world_image or edited_image
+      // (only when classification is enabled; otherwise nothing is auto-skipped)
       const autoSkip = new Set();
-      for (const [url, cat] of Object.entries(initialCategories)) {
-        if (cat === "real_world_image" || cat === "edited_image") {
-          autoSkip.add(url);
+      if (classifyImagesEnabled) {
+        for (const [url, cat] of Object.entries(initialCategories)) {
+          if (cat === "real_world_image" || cat === "edited_image") {
+            autoSkip.add(url);
+          }
         }
       }
       setSkippedPhotos(autoSkip);
@@ -1661,11 +1674,13 @@ function App() {
     setTestListingLinkSubmitted(true);
     setTestLoading(true);
     setTestError(null);
-    const steps = [
-      "Fetching listing from eBay",
-      "Creating initial JSON file",
-      "Categorizing images",
-    ];
+    const steps = classifyImagesEnabled
+      ? [
+          "Fetching listing from eBay",
+          "Creating initial JSON file",
+          "Categorizing images",
+        ]
+      : ["Fetching listing from eBay", "Creating initial JSON file"];
     setTestFetchProgress({
       isActive: true,
       currentStep: steps[0],
@@ -1679,24 +1694,34 @@ function App() {
         currentStep: steps[1],
       }));
     }, 400);
-    setTimeout(() => {
-      setTestFetchProgress((prev) => ({
-        ...prev,
-        completedSteps: [steps[0], steps[1]],
-        currentStep: steps[2],
-      }));
-    }, 800);
+    if (classifyImagesEnabled) {
+      setTimeout(() => {
+        setTestFetchProgress((prev) => ({
+          ...prev,
+          completedSteps: [steps[0], steps[1]],
+          currentStep: steps[2],
+        }));
+      }, 800);
+    }
     setTimeout(() => {
       setTestPhotos(MOCK_DATA.photos);
-      setTestCategories(MOCK_DATA.categories);
-      setTestEditableCategories({ ...MOCK_DATA.categories });
+      const initialCategories = classifyImagesEnabled
+        ? MOCK_DATA.categories
+        : MOCK_DATA.photos.reduce((acc, url) => {
+            acc[url] = "bad_image";
+            return acc;
+          }, {});
+      setTestCategories(initialCategories);
+      setTestEditableCategories({ ...initialCategories });
       setTestListing(MOCK_DATA.listing);
       setTestCurrentSku(MOCK_DATA.sku);
       setTestGeneratedImages([]);
       const autoSkip = new Set();
-      for (const [url, cat] of Object.entries(MOCK_DATA.categories)) {
-        if (cat === "real_world_image" || cat === "edited_image")
-          autoSkip.add(url);
+      if (classifyImagesEnabled) {
+        for (const [url, cat] of Object.entries(MOCK_DATA.categories)) {
+          if (cat === "real_world_image" || cat === "edited_image")
+            autoSkip.add(url);
+        }
       }
       setTestSkippedPhotos(autoSkip);
       setTestFetchProgress({
@@ -2232,6 +2257,7 @@ function App() {
               }
               lightboxOpen={testLightboxOpen}
               lightboxIndex={testLightboxIndex}
+              classifyImagesEnabled={classifyImagesEnabled}
             />
           )}
 
@@ -2410,6 +2436,30 @@ function App() {
                 </div>
               </div>
               <div className="mb-5 rounded-xl border border-border-default bg-surface-muted p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="m-0 text-lg font-semibold text-text-primary">
+                      Classify Images
+                    </h3>
+                    <p className="mt-1 text-sm text-text-muted">
+                      When off, all images are treated as needing a reframed
+                      studio shot. Skips the seed classification step.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded-lg border border-border-default bg-surface-panel px-4 py-2 text-sm font-semibold text-text-primary shadow-sm transition-all hover:-translate-y-0.5 hover:bg-surface-hover hover:shadow-md"
+                    onClick={() => setClassifyImagesEnabled((prev) => !prev)}
+                    aria-label="Toggle image classification"
+                    aria-pressed={classifyImagesEnabled}
+                  >
+                    {classifyImagesEnabled
+                      ? "Classify Images: On"
+                      : "Classify Images: Off"}
+                  </button>
+                </div>
+              </div>
+              <div className="mb-5 rounded-xl border border-border-default bg-surface-muted p-5">
                 <div className="mb-4">
                   <h3 className="m-0 text-lg font-semibold text-text-primary">
                     AI Model Selection
@@ -2448,12 +2498,22 @@ function App() {
                       ))}
                     </select>
                   </label>
-                  <label className="flex flex-col gap-2 text-sm font-semibold text-text-primary">
+                  <label
+                    className={`flex flex-col gap-2 text-sm font-semibold text-text-primary ${
+                      !classifyImagesEnabled ? "opacity-50" : ""
+                    }`}
+                  >
                     Image Classifier Model
                     <select
-                      className="rounded-lg border border-border-default bg-surface-panel px-3 py-2 text-sm font-medium text-text-primary focus:border-primary focus:outline-none"
+                      className="rounded-lg border border-border-default bg-surface-panel px-3 py-2 text-sm font-medium text-text-primary focus:border-primary focus:outline-none disabled:cursor-not-allowed"
                       value={classifierModel}
                       onChange={(e) => setClassifierModel(e.target.value)}
+                      disabled={!classifyImagesEnabled}
+                      title={
+                        !classifyImagesEnabled
+                          ? "Enable Classify Images to select a model"
+                          : undefined
+                      }
                     >
                       {CLASSIFIER_MODEL_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
@@ -2648,6 +2708,7 @@ function App() {
               onNavigateLightbox={navigateLightbox}
               lightboxOpen={lightboxOpen}
               lightboxIndex={lightboxIndex}
+              classifyImagesEnabled={classifyImagesEnabled}
             />
           )}
         </div>

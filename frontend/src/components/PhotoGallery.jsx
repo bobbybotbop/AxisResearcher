@@ -17,6 +17,7 @@ function PhotoGallery({
   onPromptModifierChange,
   onAddToOriginalPhotos,
   onOpenEditor,
+  showClassification = true,
 }) {
   const [showUploadModal, setShowUploadModal] = useState(false);
 
@@ -163,35 +164,41 @@ function PhotoGallery({
                 </div>
               )}
               {isUseOriginal && !isSkipped && (
-                <div className="absolute bottom-9 left-1/2 z-[5] -translate-x-1/2 rounded bg-blue-500/90 px-2 py-1 text-[11px] font-bold text-white">
+                <div
+                  className={`absolute ${
+                    showClassification ? "bottom-9" : "bottom-2"
+                  } left-1/2 z-[5] -translate-x-1/2 rounded bg-blue-500/90 px-2 py-1 text-[11px] font-bold text-white`}
+                >
                   USE ORIGINAL
                 </div>
               )}
-              <div
-                className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t ${getCategoryGradient(
-                  category,
-                )} p-2`}
-              >
-                <select
-                  className="w-full cursor-pointer appearance-none rounded border border-border-default bg-surface-panel/95 px-2 py-1 pr-8 text-xs font-semibold uppercase tracking-wide text-text-primary accent-text-primary focus:border-border-default focus:outline-none focus:ring-2 focus:ring-border-default/40"
-                  style={{
-                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23c7c7c7' d='M6 9L1 4h10z'/%3E%3C/svg%3E")`,
-                    backgroundRepeat: "no-repeat",
-                    backgroundPosition: "right 0.5rem center",
-                  }}
-                  value={category || ""}
-                  onChange={(e) => handleCategorySelect(e, photoUrl)}
-                  onClick={(e) => e.stopPropagation()}
-                  disabled={isSkipped}
+              {showClassification && (
+                <div
+                  className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t ${getCategoryGradient(
+                    category,
+                  )} p-2`}
                 >
-                  <option value="">Select Category</option>
-                  {categoryOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  <select
+                    className="w-full cursor-pointer appearance-none rounded border border-border-default bg-surface-panel/95 px-2 py-1 pr-8 text-xs font-semibold uppercase tracking-wide text-text-primary accent-text-primary focus:border-border-default focus:outline-none focus:ring-2 focus:ring-border-default/40"
+                    style={{
+                      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23c7c7c7' d='M6 9L1 4h10z'/%3E%3C/svg%3E")`,
+                      backgroundRepeat: "no-repeat",
+                      backgroundPosition: "right 0.5rem center",
+                    }}
+                    value={category || ""}
+                    onChange={(e) => handleCategorySelect(e, photoUrl)}
+                    onClick={(e) => e.stopPropagation()}
+                    disabled={isSkipped}
+                  >
+                    <option value="">Select Category</option>
+                    {categoryOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           );
         })}

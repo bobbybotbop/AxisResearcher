@@ -108,17 +108,21 @@ def get_listing_photos(listing_id):
             ]
             print(f"Found {len(old_photo_list)} photo(s): {old_photo_list}")
 
-            classifier_model = request.args.get("classifier_model") or DEFAULT_CLASSIFIER_MODEL
+            classify = request.args.get("classify", "true").lower() != "false"
 
-            # Step 3: Categorize images
-            yield progress_event('Categorizing images', 'in_progress')
+            # Step 3: Categorize images (skipped when classify=false)
             categories = {}
-            if old_photo_list:
-                print("Categorizing images...")
-                categories = categorize_images(old_photo_list, model=classifier_model)
-                if categories is None:
-                    categories = {}
-            yield progress_event('Categorizing images', 'completed')
+            if classify:
+                classifier_model = request.args.get("classifier_model") or DEFAULT_CLASSIFIER_MODEL
+                yield progress_event('Categorizing images', 'in_progress')
+                if old_photo_list:
+                    print("Categorizing images...")
+                    categories = categorize_images(old_photo_list, model=classifier_model)
+                    if categories is None:
+                        categories = {}
+                yield progress_event('Categorizing images', 'completed')
+            else:
+                print("Skipping image categorization (classify=false)")
 
             # Send final result
             result = {
