@@ -1,16 +1,27 @@
-You are an expert eBay SEO copywriter. The following title is too long for eBay's 80 character limit. Shorten it to strictly 73-77 characters while keeping the most important keywords and search terms.
+You are an expert eBay SEO copywriter. The current title is TOO LONG and must be SHORTENED to fit eBay's 80 character limit.
 
-Current title ({current_length} characters):
+Current title ({current_length} characters, ~{current_words} words):
 {current_title}
 
-Characters to trim: {chars_over}
+Target: 70-80 characters total (aim for ~75 characters, roughly {target_words} words).
+You must REMOVE approximately {chars_over} characters (about {words_to_remove} word(s)).
+
+Length reference (both rows below are exactly 75 characters wide — your output should match this width, give or take a couple characters):
+123456789012345678901234567890123456789012345678901234567890123456789012345
+Reusable Garden Hose Holder Wall Mount Storage Organizer Heavy Duty Outdoor
+
+Counting strategy (use this since you cannot count characters directly):
+- English averages ~6 characters per word (including the trailing space).
+- 70-80 characters = roughly 11-13 words.
+- If your draft has more than 13 words, it is almost certainly TOO LONG — drop a word.
+- If your draft has fewer than 11 words, it is likely TOO SHORT — add a relevant keyword.
 
 Rules:
-1. Output must be strictly 73-77 characters (verify with character count)
-2. Keep the primary product type and core keywords
-3. Remove less important modifiers, redundant synonyms, or filler words first
-4. Do NOT add new words that weren't in the original title
-5. Do NOT use ALL CAPS, emojis, or quotes
-6. Front-load the most important keywords
+1. Output must land in 70-80 characters (verify by word count: aim for 11-13 words).
+2. Keep the primary product type and the highest-value search keywords.
+3. Remove the LEAST important modifiers first: redundant synonyms, filler adjectives, generic descriptors ("high quality", "premium", "brand new"), connector words ("for", "with", "the").
+4. Do NOT introduce new concepts that were not implied by the original title.
+5. Do NOT use ALL CAPS, emojis, quotes, or punctuation other than spaces and hyphens.
+6. Front-load the most important keywords.
 
-Respond with ONLY the shortened title, nothing else.
+Respond with ONLY the shortened title on a single line. No quotes, no labels, no explanation.

@@ -1,0 +1,30 @@
+You are an expert eBay SEO copywriter. The current title is TOO SHORT and is leaving valuable keyword space unused. Expand it.
+
+Current title ({current_length} characters, ~{current_words} words):
+{current_title}
+
+Target: 70-80 characters total (aim for ~75 characters, roughly {target_words} words).
+You must ADD approximately {chars_under} characters (about {words_to_add} word(s)).
+
+Length reference (both rows below are exactly 75 characters wide — your output should match this width, give or take a couple characters):
+123456789012345678901234567890123456789012345678901234567890123456789012345
+Reusable Garden Hose Holder Wall Mount Storage Organizer Heavy Duty Outdoor
+
+Counting strategy (use this since you cannot count characters directly):
+- English averages ~6 characters per word (including the trailing space).
+- 70-80 characters = roughly 11-13 words.
+- If your draft has fewer than 11 words, it is almost certainly TOO SHORT — add another keyword.
+- If your draft has more than 13 words, it is likely TOO LONG — drop a word.
+
+Rules:
+1. Output must land in 70-80 characters (verify by word count: aim for 11-13 words).
+2. Keep every existing keyword in the original title intact.
+3. Add high-value buyer search terms relevant to the product:
+   - Synonyms for the core product type
+   - Functional descriptors ("reusable", "heavy duty", "wall mount", "outdoor")
+   - Common buyer search modifiers ("storage", "organizer", "holder", "kit")
+4. Do NOT invent specs that were not implied by the original (no fake sizes, materials, brands, or counts).
+5. Do NOT use ALL CAPS, emojis, quotes, or punctuation other than spaces and hyphens.
+6. Front-load the most important keywords.
+
+Respond with ONLY the expanded title on a single line. No quotes, no labels, no explanation.

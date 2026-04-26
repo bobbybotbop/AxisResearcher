@@ -168,7 +168,9 @@ function App() {
   });
   const [themeMode, setThemeMode] = useState(() => {
     try {
-      return localStorage.getItem("axisThemeMode") === "dark" ? "dark" : "light";
+      return localStorage.getItem("axisThemeMode") === "dark"
+        ? "dark"
+        : "light";
     } catch {
       return "light";
     }
@@ -185,8 +187,7 @@ function App() {
   const [imageModel, setImageModel] = useState(() => {
     try {
       return (
-        localStorage.getItem("axisImageModel") ||
-        "sourceful/riverflow-v2-fast"
+        localStorage.getItem("axisImageModel") || "sourceful/riverflow-v2-fast"
       );
     } catch {
       return "sourceful/riverflow-v2-fast";
@@ -200,6 +201,13 @@ function App() {
       );
     } catch {
       return "bytedance-seed/seed-1.6-flash";
+    }
+  });
+  const [classifyImagesEnabled, setClassifyImagesEnabled] = useState(() => {
+    try {
+      return localStorage.getItem("axisClassifyImagesEnabled") === "true";
+    } catch {
+      return false;
     }
   });
   const [testingResult, setTestingResult] = useState(null);
@@ -330,6 +338,17 @@ function App() {
       // ignore
     }
   }, [classifierModel]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "axisClassifyImagesEnabled",
+        classifyImagesEnabled ? "true" : "false",
+      );
+    } catch {
+      // ignore
+    }
+  }, [classifyImagesEnabled]);
 
   // Keep URLs aligned with tab state. Each tab has its own path.
   useEffect(() => {
@@ -549,10 +568,7 @@ function App() {
       if (uploadListingsDateFrom || uploadListingsDateTo) {
         const raw = l.createdDateTime;
         const listingDate = raw ? new Date(raw) : null;
-        if (
-          !listingDate ||
-          Number.isNaN(listingDate.getTime())
-        ) {
+        if (!listingDate || Number.isNaN(listingDate.getTime())) {
           return false;
         }
         if (uploadListingsDateFrom) {
@@ -2061,7 +2077,9 @@ function App() {
             <CreateWorkflow
               listingId={testListingId}
               listingLinkSubmitted={testListingLinkSubmitted}
-              shouldAutoHideMessageBar={testListingLinkSubmitted && !testLoading}
+              shouldAutoHideMessageBar={
+                testListingLinkSubmitted && !testLoading
+              }
               sidebarCollapsed={sidebarCollapsed}
               photos={testPhotos}
               categories={testCategories}
@@ -2289,7 +2307,9 @@ function App() {
                 {loadingListingDetail ? (
                   <div className="flex flex-col items-center justify-center gap-4 py-12">
                     <div className="h-12 w-12 animate-spin rounded-full border-4 border-border-default border-t-primary" />
-                    <p className="text-text-muted">Loading listing details...</p>
+                    <p className="text-text-muted">
+                      Loading listing details...
+                    </p>
                   </div>
                 ) : listingDetailData ? (
                   <div className="flex-1 overflow-auto p-4">
@@ -2378,7 +2398,9 @@ function App() {
                     type="button"
                     className="cursor-pointer rounded-lg border border-border-default bg-surface-panel px-4 py-2 text-sm font-semibold text-text-primary shadow-sm transition-all hover:-translate-y-0.5 hover:bg-surface-hover hover:shadow-md"
                     onClick={() =>
-                      setThemeMode((prev) => (prev === "dark" ? "light" : "dark"))
+                      setThemeMode((prev) =>
+                        prev === "dark" ? "light" : "dark",
+                      )
                     }
                     aria-label="Toggle dark mode"
                     aria-pressed={themeMode === "dark"}

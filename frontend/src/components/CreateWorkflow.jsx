@@ -109,9 +109,6 @@ function CreateWorkflow({
 
   return (
     <>
-      {listingLinkSubmitted && (
-        <div aria-hidden="true" className="h-[104px] w-full shrink-0" />
-      )}
       {shouldAutoHideMessageBar && (
         <motion.div
           aria-hidden="true"

@@ -697,20 +697,196 @@ def update_listing_images_endpoint():
         return jsonify({"error": error_msg, "listing_data": None}), 500
 
 
+TITLE_MIN_LEN = 70
+TITLE_MAX_LEN = 80
+TITLE_TARGET_LEN = 75
+TITLE_MAX_ATTEMPTS = 3
+
+
+def _sanitize_title(text):
+    """Strip whitespace, surrounding quotes, and any trailing punctuation an LLM may add."""
+    if not text:
+        return ""
+    cleaned = text.strip()
+    # Remove paired surrounding quotes
+    while cleaned and cleaned[0] in ('"', "'") and cleaned[-1] in ('"', "'"):
+        cleaned = cleaned[1:-1].strip()
+    # If model returned multiple lines, take the first non-empty line
+    for line in cleaned.splitlines():
+        line = line.strip()
+        if line:
+            cleaned = line
+            break
+    return cleaned.strip()
+
+
+def _load_prompt(filename):
+    with open(f"prompts/{filename}", "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def _nudge_title_length(current_title, text_model):
+    """
+    Recursively nudge a title's character count into [TITLE_MIN_LEN, TITLE_MAX_LEN].
+
+    Uses two directional prompts (decrease/increase) and retries up to
+    TITLE_MAX_ATTEMPTS times. Logs every attempt for testing.
+
+    Returns (best_title, attempts_log) where best_title is the candidate
+    closest to TITLE_TARGET_LEN that we produced (in-range if possible).
+    """
+    from backend.ebay_cli import call_openrouter_llm
+
+    try:
+        decrease_template = _load_prompt("trimTitlePrompt.txt")
+    except FileNotFoundError:
+        decrease_template = None
+    try:
+        increase_template = _load_prompt("increaseTitlePrompt.txt")
+    except FileNotFoundError:
+        increase_template = None
+
+    attempts_log = []
+    candidates = [current_title]
+    working_title = current_title
+
+    for attempt in range(1, TITLE_MAX_ATTEMPTS + 1):
+        in_len = len(working_title)
+        in_words = len(working_title.split())
+
+        if TITLE_MIN_LEN <= in_len <= TITLE_MAX_LEN:
+            print(
+                f"[TITLE_NUDGE] attempt={attempt - 1} status=in_range "
+                f"length={in_len} title='{working_title}'"
+            )
+            break
+
+        if in_len > TITLE_MAX_LEN:
+            direction = "decrease"
+            template = decrease_template
+            chars_delta = in_len - TITLE_TARGET_LEN  # positive: chars to remove
+            target_words = max(1, round(TITLE_TARGET_LEN / 6))
+            words_to_remove = max(1, round(chars_delta / 6))
+            if not template:
+                print("[TITLE_NUDGE] decrease prompt template missing; aborting loop")
+                break
+            prompt = template.format(
+                current_title=working_title,
+                current_length=in_len,
+                current_words=in_words,
+                chars_over=chars_delta,
+                target_words=target_words,
+                words_to_remove=words_to_remove,
+            )
+        else:  # in_len < TITLE_MIN_LEN
+            direction = "increase"
+            template = increase_template
+            chars_delta = TITLE_TARGET_LEN - in_len  # positive: chars to add
+            target_words = max(1, round(TITLE_TARGET_LEN / 6))
+            words_to_add = max(1, round(chars_delta / 6))
+            if not template:
+                print("[TITLE_NUDGE] increase prompt template missing; aborting loop")
+                break
+            prompt = template.format(
+                current_title=working_title,
+                current_length=in_len,
+                current_words=in_words,
+                chars_under=chars_delta,
+                target_words=target_words,
+                words_to_add=words_to_add,
+            )
+
+        print(
+            f"[TITLE_NUDGE] attempt={attempt} direction={direction} "
+            f"in_length={in_len} chars_delta={chars_delta} "
+            f"in_title='{working_title}'"
+        )
+
+        raw_response = call_openrouter_llm(prompt, model=text_model)
+        new_title = _sanitize_title(raw_response)
+
+        if not new_title:
+            print(
+                f"[TITLE_NUDGE] attempt={attempt} direction={direction} "
+                f"result=empty_response keeping_previous"
+            )
+            attempts_log.append({
+                "attempt": attempt,
+                "direction": direction,
+                "in_length": in_len,
+                "out_length": 0,
+                "delta": 0,
+                "in_range": False,
+                "title": "",
+            })
+            continue
+
+        out_len = len(new_title)
+        delta = out_len - in_len
+        in_range = TITLE_MIN_LEN <= out_len <= TITLE_MAX_LEN
+
+        print(
+            f"[TITLE_NUDGE] attempt={attempt} direction={direction} "
+            f"in_length={in_len} out_length={out_len} delta={delta:+d} "
+            f"in_range={in_range} out_title='{new_title}'"
+        )
+
+        attempts_log.append({
+            "attempt": attempt,
+            "direction": direction,
+            "in_length": in_len,
+            "out_length": out_len,
+            "delta": delta,
+            "in_range": in_range,
+            "title": new_title,
+        })
+
+        candidates.append(new_title)
+        working_title = new_title
+
+        if in_range:
+            break
+
+    # Pick the best candidate: prefer in-range, otherwise closest to target
+    in_range_candidates = [
+        c for c in candidates if TITLE_MIN_LEN <= len(c) <= TITLE_MAX_LEN
+    ]
+    if in_range_candidates:
+        # Prefer the LAST in-range candidate (most recent, refined version)
+        best = in_range_candidates[-1]
+    else:
+        best = min(candidates, key=lambda c: abs(len(c) - TITLE_TARGET_LEN))
+
+    print(
+        f"[TITLE_NUDGE] final length={len(best)} "
+        f"in_range={TITLE_MIN_LEN <= len(best) <= TITLE_MAX_LEN} "
+        f"attempts={len(attempts_log)} title='{best}'"
+    )
+
+    return best, attempts_log
+
+
 @app.route('/api/trim-title', methods=['POST'])
 def trim_title():
     """
-    Use AI to shorten a listing title to within 80 characters.
+    Use AI to nudge a listing title into the 70-80 character range.
+
+    If the title is too long (>80) it is shortened.
+    If the title is too short (<70) it is expanded.
+    Already-in-range titles are returned unchanged.
+
+    Up to 3 LLM attempts are made; each attempt is logged for testing.
     Also updates the listing JSON file if sku is provided.
-    
+
     Accepts JSON body:
     {
         "title": "current title text",
-        "sku": "AXIS_XX" (optional - if provided, updates the listing file)
+        "sku": "AXIS_XX" (optional - if provided, updates the listing file),
+        "text_model": "model id" (optional)
     }
-    
+
     Returns:
-        JSON with trimmed_title
+        JSON with trimmed_title (and attempts metadata for debugging)
     """
     try:
         print("[API] /api/trim-title endpoint called")
@@ -726,35 +902,30 @@ def trim_title():
             return jsonify({"error": "title is required"}), 400
 
         current_length = len(current_title)
-        if current_length <= 80:
-            return jsonify({"trimmed_title": current_title}), 200
-
-        chars_over = current_length - 77  # Target 77 chars
-
-        # Load the trim prompt template
-        try:
-            with open("prompts/trimTitlePrompt.txt", "r", encoding="utf-8") as f:
-                prompt_template = f.read()
-        except FileNotFoundError:
-            return jsonify({"error": "Trim prompt template not found"}), 500
-
-        prompt = prompt_template.format(
-            current_title=current_title,
-            current_length=current_length,
-            chars_over=chars_over
+        print(
+            f"[API] /api/trim-title input length={current_length} "
+            f"title='{current_title}'"
         )
 
-        from backend.ebay_cli import call_openrouter_llm
-        text_model = data.get("text_model") or DEFAULT_TEXT_MODEL
-        trimmed = call_openrouter_llm(prompt, model=text_model)
+        if TITLE_MIN_LEN <= current_length <= TITLE_MAX_LEN:
+            print(f"[API] Title already in range ({current_length} chars), no nudge needed")
+            return jsonify({
+                "trimmed_title": current_title,
+                "attempts": [],
+                "original_length": current_length,
+                "final_length": current_length,
+            }), 200
 
-        if not trimmed:
+        text_model = data.get("text_model") or DEFAULT_TEXT_MODEL
+        final_title, attempts_log = _nudge_title_length(current_title, text_model)
+
+        if not final_title:
             return jsonify({"error": "Failed to get response from AI"}), 502
 
-        # Clean up any quotes or whitespace the LLM might add
-        trimmed = trimmed.strip().strip('"').strip("'").strip()
-
-        print(f"[API] Trimmed title: '{trimmed}' ({len(trimmed)} chars)")
+        print(
+            f"[API] Final title: '{final_title}' ({len(final_title)} chars) "
+            f"after {len(attempts_log)} attempt(s)"
+        )
 
         # Update listing file if sku provided
         if sku:
@@ -762,14 +933,19 @@ def trim_title():
                 listing_data = load_listing_data(sku=sku)
                 if listing_data:
                     update_listing_title_description(sku, {
-                        "edited_title": trimmed,
+                        "edited_title": final_title,
                         "edited_description": listing_data.get("inventoryItem", {}).get("product", {}).get("description", "")
                     })
-                    print(f"[API] Updated listing {sku} with trimmed title")
+                    print(f"[API] Updated listing {sku} with nudged title")
             except Exception as e:
                 print(f"[API] Warning: Could not update listing file: {e}")
 
-        return jsonify({"trimmed_title": trimmed}), 200
+        return jsonify({
+            "trimmed_title": final_title,
+            "attempts": attempts_log,
+            "original_length": current_length,
+            "final_length": len(final_title),
+        }), 200
 
     except Exception as e:
         try:
