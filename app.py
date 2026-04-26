@@ -41,6 +41,10 @@ CORS(app, origins=["http://localhost:3000", "http://localhost:5173", "http://loc
 image_generation_tasks = {}
 image_generation_lock = threading.Lock()
 
+DEFAULT_TEXT_MODEL = "deepseek/deepseek-v4-flash"
+DEFAULT_IMAGE_MODEL = "sourceful/riverflow-v2-fast"
+DEFAULT_CLASSIFIER_MODEL = "bytedance-seed/seed-1.6-flash"
+
 # --- Streaming progress helpers (NDJSON) ---
 def progress_event(step, status):
     """Send a progress event as an NDJSON line."""
@@ -104,12 +108,14 @@ def get_listing_photos(listing_id):
             ]
             print(f"Found {len(old_photo_list)} photo(s): {old_photo_list}")
 
+            classifier_model = request.args.get("classifier_model") or DEFAULT_CLASSIFIER_MODEL
+
             # Step 3: Categorize images
             yield progress_event('Categorizing images', 'in_progress')
             categories = {}
             if old_photo_list:
                 print("Categorizing images...")
-                categories = categorize_images(old_photo_list)
+                categories = categorize_images(old_photo_list, model=classifier_model)
                 if categories is None:
                     categories = {}
             yield progress_event('Categorizing images', 'completed')
@@ -182,7 +188,15 @@ def get_generation_status(task_id):
             "status": None
         }), 500
 
-def generate_image_with_delay(photo_url, image_type, index, delay_ms=500, task_id=None, prompt_modifier=None):
+def generate_image_with_delay(
+    photo_url,
+    image_type,
+    index,
+    delay_ms=500,
+    task_id=None,
+    prompt_modifier=None,
+    image_model=None,
+):
     """
     Generate image with rate limiting delay. Used for parallel execution.
     
@@ -210,7 +224,12 @@ def generate_image_with_delay(photo_url, image_type, index, delay_ms=500, task_i
         print(f"[API] Starting generation for image {index + 1} (photo: {photo_url[:50]}...)")
         
         # Generate image
-        result = generate_image_from_urls([photo_url], image_type, prompt_modifier=prompt_modifier)
+        result = generate_image_from_urls(
+            [photo_url],
+            image_type,
+            prompt_modifier=prompt_modifier,
+            model=image_model or DEFAULT_IMAGE_MODEL,
+        )
         
         # Update progress: completed
         if task_id:
@@ -270,6 +289,7 @@ def generate_images():
         photos = data.get("photos", [])
         categories = data.get("categories", {})
         prompt_modifier = data.get("prompt_modifier", "")
+        image_model = data.get("image_model") or DEFAULT_IMAGE_MODEL
         
         print(f"[API] Processing {len(photos)} photos with {len(categories)} categories")
         if prompt_modifier:
@@ -348,7 +368,8 @@ def generate_images():
                         future = executor.submit(
                             generate_image_with_delay,
                             photo_url, image_type, idx, delay_ms=500, task_id=task_id,
-                            prompt_modifier=prompt_modifier if prompt_modifier else None
+                            prompt_modifier=prompt_modifier if prompt_modifier else None,
+                            image_model=image_model,
                         )
                         futures[future] = (idx, photo_url)
                     
@@ -428,6 +449,7 @@ def regenerate_images():
         
         image_urls = data.get("image_urls", [])
         prompt = data.get("prompt", "")
+        image_model = data.get("image_model") or DEFAULT_IMAGE_MODEL
         
         if not image_urls or not isinstance(image_urls, list):
             return jsonify({
@@ -451,7 +473,12 @@ def regenerate_images():
         for idx, image_url in enumerate(image_urls):
             try:
                 print(f"[API] Regenerating image {idx + 1}/{len(image_urls)}...")
-                result = generate_image_from_urls([image_url], ImageType.EXPERIMENTAL, custom_prompt=prompt.strip())
+                result = generate_image_from_urls(
+                    [image_url],
+                    ImageType.EXPERIMENTAL,
+                    custom_prompt=prompt.strip(),
+                    model=image_model,
+                )
                 
                 if result and isinstance(result, list):
                     generated_images.extend(result)
@@ -511,6 +538,7 @@ def create_listing():
             generated_images = data.get("generated_images", [])
             listing = data.get("listing", {})
             sku = data.get("sku")
+            text_model = data.get("text_model") or DEFAULT_TEXT_MODEL
 
             if not generated_images or not isinstance(generated_images, list):
                 yield error_event("generated_images must be a non-empty array")
@@ -548,7 +576,7 @@ def create_listing():
 
             if old_title and old_description:
                 print(f"[API] Generating optimized text...")
-                optimized_content = create_text(old_title, old_description)
+                optimized_content = create_text(old_title, old_description, model=text_model)
 
                 if optimized_content:
                     update_listing_title_description(sku, optimized_content)
@@ -717,7 +745,8 @@ def trim_title():
         )
 
         from backend.ebay_cli import call_openrouter_llm
-        trimmed = call_openrouter_llm(prompt)
+        text_model = data.get("text_model") or DEFAULT_TEXT_MODEL
+        trimmed = call_openrouter_llm(prompt, model=text_model)
 
         if not trimmed:
             return jsonify({"error": "Failed to get response from AI"}), 502

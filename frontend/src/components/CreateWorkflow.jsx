@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { motion } from "motion/react";
 import PhotoGallery from "./PhotoGallery";
 import MessageBarInput from "./MessageBarInput";
 import Lightbox from "./Lightbox";
@@ -11,6 +12,8 @@ import { btnPillLg, btnPillSm } from "../styles/buttonPill";
 function CreateWorkflow({
   listingId,
   listingLinkSubmitted = false,
+  shouldAutoHideMessageBar = false,
+  sidebarCollapsed = false,
   photos,
   categories,
   editableCategories,
@@ -75,15 +78,72 @@ function CreateWorkflow({
   lightboxIndex,
 }) {
   const [descriptionEditMode, setDescriptionEditMode] = useState(false);
+  const [isHoveringBarZone, setIsHoveringBarZone] = useState(false);
+
+  // Bar is revealed while loading (always visible) or while user is hovering the
+  // top reveal zone / the bar itself after auto-hide kicks in.
+  const isBarRevealed = !shouldAutoHideMessageBar || isHoveringBarZone;
+
+  // Reset hover state when leaving auto-hide mode so reveal logic doesn't get stuck.
+  useEffect(() => {
+    if (!shouldAutoHideMessageBar) {
+      setIsHoveringBarZone(false);
+    }
+  }, [shouldAutoHideMessageBar]);
+
+  useEffect(() => {
+    if (!isEditorOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape" && onEditorToggle) {
+        onEditorToggle();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isEditorOpen, onEditorToggle]);
+
+  const sidebarLeft = sidebarCollapsed ? "4.25rem" : "15rem";
+  const barWrapperClassName = listingLinkSubmitted
+    ? "fixed right-0 top-0 z-40 flex w-auto flex-col items-center justify-center min-h-0 bg-surface-app/90 px-6 py-3 shadow-sm backdrop-blur md:px-8 transition-[left,margin,padding,min-height,background-color,box-shadow,border-color,backdrop-filter] duration-500 ease-in-out"
+    : "flex w-full flex-col items-center mb-[15%] min-h-[min(42vh,320px)] max-w-4xl self-center justify-center border-b border-transparent bg-transparent shadow-none backdrop-blur-none transition-[margin,padding,min-height,background-color,box-shadow,border-color,backdrop-filter] duration-500 ease-in-out";
 
   return (
     <>
-      <div
-        className={`flex w-full flex-col items-center transition-[margin,padding,min-height,background-color,box-shadow,border-color,backdrop-filter] duration-500 ease-in-out ${
+      {listingLinkSubmitted && (
+        <div aria-hidden="true" className="h-[104px] w-full shrink-0" />
+      )}
+      {shouldAutoHideMessageBar && (
+        <motion.div
+          aria-hidden="true"
+          className="fixed right-0 top-0 z-30"
+          style={{ left: sidebarLeft, height: 96 }}
+          onHoverStart={() => setIsHoveringBarZone(true)}
+          onHoverEnd={() => setIsHoveringBarZone(false)}
+        />
+      )}
+      <motion.div
+        style={
           listingLinkSubmitted
-            ? "sticky top-4 z-30 mb-6 min-h-0 self-stretch justify-center bg-gray-50/90 px-6 py-3 md:px-8"
-            : "mb-[15%] min-h-[min(42vh,320px)] max-w-4xl self-center justify-center border-b border-transparent bg-transparent shadow-none backdrop-blur-none"
-        }`}
+            ? { left: sidebarLeft, right: 0 }
+            : undefined
+        }
+        animate={
+          listingLinkSubmitted
+            ? { y: isBarRevealed ? 0 : "-120%" }
+            : { y: 0 }
+        }
+        transition={{ type: "spring", stiffness: 260, damping: 30 }}
+        onHoverStart={
+          shouldAutoHideMessageBar
+            ? () => setIsHoveringBarZone(true)
+            : undefined
+        }
+        onHoverEnd={
+          shouldAutoHideMessageBar
+            ? () => setIsHoveringBarZone(false)
+            : undefined
+        }
+        className={barWrapperClassName}
       >
         <div
           className={`w-full overflow-hidden transition-[max-height,opacity,margin] duration-500 ease-in-out ${
@@ -93,7 +153,7 @@ function CreateWorkflow({
           }`}
           aria-hidden={listingLinkSubmitted}
         >
-          <h1 className="text-center text-6xl font-light leading-snug tracking-tight text-gray-900 md:text-6xl">
+          <h1 className="text-center text-6xl font-light leading-snug tracking-tight text-text-primary md:text-6xl">
             Reimagine Any Listing
           </h1>
         </div>
@@ -113,7 +173,7 @@ function CreateWorkflow({
             aria-label="eBay listing URL or ID"
           />
         </form>
-      </div>
+      </motion.div>
 
       {error && (
         <div className="mb-8 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
@@ -123,8 +183,8 @@ function CreateWorkflow({
 
       {loading && (
         <div className="flex flex-col items-center justify-center gap-4 py-12">
-          <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200 border-t-primary" />
-          <p className="text-gray-600">Fetching listing data...</p>
+          <div className="h-12 w-12 animate-spin rounded-full border-4 border-border-default border-t-primary" />
+          <p className="text-text-muted">Fetching listing data...</p>
           {fetchProgress?.isActive && fetchProgress?.totalSteps?.length > 0 && (
             <ProgressIndicator
               steps={fetchProgress.totalSteps}
@@ -136,7 +196,7 @@ function CreateWorkflow({
       )}
 
       {currentSku && (
-        <div className="my-5 rounded-md bg-gray-100 p-2.5">
+        <div className="my-5 rounded-md bg-surface-muted p-2.5 text-text-primary">
           <strong>Current SKU:</strong> {currentSku}
         </div>
       )}
@@ -157,19 +217,20 @@ function CreateWorkflow({
             promptModifier={promptModifier}
             onPromptModifierChange={onPromptModifierChange}
             onAddToOriginalPhotos={onAddToOriginalPhotos}
+            onOpenEditor={onEditorToggle}
           />
           {isConfirming && imageGenProgress?.isActive && (
-            <div className="my-5 rounded-lg border border-gray-200 bg-gray-50 p-4">
-              <h3 className="mb-2.5 text-lg text-gray-800">
+            <div className="my-5 rounded-lg border border-border-default bg-surface-muted p-4">
+              <h3 className="mb-2.5 text-lg text-text-primary">
                 Generating Images
               </h3>
               <div className="mt-2.5">
-                <p className="text-gray-600">
+                <p className="text-text-muted">
                   Progress: {imageGenProgress.completed} of{" "}
                   {imageGenProgress.total} images complete
                 </p>
                 {imageGenProgress.total > 0 && (
-                  <div className="relative mt-2.5 h-5 w-full overflow-hidden rounded bg-gray-200">
+                  <div className="relative mt-2.5 h-5 w-full overflow-hidden rounded bg-surface-hover">
                     <div
                       className="h-full rounded bg-green-500 transition-[width] duration-300"
                       style={{
@@ -182,54 +243,12 @@ function CreateWorkflow({
             </div>
           )}
 
-          <div className="mt-6 overflow-hidden rounded-xl border border-gray-200 bg-white">
-            <button
-              type="button"
-              className="flex w-full items-center gap-3 border-none bg-[#fafbfe] px-5 py-4 text-left text-lg font-semibold text-gray-800 transition-colors hover:bg-[#f0f2fa]"
-              onClick={onEditorToggle}
-            >
-              <span
-                className={`inline-block text-sm text-primary transition-transform ${isEditorOpen ? "rotate-90" : ""}`}
-              >
-                &#9654;
-              </span>
-              Image Editor
-            </button>
-            {isEditorOpen && (
-              <div className="border-t border-gray-200 p-4">
-                {onUseRealEbayUploadChange != null && (
-                  <label className="mb-3 flex cursor-pointer items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={useRealEbayUpload ?? false}
-                      onChange={(e) =>
-                        onUseRealEbayUploadChange(e.target.checked)
-                      }
-                      className="rounded"
-                    />
-                    <span>Upload to eBay when adding from canvas</span>
-                  </label>
-                )}
-                <ImageCanvas
-                  onAddToListing={onAddToListing}
-                  onAddToOriginalPhotos={onAddToOriginalPhotos}
-                  originalPhotos={photos}
-                  generatedImages={generatedImages}
-                  useRealUpload={
-                    onUseRealEbayUploadChange != null
-                      ? (useRealEbayUpload ?? false)
-                      : true
-                  }
-                />
-              </div>
-            )}
-          </div>
         </>
       )}
 
       {generatedImages?.length > 0 && (
-        <div className="mt-8 rounded-2xl border border-green-200 bg-green-50/50 p-6">
-          <h2 className="mb-5 text-xl font-semibold text-gray-800">
+        <div className="mt-8 rounded-2xl border border-border-default bg-surface-panel p-6">
+          <h2 className="mb-5 text-xl font-semibold text-text-primary">
             New Listing Photos
           </h2>
           <DragDropContext onDragEnd={onDragEnd}>
@@ -255,7 +274,7 @@ function CreateWorkflow({
                           }`}
                         >
                           <div
-                            className="absolute left-1.5 top-1.5 z-20 cursor-grab text-gray-600 hover:text-gray-800"
+                            className="absolute left-1.5 top-1.5 z-20 cursor-grab text-text-muted hover:text-text-primary"
                             {...provided.dragHandleProps}
                             title="Drag to reorder"
                           >
@@ -297,15 +316,15 @@ function CreateWorkflow({
             </Droppable>
           </DragDropContext>
 
-          <div className="mt-8 rounded-xl bg-white p-6 shadow-sm">
-            <h3 className="mb-2 text-xl text-gray-800">
+          <div className="mt-8 rounded-xl border border-border-default bg-surface-muted p-6 shadow-sm">
+            <h3 className="mb-2 text-xl text-text-primary">
               Optional: Edit Images Further
             </h3>
-            <p className="mb-4 text-gray-600">
+            <p className="mb-4 text-text-muted">
               Enter a custom prompt to regenerate selected images
             </p>
             <textarea
-              className="w-full resize-y rounded-lg border-2 border-gray-300 p-3 text-base transition-colors focus:border-primary focus:outline-none disabled:cursor-not-allowed disabled:bg-gray-100"
+              className="w-full resize-y rounded-lg border-2 border-border-default bg-surface-panel p-3 text-base text-text-primary transition-colors focus:border-primary focus:outline-none disabled:cursor-not-allowed disabled:bg-surface-hover"
               value={customPrompt}
               onChange={(e) => onCustomPromptChange(e.target.value)}
               placeholder="Enter your custom prompt for image editing..."
@@ -387,14 +406,14 @@ function CreateWorkflow({
 
       {listingData && (
         <div className="mt-8">
-          <h2 className="mb-4 text-xl font-semibold text-gray-800">
+          <h2 className="mb-4 text-xl font-semibold text-text-primary">
             Generated Listing
           </h2>
           <div className="space-y-4">
-            <div className="border-b border-gray-200 pb-4">
+            <div className="border-b border-border-default pb-4">
               <strong className="text-primary">SKU:</strong> {listingData.sku}
             </div>
-            <div className="flex flex-col gap-2 border-b border-gray-200 pb-4">
+            <div className="flex flex-col gap-2 border-b border-border-default pb-4">
               <div className="flex items-center justify-between">
                 <strong className="text-primary">Title:</strong>
                 <span
@@ -417,7 +436,7 @@ function CreateWorkflow({
                 className={`w-full rounded-lg border-2 px-3 py-2.5 transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20 ${
                   editableTitle?.length > 80
                     ? "border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500/20"
-                    : "border-gray-300 focus:border-primary"
+                    : "border-border-default bg-surface-panel text-text-primary focus:border-primary"
                 }`}
                 value={editableTitle}
                 onChange={(e) => onEditableTitleChange(e.target.value)}
@@ -453,12 +472,12 @@ function CreateWorkflow({
                 )}
               </div>
             </div>
-            <div className="border-b border-gray-200 pb-4">
+            <div className="border-b border-border-default pb-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <strong className="text-primary">Description:</strong>
                 <button
                   type="button"
-                  className="rounded-lg border-2 border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-700 transition-colors hover:border-primary hover:text-primary"
+                  className="rounded-lg border-2 border-border-default bg-surface-panel px-3 py-1.5 text-sm font-semibold text-text-primary transition-colors hover:border-primary hover:text-primary"
                   onClick={() => setDescriptionEditMode((v) => !v)}
                 >
                   {descriptionEditMode ? "Preview HTML" : "Edit HTML"}
@@ -466,7 +485,7 @@ function CreateWorkflow({
               </div>
               {descriptionEditMode ? (
                 <textarea
-                  className="mt-2 min-h-[200px] w-full resize-y rounded-lg border-2 border-gray-300 p-3 font-mono text-sm text-gray-800 transition-colors focus:border-primary focus:outline-none"
+                  className="mt-2 min-h-[200px] w-full resize-y rounded-lg border-2 border-border-default bg-surface-panel p-3 font-mono text-sm text-text-primary transition-colors focus:border-primary focus:outline-none"
                   value={editableDescription}
                   onChange={(e) => onEditableDescriptionChange(e.target.value)}
                   placeholder="HTML description..."
@@ -475,11 +494,11 @@ function CreateWorkflow({
                 />
               ) : (
                 <div
-                  className="listing-description-html mt-2 rounded-md bg-gray-50 p-3 text-gray-600 [&_a]:text-primary [&_a]:underline [&_li]:my-0.5 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-2 [&_p:first-child]:mt-0 [&_ul]:list-disc [&_ul]:pl-6"
+                  className="listing-description-html mt-2 rounded-md bg-surface-muted p-3 text-text-muted [&_a]:text-primary [&_a]:underline [&_li]:my-0.5 [&_ol]:list-decimal [&_ol]:pl-6 [&_p]:my-2 [&_p:first-child]:mt-0 [&_ul]:list-disc [&_ul]:pl-6"
                   dangerouslySetInnerHTML={{
                     __html:
                       (editableDescription && editableDescription.trim()) ||
-                      '<p class="text-gray-400 italic">N/A</p>',
+                      '<p class="text-text-muted italic">N/A</p>',
                   }}
                 />
               )}
@@ -497,15 +516,15 @@ function CreateWorkflow({
                 )}
               </div>
             </div>
-            <div className="border-b border-gray-200 pb-4">
+            <div className="border-b border-border-default pb-4">
               <strong className="text-primary">Price:</strong> $
               {listingData.offer?.pricingSummary?.price?.value || "N/A"}
             </div>
-            <div className="border-b border-gray-200 pb-4">
+            <div className="border-b border-border-default pb-4">
               <strong className="text-primary">Category ID:</strong>{" "}
               {listingData.offer?.categoryId || "N/A"}
             </div>
-            <div className="border-b border-gray-200 pb-4">
+            <div className="border-b border-border-default pb-4">
               <strong className="text-primary">
                 Images (
                 {listingData.inventoryItem?.product?.imageUrls?.length || 0}):
@@ -515,7 +534,7 @@ function CreateWorkflow({
                   (url, idx) => (
                     <div
                       key={idx}
-                      className="rounded-md bg-gray-50 p-2 text-sm text-gray-600 break-all"
+                      className="rounded-md bg-surface-muted p-2 text-sm text-text-muted break-all"
                     >
                       {idx + 1}. {url}
                     </div>
@@ -523,13 +542,13 @@ function CreateWorkflow({
                 ) || "No images"}
               </div>
             </div>
-            <div className="border-b border-gray-200 pb-4">
+            <div className="border-b border-border-default pb-4">
               <strong className="text-primary">Created:</strong>{" "}
               {listingData.createdDateTime || "N/A"}
             </div>
           </div>
 
-          <div className="mt-8 flex justify-center border-t-2 border-gray-200 pt-8">
+          <div className="mt-8 flex justify-center border-t-2 border-border-default pt-8">
             <button
               type="button"
               className={btnPillLg}
@@ -610,6 +629,59 @@ function CreateWorkflow({
           onClose={onCloseLightbox}
           onNavigate={onNavigateLightbox}
         />
+      )}
+
+      {isEditorOpen && photos?.length > 0 && (
+        <div
+          className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4"
+          onClick={onEditorToggle}
+        >
+          <div
+            className="flex max-h-[95vh] w-full max-w-[1400px] flex-col overflow-hidden rounded-xl bg-surface-panel shadow-2xl animate-slide-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-border-default p-4">
+              <h2 className="m-0 text-xl font-semibold text-text-primary">
+                Image Editor
+              </h2>
+              <button
+                type="button"
+                aria-label="Close image editor"
+                className="flex h-10 w-10 items-center justify-center rounded-full border-none bg-surface-muted text-2xl text-text-muted transition-all hover:rotate-90 hover:bg-surface-hover hover:text-text-primary"
+                onClick={onEditorToggle}
+              >
+                &times;
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-4 text-text-primary">
+              {onUseRealEbayUploadChange != null && (
+                <label className="mb-3 flex cursor-pointer items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={useRealEbayUpload ?? false}
+                    onChange={(e) =>
+                      onUseRealEbayUploadChange(e.target.checked)
+                    }
+                    className="rounded"
+                  />
+                  <span>Upload to eBay when adding from canvas</span>
+                </label>
+              )}
+              <ImageCanvas
+                onAddToListing={onAddToListing}
+                onAddToOriginalPhotos={onAddToOriginalPhotos}
+                originalPhotos={photos}
+                generatedImages={generatedImages}
+                useRealUpload={
+                  onUseRealEbayUploadChange != null
+                    ? (useRealEbayUpload ?? false)
+                    : true
+                }
+                onRequestClose={onEditorToggle}
+              />
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

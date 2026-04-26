@@ -18,6 +18,25 @@ import { trimTransparentPadding } from "./utils/trimImage";
 import { isIncomplete } from "./utils/listingStatus";
 import { btnPill, btnPillSm } from "./styles/buttonPill";
 
+const TEXT_MODEL_OPTIONS = [
+  { value: "deepseek/deepseek-v4-flash", label: "DeepSeek V4 Flash" },
+];
+
+const IMAGE_MODEL_OPTIONS = [
+  {
+    value: "sourceful/riverflow-v2-fast",
+    label: "Riverflow V2 Fast",
+  },
+  {
+    value: "google/gemini-2.5-flash-image",
+    label: "Gemini 2.5 Flash Image",
+  },
+];
+
+const CLASSIFIER_MODEL_OPTIONS = [
+  { value: "bytedance-seed/seed-1.6-flash", label: "ByteDance Seed 1.6 Flash" },
+];
+
 /**
  * Fetch with streaming progress support.
  * Reads NDJSON stream from the backend and calls onProgress for each progress event.
@@ -147,6 +166,42 @@ function App() {
       return false;
     }
   });
+  const [themeMode, setThemeMode] = useState(() => {
+    try {
+      return localStorage.getItem("axisThemeMode") === "dark" ? "dark" : "light";
+    } catch {
+      return "light";
+    }
+  });
+  const [textModel, setTextModel] = useState(() => {
+    try {
+      return (
+        localStorage.getItem("axisTextModel") || "deepseek/deepseek-v4-flash"
+      );
+    } catch {
+      return "deepseek/deepseek-v4-flash";
+    }
+  });
+  const [imageModel, setImageModel] = useState(() => {
+    try {
+      return (
+        localStorage.getItem("axisImageModel") ||
+        "sourceful/riverflow-v2-fast"
+      );
+    } catch {
+      return "sourceful/riverflow-v2-fast";
+    }
+  });
+  const [classifierModel, setClassifierModel] = useState(() => {
+    try {
+      return (
+        localStorage.getItem("axisClassifierModel") ||
+        "bytedance-seed/seed-1.6-flash"
+      );
+    } catch {
+      return "bytedance-seed/seed-1.6-flash";
+    }
+  });
   const [testingResult, setTestingResult] = useState(null);
   const [isTesting, setIsTesting] = useState(false);
   const [testingId, setTestingId] = useState("");
@@ -241,6 +296,40 @@ function App() {
       // ignore
     }
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    root.setAttribute("data-theme", themeMode);
+    try {
+      localStorage.setItem("axisThemeMode", themeMode);
+    } catch {
+      // ignore
+    }
+  }, [themeMode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("axisTextModel", textModel);
+    } catch {
+      // ignore
+    }
+  }, [textModel]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("axisImageModel", imageModel);
+    } catch {
+      // ignore
+    }
+  }, [imageModel]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("axisClassifierModel", classifierModel);
+    } catch {
+      // ignore
+    }
+  }, [classifierModel]);
 
   // Keep URLs aligned with tab state. Each tab has its own path.
   useEffect(() => {
@@ -547,7 +636,7 @@ function App() {
     try {
       // Stream progress from backend as each step actually completes
       const data = await fetchWithProgress(
-        `/api/photos/${encodeURIComponent(listingId.trim())}`,
+        `/api/photos/${encodeURIComponent(listingId.trim())}?classifier_model=${encodeURIComponent(classifierModel)}`,
         {},
         (event) => {
           setFetchProgress((prev) => {
@@ -722,6 +811,7 @@ function App() {
         photos: needsAIPhotos,
         categories: categoriesToProcess,
         prompt_modifier: promptModifier.trim() || undefined,
+        image_model: imageModel,
       };
       console.log("Sending request to /api/generate-images:", requestBody);
 
@@ -934,6 +1024,7 @@ function App() {
         body: JSON.stringify({
           image_urls: imagesToRegen,
           prompt: promptToUse,
+          image_model: imageModel,
         }),
       });
 
@@ -1045,6 +1136,7 @@ function App() {
         body: JSON.stringify({
           image_urls: imagesToRegen,
           prompt: customPrompt.trim(),
+          image_model: imageModel,
         }),
       });
 
@@ -1133,6 +1225,7 @@ function App() {
             sku: currentSku,
             generated_images: generatedImages,
             listing: listing,
+            text_model: textModel,
           }),
         },
         (event) => {
@@ -1197,7 +1290,11 @@ function App() {
       const response = await fetch("/api/trim-title", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: editableTitle, sku: currentSku }),
+        body: JSON.stringify({
+          title: editableTitle,
+          sku: currentSku,
+          text_model: textModel,
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to trim title");
@@ -1427,7 +1524,7 @@ function App() {
     } ${
       activeTab === tab
         ? "bg-primary/10 font-semibold text-primary"
-        : "font-medium text-gray-700 hover:bg-gray-100"
+        : "font-medium text-text-muted hover:bg-surface-hover hover:text-text-primary"
     }`;
 
   const handleTestAppToken = async () => {
@@ -1843,30 +1940,30 @@ function App() {
   };
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen bg-surface-app text-text-primary">
       <aside
-        className={`sticky top-0 flex h-screen shrink-0 flex-col rounded-tr-xl border-r border-gray-200 bg-white shadow-sm transition-[width] duration-200 ease-out ${
+        className={`sticky top-0 flex h-screen shrink-0 flex-col rounded-tr-xl border-r border-border-default bg-surface-panel shadow-sm transition-[width] duration-200 ease-out ${
           sidebarCollapsed ? "w-[4.25rem]" : "w-60"
         }`}
         aria-label="Main navigation"
         aria-expanded={!sidebarCollapsed}
       >
         <div
-          className={`flex shrink-0 items-center border-b border-gray-200 ${
+          className={`flex shrink-0 items-center border-b border-border-default ${
             sidebarCollapsed
               ? "justify-center px-2 py-3"
               : "justify-between gap-2 px-4 py-4"
           }`}
         >
           {!sidebarCollapsed && (
-            <span className="min-w-0 truncate text-base font-bold leading-tight tracking-tight text-gray-900">
+            <span className="min-w-0 truncate text-base font-bold leading-tight tracking-tight text-text-primary">
               Axis Researcher
             </span>
           )}
           <button
             type="button"
             onClick={() => setSidebarCollapsed((c) => !c)}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary"
             aria-label={
               sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
             }
@@ -1920,7 +2017,7 @@ function App() {
             </button>
           </div>
           <div
-            className={`mt-auto border-t border-gray-200 ${sidebarCollapsed ? "pt-2" : "pt-3"}`}
+            className={`mt-auto border-t border-border-default ${sidebarCollapsed ? "pt-2" : "pt-3"}`}
           >
             <button
               type="button"
@@ -1936,7 +2033,7 @@ function App() {
               {!sidebarCollapsed && <span>Settings</span>}
               {isTokenStale && (
                 <span
-                  className={`absolute h-2 w-2 animate-stale-pulse rounded-full bg-danger ring-2 ring-white ${
+                  className={`absolute h-2 w-2 animate-stale-pulse rounded-full bg-danger ring-2 ring-ring-contrast ${
                     sidebarCollapsed
                       ? "right-1 top-1"
                       : "right-2.5 top-1/2 -translate-y-1/2"
@@ -1949,16 +2046,23 @@ function App() {
         </nav>
       </aside>
 
-      <main className="min-h-screen flex-1 overflow-auto bg-gray-50">
+      <main className="min-h-screen flex-1 overflow-auto bg-surface-app">
         <div
-          className={`mx-auto flex w-full h-full flex-col justify-center px-6 md:px-8 ${
+          className={`mx-auto flex w-full h-full flex-col px-6 md:px-8 ${
             activeTab === "upload" ? "max-w-7xl" : "max-w-[1200px]"
+          } ${
+            (activeTab === "create" && listingLinkSubmitted) ||
+            (activeTab === "test-workflow" && testListingLinkSubmitted)
+              ? "justify-start"
+              : "justify-center"
           }`}
         >
           {activeTab === "test-workflow" && (
             <CreateWorkflow
               listingId={testListingId}
               listingLinkSubmitted={testListingLinkSubmitted}
+              shouldAutoHideMessageBar={testListingLinkSubmitted && !testLoading}
+              sidebarCollapsed={sidebarCollapsed}
               photos={testPhotos}
               categories={testCategories}
               editableCategories={testEditableCategories}
@@ -2128,18 +2232,18 @@ function App() {
 
               {loadingListings ? (
                 <div className="flex flex-col items-center justify-center gap-4 py-12">
-                  <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200 border-t-primary" />
-                  <p className="text-gray-600">Loading history...</p>
+                  <div className="h-12 w-12 animate-spin rounded-full border-4 border-border-default border-t-primary" />
+                  <p className="text-text-muted">Loading history...</p>
                 </div>
               ) : allListings.length === 0 ? (
-                <div className="rounded-xl border border-gray-200 bg-gray-50 p-8 text-center">
-                  <p className="text-gray-600">
+                <div className="rounded-xl border border-border-default bg-surface-muted p-8 text-center">
+                  <p className="text-text-muted">
                     No history items found. Create a listing first!
                   </p>
                 </div>
               ) : filteredUploadListings.length === 0 ? (
-                <div className="rounded-xl border border-gray-200 bg-gray-50 p-8 text-center">
-                  <p className="text-gray-600">
+                <div className="rounded-xl border border-border-default bg-surface-muted p-8 text-center">
+                  <p className="text-text-muted">
                     No history items match your search or filters.
                   </p>
                 </div>
@@ -2167,15 +2271,15 @@ function App() {
               onClick={closeListingDetail}
             >
               <div
-                className="flex max-h-[90vh] max-w-[90%] flex-col overflow-hidden rounded-xl bg-white shadow-2xl animate-slide-up md:max-w-[95%]"
+                className="flex max-h-[90vh] max-w-[90%] flex-col overflow-hidden rounded-xl bg-surface-panel shadow-2xl animate-slide-up md:max-w-[95%]"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="flex items-center justify-between border-b-2 border-gray-200 p-4">
-                  <h2 className="m-0 text-xl font-semibold text-gray-800 md:text-2xl">
+                <div className="flex items-center justify-between border-b-2 border-border-default p-4">
+                  <h2 className="m-0 text-xl font-semibold text-text-primary md:text-2xl">
                     Listing Details: {selectedListing.sku}
                   </h2>
                   <button
-                    className="flex h-10 w-10 items-center justify-center rounded-full border-none bg-gray-100 text-2xl text-gray-600 transition-all hover:rotate-90 hover:bg-gray-200 hover:text-gray-800"
+                    className="flex h-10 w-10 items-center justify-center rounded-full border-none bg-surface-muted text-2xl text-text-muted transition-all hover:rotate-90 hover:bg-surface-hover hover:text-text-primary"
                     onClick={closeListingDetail}
                   >
                     ×
@@ -2184,12 +2288,12 @@ function App() {
 
                 {loadingListingDetail ? (
                   <div className="flex flex-col items-center justify-center gap-4 py-12">
-                    <div className="h-12 w-12 animate-spin rounded-full border-4 border-gray-200 border-t-primary" />
-                    <p className="text-gray-600">Loading listing details...</p>
+                    <div className="h-12 w-12 animate-spin rounded-full border-4 border-border-default border-t-primary" />
+                    <p className="text-text-muted">Loading listing details...</p>
                   </div>
                 ) : listingDetailData ? (
                   <div className="flex-1 overflow-auto p-4">
-                    <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-gray-200 bg-gray-50 p-4 font-mono text-sm text-gray-800">
+                    <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-border-default bg-surface-muted p-4 font-mono text-sm text-text-primary">
                       {JSON.stringify(listingDetailData, null, 2)}
                     </pre>
                   </div>
@@ -2203,26 +2307,26 @@ function App() {
           )}
 
           {activeTab === "testing" && (
-            <div className="rounded-xl border border-gray-200 bg-white p-8 shadow-sm">
-              <h2 className="mb-5 text-xl font-semibold text-gray-800">
+            <div className="rounded-xl border border-border-default bg-surface-panel p-8 shadow-sm">
+              <h2 className="mb-5 text-xl font-semibold text-text-primary">
                 Testing
               </h2>
               <div className="flex flex-col gap-6">
-                <p className="text-gray-600">
+                <p className="text-text-muted">
                   Use this section to test functions and debug code.
                 </p>
 
                 <div className="flex flex-col gap-2">
                   <label
                     htmlFor="testing-id"
-                    className="text-sm font-semibold text-gray-700"
+                    className="text-sm font-semibold text-text-primary"
                   >
                     ID (optional):
                   </label>
                   <input
                     id="testing-id"
                     type="text"
-                    className="rounded-lg border-2 border-gray-300 px-4 py-2 transition-colors focus:border-primary focus:outline-none disabled:bg-gray-100"
+                    className="rounded-lg border-2 border-border-default bg-surface-panel px-4 py-2 text-text-primary transition-colors focus:border-primary focus:outline-none disabled:bg-surface-hover"
                     value={testingId}
                     onChange={(e) => setTestingId(e.target.value)}
                     placeholder="Enter ID parameter..."
@@ -2238,11 +2342,11 @@ function App() {
                   {isTesting ? "Running..." : "Run Testing Function"}
                 </button>
                 {testingResult && (
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                    <h3 className="mb-2 font-semibold text-gray-800">
+                  <div className="rounded-lg border border-border-default bg-surface-muted p-4">
+                    <h3 className="mb-2 font-semibold text-text-primary">
                       Result:
                     </h3>
-                    <pre className="overflow-x-auto whitespace-pre-wrap text-sm text-gray-700">
+                    <pre className="overflow-x-auto whitespace-pre-wrap text-sm text-text-muted">
                       {typeof testingResult === "string"
                         ? testingResult
                         : JSON.stringify(testingResult, null, 2)}
@@ -2254,20 +2358,98 @@ function App() {
           )}
 
           {activeTab === "settings" && (
-            <div className="animate-token-slide-down rounded-xl border border-gray-200 bg-white p-6 shadow-sm md:p-8">
+            <div className="animate-token-slide-down rounded-xl border border-border-default bg-surface-panel p-6 shadow-sm md:p-8">
               <div className="mb-6 flex flex-wrap items-center justify-between gap-2">
-                <h2 className="text-xl font-semibold text-gray-800">
+                <h2 className="text-xl font-semibold text-text-primary">
                   Settings
                 </h2>
               </div>
-              <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-5">
+              <div className="mb-5 rounded-xl border border-border-default bg-surface-muted p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="m-0 text-lg font-semibold text-text-primary">
+                      Appearance
+                    </h3>
+                    <p className="mt-1 text-sm text-text-muted">
+                      Choose your preferred theme for the app.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded-lg border border-border-default bg-surface-panel px-4 py-2 text-sm font-semibold text-text-primary shadow-sm transition-all hover:-translate-y-0.5 hover:bg-surface-hover hover:shadow-md"
+                    onClick={() =>
+                      setThemeMode((prev) => (prev === "dark" ? "light" : "dark"))
+                    }
+                    aria-label="Toggle dark mode"
+                    aria-pressed={themeMode === "dark"}
+                  >
+                    {themeMode === "dark" ? "Dark Mode: On" : "Dark Mode: Off"}
+                  </button>
+                </div>
+              </div>
+              <div className="mb-5 rounded-xl border border-border-default bg-surface-muted p-5">
+                <div className="mb-4">
+                  <h3 className="m-0 text-lg font-semibold text-text-primary">
+                    AI Model Selection
+                  </h3>
+                  <p className="mt-1 text-sm text-text-muted">
+                    Choose which models are used for text generation, image
+                    generation, and image classification.
+                  </p>
+                </div>
+                <div className="grid gap-4 md:grid-cols-3">
+                  <label className="flex flex-col gap-2 text-sm font-semibold text-text-primary">
+                    Text Generation Model
+                    <select
+                      className="rounded-lg border border-border-default bg-surface-panel px-3 py-2 text-sm font-medium text-text-primary focus:border-primary focus:outline-none"
+                      value={textModel}
+                      onChange={(e) => setTextModel(e.target.value)}
+                    >
+                      {TEXT_MODEL_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-2 text-sm font-semibold text-text-primary">
+                    Image Generation Model
+                    <select
+                      className="rounded-lg border border-border-default bg-surface-panel px-3 py-2 text-sm font-medium text-text-primary focus:border-primary focus:outline-none"
+                      value={imageModel}
+                      onChange={(e) => setImageModel(e.target.value)}
+                    >
+                      {IMAGE_MODEL_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-2 text-sm font-semibold text-text-primary">
+                    Image Classifier Model
+                    <select
+                      className="rounded-lg border border-border-default bg-surface-panel px-3 py-2 text-sm font-medium text-text-primary focus:border-primary focus:outline-none"
+                      value={classifierModel}
+                      onChange={(e) => setClassifierModel(e.target.value)}
+                    >
+                      {CLASSIFIER_MODEL_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </div>
+              <div className="rounded-xl border border-border-default bg-surface-muted p-5">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="m-0 text-lg font-semibold text-gray-800">
+                  <h3 className="m-0 text-lg font-semibold text-text-primary">
                     eBay Token Management
                   </h3>
                   <button
                     type="button"
-                    className="cursor-pointer rounded-md border border-gray-200 bg-white px-4 py-2 text-sm font-semibold text-primary shadow-sm transition-all hover:-translate-y-0.5 hover:bg-gray-50 hover:shadow-md"
+                    className="cursor-pointer rounded-md border border-border-default bg-surface-panel px-4 py-2 text-sm font-semibold text-primary shadow-sm transition-all hover:-translate-y-0.5 hover:bg-surface-hover hover:shadow-md"
                     onClick={handleOpenEbayAuth}
                   >
                     Open eBay Auth Page
@@ -2317,7 +2499,7 @@ function App() {
                 <div className="mt-3 flex flex-col gap-3">
                   <button
                     type="button"
-                    className="cursor-pointer rounded-lg border border-gray-200 bg-white px-6 py-2.5 text-sm font-semibold text-primary shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:transform-none"
+                    className="cursor-pointer rounded-lg border border-border-default bg-surface-panel px-6 py-2.5 text-sm font-semibold text-primary shadow-sm transition-all hover:-translate-y-0.5 hover:bg-surface-hover hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:transform-none"
                     onClick={handleRefreshTokens}
                     disabled={isRefreshing}
                   >
@@ -2381,6 +2563,9 @@ function App() {
           {activeTab === "create" && (
             <CreateWorkflow
               listingId={listingId}
+              listingLinkSubmitted={listingLinkSubmitted}
+              shouldAutoHideMessageBar={listingLinkSubmitted && !loading}
+              sidebarCollapsed={sidebarCollapsed}
               photos={photos}
               categories={categories}
               editableCategories={editableCategories}

@@ -30,7 +30,7 @@ function ProgressIndicator({ steps, currentStep, completedSteps = [], showProgre
         )
       default:
         return (
-          <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border-2 border-gray-300 bg-gray-200 text-sm font-bold text-gray-500">
+          <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border-2 border-border-default bg-surface-hover text-sm font-bold text-text-muted">
             ○
           </span>
         )
@@ -42,14 +42,14 @@ function ProgressIndicator({ steps, currentStep, completedSteps = [], showProgre
   const progressPercent = totalCount > 0 ? (completedCount / totalCount) * 100 : 0
 
   return (
-    <div className="my-5 rounded-lg border border-gray-200 bg-gray-50 p-4">
+    <div className="my-5 rounded-lg border border-border-default bg-surface-muted p-4">
       {showProgressBar && (
-        <div className="relative mb-4 h-6 w-full overflow-hidden rounded-xl bg-gray-200">
+        <div className="relative mb-4 h-6 w-full overflow-hidden rounded-xl bg-surface-hover">
           <div
             className="h-full min-w-[2%] rounded-xl bg-gradient-to-r from-green-500 to-green-600 transition-[width] duration-300"
             style={{ width: `${progressPercent}%` }}
           />
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-sm font-semibold text-gray-800">
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-sm font-semibold text-text-primary">
             {completedCount} of {totalCount} complete
           </div>
         </div>
@@ -60,7 +60,7 @@ function ProgressIndicator({ steps, currentStep, completedSteps = [], showProgre
           const statusColors = {
             completed: 'text-green-600',
             current: 'font-semibold text-primary',
-            pending: 'text-gray-500',
+            pending: 'text-text-muted',
           }
           return (
             <div

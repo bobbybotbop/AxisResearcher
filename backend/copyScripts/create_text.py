@@ -7,7 +7,7 @@ This module contains functions for creating optimized eBay listing text.
 import json
 
 
-def create_text(old_title, old_description):
+def create_text(old_title, old_description, model="deepseek/deepseek-v4-flash"):
     """
     Generate optimized listing content using LLM from original title and description.
     
@@ -40,7 +40,7 @@ def create_text(old_title, old_description):
     )
     
     # Call OpenRouter API to get optimized content
-    llm_response = call_openrouter_llm(prompt)
+    llm_response = call_openrouter_llm(prompt, model=model)
     
     if llm_response:
         try:

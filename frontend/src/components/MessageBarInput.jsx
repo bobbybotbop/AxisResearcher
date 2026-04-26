@@ -57,14 +57,14 @@ const StyledWrapper = styled.div`
     display: flex;
     align-items: center;
     justify-content: center;
-    background-color: #ffffff;
+    background-color: var(--surface-panel);
     padding: 0 18px 0 24px;
     border-radius: 9999px;
-    border: 1px solid #d1d5db;
+    border: 1px solid var(--border-default);
     transition: border-color 0.2s ease;
   }
   .messageBox:focus-within:not(:has(.messageInput:disabled)) {
-    border-color: #000000;
+    border-color: var(--text-primary);
   }
   .messageInput {
     width: 200px;
@@ -74,22 +74,22 @@ const StyledWrapper = styled.div`
     box-shadow: none;
     border: none;
     padding-left: 6px;
-    color: #111827;
+    color: var(--text-primary);
     font-size: 1.125rem;
     line-height: 1.4;
   }
   .messageInput::placeholder {
-    color: #9ca3af;
+    color: var(--text-muted);
   }
   .messageInput:disabled {
-    color: #6b7280;
+    color: var(--text-muted);
     cursor: not-allowed;
   }
 
   .sendButton {
     width: fit-content;
     height: 100%;
-    color: #6b7280;
+    color: var(--text-muted);
     background-color: transparent;
     outline: none;
     border: none;
@@ -101,7 +101,7 @@ const StyledWrapper = styled.div`
     transition: color 0.2s ease, opacity 0.2s ease;
   }
   .messageBox:focus-within:not(:has(.messageInput:disabled)) .sendButton {
-    color: #000000;
+    color: var(--text-primary);
   }
   .sendButton:disabled {
     cursor: not-allowed;

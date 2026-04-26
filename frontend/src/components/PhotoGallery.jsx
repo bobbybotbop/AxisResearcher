@@ -16,6 +16,7 @@ function PhotoGallery({
   promptModifier = "",
   onPromptModifierChange,
   onAddToOriginalPhotos,
+  onOpenEditor,
 }) {
   const [showUploadModal, setShowUploadModal] = useState(false);
 
@@ -82,18 +83,25 @@ function PhotoGallery({
   };
 
   return (
-    <div className="mt-8 rounded-2xl border border-gray-200 bg-gray-50 p-6">
+    <div className="mt-8 rounded-2xl border border-border-default bg-surface-panel p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-xl font-semibold text-gray-800">Original Photos</h2>
-        {onAddToOriginalPhotos && (
-          <button
-            type="button"
-            className={btnPill}
-            onClick={() => setShowUploadModal(true)}
-          >
-            Upload Images
-          </button>
-        )}
+        <h2 className="text-xl font-semibold text-text-primary">Original Photos</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          {onOpenEditor && (
+            <button type="button" className={btnPill} onClick={onOpenEditor}>
+              Image Editor
+            </button>
+          )}
+          {onAddToOriginalPhotos && (
+            <button
+              type="button"
+              className={btnPill}
+              onClick={() => setShowUploadModal(true)}
+            >
+              Upload Images
+            </button>
+          )}
+        </div>
       </div>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:gap-5">
         {photos.map((photoUrl, index) => {
@@ -165,9 +173,9 @@ function PhotoGallery({
                 )} p-2`}
               >
                 <select
-                  className="w-full cursor-pointer appearance-none rounded border border-white/30 bg-white/95 px-2 py-1 pr-8 text-xs font-semibold uppercase tracking-wide text-gray-800 accent-black focus:border-white/60 focus:outline-none focus:ring-2 focus:ring-white/30"
+                  className="w-full cursor-pointer appearance-none rounded border border-border-default bg-surface-panel/95 px-2 py-1 pr-8 text-xs font-semibold uppercase tracking-wide text-text-primary accent-text-primary focus:border-border-default focus:outline-none focus:ring-2 focus:ring-border-default/40"
                   style={{
-                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23000' d='M6 9L1 4h10z'/%3E%3C/svg%3E")`,
+                    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23c7c7c7' d='M6 9L1 4h10z'/%3E%3C/svg%3E")`,
                     backgroundRepeat: "no-repeat",
                     backgroundPosition: "right 0.5rem center",
                   }}
@@ -196,13 +204,13 @@ function PhotoGallery({
           >
             Prompt Modifier (optional)
           </label>
-          <p className="mb-2 text-[13px] text-gray-600">
+          <p className="mb-2 text-[13px] text-text-muted">
             Add instructions that apply to every generated image (e.g.,
             &quot;change the blue plastic to black&quot;)
           </p>
           <textarea
             id="prompt-modifier"
-            className="w-full resize-y rounded-md border border-gray-300 p-2.5 text-sm transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-gray-100"
+            className="w-full resize-y rounded-md border border-border-default bg-surface-muted p-2.5 text-sm text-text-primary transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-surface-hover"
             value={promptModifier}
             onChange={(e) => onPromptModifierChange(e.target.value)}
             placeholder="e.g., change the color of the blue plastic to black instead"

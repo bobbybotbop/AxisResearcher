@@ -534,7 +534,13 @@ def upload_image_bytes_to_ebay(image_bytes, mime_type, picture_name="Uploaded Im
         return None
 
 
-def generate_image_from_urls(image_urls, image_type, custom_prompt=None, prompt_modifier=None):
+def generate_image_from_urls(
+    image_urls,
+    image_type,
+    custom_prompt=None,
+    prompt_modifier=None,
+    model="sourceful/riverflow-v2-fast",
+):
     """
     Generate an image using OpenRouter's Gemini 2.5 Flash Image API from input image URLs.
     Extracts images from response, saves them to files, uploads to eBay, and returns eBay URLs.
@@ -625,7 +631,7 @@ def generate_image_from_urls(image_urls, image_type, custom_prompt=None, prompt_
     }
     
     data = {
-        "model": "google/gemini-2.5-flash-image",
+        "model": model,
         "messages": [
             {
                 "role": "user",
@@ -635,7 +641,7 @@ def generate_image_from_urls(image_urls, image_type, custom_prompt=None, prompt_
     }
     
     try:
-        print(f"🤖 Calling OpenRouter Gemini 2.5 Flash Image API ({image_type.value})...")
+        print(f"🤖 Calling OpenRouter image model {model} ({image_type.value})...")
         response = requests.post(url, headers=headers, data=json.dumps(data), timeout=60)
         
         response.raise_for_status()
@@ -1031,7 +1037,7 @@ def upload_image_to_ebay(picture_name="Uploaded Image"):
 
 
 
-def categorize_image(image_url):
+def categorize_image(image_url, model="bytedance-seed/seed-1.6-flash"):
     """
     Categorize a single image using OpenRouter's ByteDance Seed 1.6 Flash API.
     
@@ -1098,7 +1104,7 @@ def categorize_image(image_url):
     }
     
     data = {
-        "model": "bytedance-seed/seed-1.6-flash",
+        "model": model,
         "messages": [
             {
                 "role": "user",
@@ -1108,7 +1114,7 @@ def categorize_image(image_url):
     }
     
     try:
-        print(f"[DEBUG] Making API request to OpenRouter with model: bytedance-seed/seed-1.6-flash")
+        print(f"[DEBUG] Making API request to OpenRouter with model: {model}")
         print(f"[DEBUG] Request URL: {url}")
         print(f"[DEBUG] Image URL being sent: {image_url[:50]}...")
         
@@ -1178,7 +1184,7 @@ def categorize_image(image_url):
         return None
 
 
-def categorize_images(image_urls):
+def categorize_images(image_urls, model="bytedance-seed/seed-1.6-flash"):
     """
     Categorize multiple images using OpenRouter's ByteDance Seed 1.6 Flash API.
     
@@ -1207,7 +1213,7 @@ def categorize_images(image_urls):
             continue
         
         print(f"Categorizing image {idx + 1}/{len(image_urls)}: {image_url[:50]}...")
-        category = categorize_image(image_url)
+        category = categorize_image(image_url, model=model)
         
         if category:
             categories[image_url] = category

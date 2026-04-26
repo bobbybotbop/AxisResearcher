@@ -215,8 +215,8 @@ def single_search_by_seller(seller_username, query="", limit=50, offset=0):
         return None
 
 
-def call_openrouter_llm(prompt):
-    """Call OpenRouter DeepSeek R1 0528 API to generate optimized eBay listing content."""
+def call_openrouter_llm(prompt, model="deepseek/deepseek-v4-flash"):
+    """Call OpenRouter chat model to generate optimized eBay listing content."""
     if not OPENROUTER_API_KEY:
         print("❌ OpenRouter API key not found. Please set OPENROUTER_API_KEY in your .env file")
         return None
@@ -229,7 +229,7 @@ def call_openrouter_llm(prompt):
     }
     
     data = {
-        "model": "deepseek/deepseek-r1-0528",
+        "model": model,
         "messages": [
             {
                 "role": "user",
@@ -239,7 +239,7 @@ def call_openrouter_llm(prompt):
     }
     
     try:
-        print("🤖 Calling OpenRouter deepseek-r1-0528...")
+        print(f"🤖 Calling OpenRouter model: {model}...")
         response = requests.post(url, headers=headers, json=data, timeout=30)
         response.raise_for_status()
         

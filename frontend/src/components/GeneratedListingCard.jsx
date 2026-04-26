@@ -50,7 +50,7 @@ function RestGalleryStrip({ urls, heroIndex, onPickIndex }) {
           key={i}
           type="button"
           aria-label={`Show image ${i + 1} in main preview`}
-          className="h-20 w-20 shrink-0 overflow-hidden rounded-md border border-gray-200 bg-gray-100 ring-offset-2 transition-shadow hover:ring-2 hover:ring-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="h-20 w-20 shrink-0 overflow-hidden rounded-md border border-border-default bg-surface-muted ring-offset-2 transition-shadow hover:ring-2 hover:ring-primary/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           onClick={(e) => {
             e.stopPropagation();
             onPickIndex(i);
@@ -61,7 +61,7 @@ function RestGalleryStrip({ urls, heroIndex, onPickIndex }) {
       ))}
       {overflow && overflowPeek && (
         <div
-          className="relative h-20 w-20 shrink-0 overflow-hidden rounded-md border border-gray-200"
+          className="relative h-20 w-20 shrink-0 overflow-hidden rounded-md border border-border-default"
           title={`${moreCount} more image${moreCount === 1 ? "" : "s"} not shown`}
         >
           <img
@@ -151,12 +151,12 @@ export default function GeneratedListingCard({
           onCardClick?.(listing);
         }
       }}
-      className="flex w-full cursor-pointer flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md md:flex-row md:items-stretch"
+      className="flex w-full cursor-pointer flex-col overflow-hidden rounded-xl border border-border-default bg-surface-panel shadow-sm transition-shadow hover:shadow-md md:flex-row md:items-stretch"
     >
       {/* Image column — hero + dots + upload below image */}
-      <div className="flex w-full shrink-0 flex-col border-b border-gray-200 md:w-[30%] md:max-w-md md:border-b-0 md:border-r md:border-gray-200">
+      <div className="flex w-full shrink-0 flex-col border-b border-border-default md:w-[30%] md:max-w-md md:border-b-0 md:border-r md:border-border-default">
         <div className="relative w-full">
-          <div className="aspect-square w-full border-b border-gray-200 bg-gray-100 md:border-b-0">
+          <div className="aspect-square w-full border-b border-border-default bg-surface-muted md:border-b-0">
             {urls.length > 0 ? (
               <div className="flex h-full w-full items-center justify-center">
                 <img
@@ -166,7 +166,7 @@ export default function GeneratedListingCard({
                 />
               </div>
             ) : (
-              <div className="flex h-full items-center justify-center text-sm text-gray-400">
+              <div className="flex h-full items-center justify-center text-sm text-text-muted">
                 No image
               </div>
             )}
@@ -193,7 +193,7 @@ export default function GeneratedListingCard({
           )}
         </div>
         <div
-          className="border-t border-gray-200 bg-white p-3 sm:p-4"
+          className="border-t border-border-default bg-surface-panel p-3 sm:p-4"
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
@@ -223,7 +223,7 @@ export default function GeneratedListingCard({
                 <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-green-700 bg-white text-lg font-bold text-green-800">
                   ✓
                 </div>
-                <div className="min-w-0 flex-1 text-sm text-gray-800">
+                <div className="min-w-0 flex-1 text-sm text-text-primary">
                   {uploadResult.listingId && (
                     <div>
                       <strong>Listing ID:</strong>{" "}
@@ -262,28 +262,28 @@ export default function GeneratedListingCard({
         <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h3 className="line-clamp-2 text-lg font-bold leading-tight text-gray-900 sm:text-xl">
+              <h3 className="line-clamp-2 text-lg font-bold leading-tight text-text-primary sm:text-xl">
                 {title}
               </h3>
             </div>
-            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-500">
-              <span className="font-mono text-gray-600">{listing.sku}</span>
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-muted">
+              <span className="font-mono text-text-muted">{listing.sku}</span>
               {listing.createdDateTime && (
                 <>
-                  <span className="text-gray-300">·</span>
+                  <span className="text-text-muted">·</span>
                   <span>{formatListingDateTime(listing.createdDateTime)}</span>
                 </>
               )}
-              <span className="text-gray-300">·</span>
+              <span className="text-text-muted">·</span>
               <span
                 className="whitespace-nowrap"
                 title="Number of images on the listing"
               >
                 {imageCount} {imageCount === 1 ? "image" : "images"}
               </span>
-              <span className="text-gray-300">·</span>
+              <span className="text-text-muted">·</span>
               <span
-                className="whitespace-nowrap font-medium text-gray-600"
+                className="whitespace-nowrap font-medium text-text-muted"
                 title={
                   categoryId !== "—" ? `Category ID: ${categoryId}` : undefined
                 }
@@ -293,14 +293,14 @@ export default function GeneratedListingCard({
             </p>
           </div>
           <div className="shrink-0 text-left sm:text-right">
-            <div className="text-xl font-bold text-gray-900 sm:text-2xl">
+            <div className="text-xl font-bold text-text-primary sm:text-2xl">
               {formatPrice(listing.price, listing.currency)}
             </div>
           </div>
         </div>
 
         <div
-          className="flex min-h-0 flex-1 flex-col gap-3 border-t border-gray-100 pt-4"
+          className="flex min-h-0 flex-1 flex-col gap-3 border-t border-border-default pt-4"
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => e.stopPropagation()}
         >
@@ -311,9 +311,9 @@ export default function GeneratedListingCard({
           />
 
           {descriptionHtml ? (
-            <div className="rounded-lg border border-gray-100 bg-gray-50/90 p-3">
+            <div className="rounded-lg border border-border-default bg-surface-muted p-3">
               <div
-                className="max-h-[calc(1.625em*6)] min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain text-left text-sm leading-relaxed text-gray-800 [&_a]:text-primary [&_a]:underline [&_h1]:mb-2 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:text-sm [&_h2]:font-semibold [&_img]:h-auto [&_img]:max-w-full [&_li]:my-0.5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_p]:first:mt-0 [&_table]:my-2 [&_table]:max-w-full [&_td]:border [&_td]:border-gray-200 [&_td]:p-1.5 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
+                className="max-h-[calc(1.625em*6)] min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain text-left text-sm leading-relaxed text-text-primary [&_a]:text-primary [&_a]:underline [&_h1]:mb-2 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:text-sm [&_h2]:font-semibold [&_img]:h-auto [&_img]:max-w-full [&_li]:my-0.5 [&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-2 [&_p]:first:mt-0 [&_table]:my-2 [&_table]:max-w-full [&_td]:border [&_td]:border-border-default [&_td]:p-1.5 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5"
                 dangerouslySetInnerHTML={{ __html: descriptionHtml }}
               />
             </div>

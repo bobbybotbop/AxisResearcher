@@ -135,13 +135,13 @@ export default function ImageUploadModal({
       aria-labelledby="upload-modal-title"
     >
       <div
-        className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-xl border border-gray-200 bg-white shadow-xl"
+        className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-xl border border-border-default bg-surface-panel shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="border-b border-gray-200 p-4">
+        <div className="border-b border-border-default p-4">
           <h2
             id="upload-modal-title"
-            className="text-lg font-semibold text-gray-800"
+            className="text-lg font-semibold text-text-primary"
           >
             Add Images
           </h2>
@@ -152,19 +152,19 @@ export default function ImageUploadModal({
             className={`mb-4 rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
               isDragging
                 ? "border-primary bg-primary/5"
-                : "border-gray-300 bg-gray-50"
+                : "border-border-default bg-surface-muted"
             }`}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             tabIndex={0}
           >
-            <p className="mb-2 text-sm text-gray-600">
+            <p className="mb-2 text-sm text-text-muted">
               Paste an image (Ctrl+V) or drag and drop files here
             </p>
             <button
               type="button"
-              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+              className="rounded-lg border border-border-default bg-surface-panel px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-surface-hover"
               onClick={() => fileInputRef.current?.click()}
             >
               Choose files
@@ -181,7 +181,7 @@ export default function ImageUploadModal({
 
           {canAddToOriginal && mode !== "original" && (
             <div className="mb-4">
-              <label className="mb-2 block text-sm font-medium text-gray-700">
+              <label className="mb-2 block text-sm font-medium text-text-primary">
                 Add to
               </label>
               <div className="flex flex-col gap-2">
@@ -194,7 +194,7 @@ export default function ImageUploadModal({
                     onChange={() => setDestination("pool")}
                     className="rounded"
                   />
-                  <span className="text-sm">
+                  <span className="text-sm text-text-primary">
                     Image Pool (for canvas editing)
                   </span>
                 </label>
@@ -207,7 +207,7 @@ export default function ImageUploadModal({
                     onChange={() => setDestination("original")}
                     className="rounded"
                   />
-                  <span className="text-sm">
+                  <span className="text-sm text-text-primary">
                     Original Photos (for AI processing)
                   </span>
                 </label>
@@ -217,7 +217,7 @@ export default function ImageUploadModal({
 
           {pendingImages.length > 0 && (
             <div>
-              <p className="mb-2 text-sm font-medium text-gray-700">
+              <p className="mb-2 text-sm font-medium text-text-primary">
                 Preview ({pendingImages.length} image
                 {pendingImages.length !== 1 ? "s" : ""})
               </p>
@@ -225,7 +225,7 @@ export default function ImageUploadModal({
                 {pendingImages.map((img, i) => (
                   <div
                     key={i}
-                    className="group relative aspect-square w-20 overflow-hidden rounded-lg border border-gray-200"
+                    className="group relative aspect-square w-20 overflow-hidden rounded-lg border border-border-default"
                   >
                     <img
                       src={img.dataUrl}
@@ -250,10 +250,10 @@ export default function ImageUploadModal({
           )}
         </div>
 
-        <div className="flex justify-end gap-2 border-t border-gray-200 p-4">
+        <div className="flex justify-end gap-2 border-t border-border-default p-4">
           <button
             type="button"
-            className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+            className="rounded-lg border border-border-default bg-surface-panel px-4 py-2 text-sm font-medium text-text-primary transition-colors hover:bg-surface-hover"
             onClick={onClose}
           >
             Cancel

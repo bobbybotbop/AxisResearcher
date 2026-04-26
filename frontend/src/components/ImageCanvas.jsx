@@ -27,11 +27,12 @@ export default function ImageCanvas({
   originalPhotos = [],
   generatedImages = [],
   useRealUpload = true,
+  onRequestClose,
 }) {
   // Canvas settings
   const [canvasWidth, setCanvasWidth] = useState(1080);
   const [canvasHeight, setCanvasHeight] = useState(1080);
-  const [bgColor, setBgColor] = useState("#FFFFFF");
+  const [bgColor, setBgColor] = useState("#121212");
   const [showSettings, setShowSettings] = useState(false);
   const [showTextOptions, setShowTextOptions] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -39,7 +40,7 @@ export default function ImageCanvas({
   // Temp settings (only applied on confirm)
   const [tempWidth, setTempWidth] = useState(1080);
   const [tempHeight, setTempHeight] = useState(1080);
-  const [tempBgColor, setTempBgColor] = useState("#FFFFFF");
+  const [tempBgColor, setTempBgColor] = useState("#121212");
 
   // Uploaded image pool
   const [uploadedImages, setUploadedImages] = useState([]); // { id, dataUrl, name }
@@ -387,7 +388,9 @@ export default function ImageCanvas({
     link.href = dataUrl;
     link.download = "canvas-export.png";
     link.click();
-  }, []);
+
+    onRequestClose?.();
+  }, [onRequestClose]);
 
   // Add to New Listing: export canvas, optionally upload to eBay, add to listing
   const handleAddToListing = useCallback(async () => {
@@ -409,6 +412,7 @@ export default function ImageCanvas({
         // Mock mode: add data URL directly without uploading to eBay
         if (onAddToListing) onAddToListing(dataUrl);
         setIsCompiling(false);
+        onRequestClose?.();
         return;
       }
 
@@ -441,13 +445,14 @@ export default function ImageCanvas({
       if (onAddToListing) {
         onAddToListing(ebayUrl);
       }
+      onRequestClose?.();
     } catch (err) {
       console.error("Error adding to listing:", err);
       alert("Failed to add image to listing: " + err.message);
     } finally {
       setIsCompiling(false);
     }
-  }, [onAddToListing, useRealUpload]);
+  }, [onAddToListing, useRealUpload, onRequestClose]);
 
   // Add text to canvas
   const handleAddText = useCallback(() => {
@@ -472,7 +477,7 @@ export default function ImageCanvas({
       fontSize,
       fontWeight,
       fontFamily: "Arial",
-      fill: "#000000",
+      fill: "#f5f5f5",
       originX: "left",
       originY: "top",
     });
@@ -555,15 +560,15 @@ export default function ImageCanvas({
   const selectedCount = selectedIds.size;
 
   const iconBtn =
-    "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-gray-100 text-gray-700 transition-colors hover:bg-gray-200";
+    "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border-default bg-surface-muted text-text-primary transition-colors hover:bg-surface-hover";
   const iconBtnPool =
-    "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-300 bg-gray-100 text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-60";
+    "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border-default bg-surface-muted text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-60";
 
   return (
     <div>
       <div className="flex gap-4">
         {/* Vertical toolbar - left */}
-        <div className="flex flex-col gap-1 rounded-xl border border-gray-200 bg-white p-2">
+        <div className="flex flex-col gap-1 rounded-xl border border-border-default bg-surface-panel p-2">
           <div className="relative" ref={textOptionsRef}>
             <button
               type="button"
@@ -577,7 +582,7 @@ export default function ImageCanvas({
               <TypeText size={20} />
             </button>
             {showTextOptions && (
-              <div className="absolute left-full top-0 z-10 ml-2 flex w-40 flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
+              <div className="absolute left-full top-0 z-10 ml-2 flex w-40 flex-col gap-2 rounded-lg border border-border-default bg-surface-panel p-3 text-text-primary shadow-lg">
                 <div className="flex items-center justify-between gap-2">
                   <label className="text-sm">Size:</label>
                   <input
@@ -593,7 +598,7 @@ export default function ImageCanvas({
                         ),
                       )
                     }
-                    className="w-16 rounded border border-gray-300 px-2 py-1 text-sm"
+                    className="w-16 rounded border border-border-default bg-surface-muted px-2 py-1 text-sm text-text-primary"
                   />
                 </div>
                 <div className="flex items-center justify-between gap-2">
@@ -601,9 +606,9 @@ export default function ImageCanvas({
                   <select
                     value={textFontWeight}
                     onChange={(e) => setTextFontWeight(e.target.value)}
-                    className="appearance-none rounded border border-gray-300 bg-white px-2 py-1 pr-7 text-sm accent-black"
+                    className="appearance-none rounded border border-border-default bg-surface-muted px-2 py-1 pr-7 text-sm text-text-primary accent-text-primary"
                     style={{
-                      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23000' d='M6 9L1 4h10z'/%3E%3C/svg%3E")`,
+                      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23c7c7c7' d='M6 9L1 4h10z'/%3E%3C/svg%3E")`,
                       backgroundRepeat: "no-repeat",
                       backgroundPosition: "right 0.35rem center",
                     }}
@@ -637,7 +642,7 @@ export default function ImageCanvas({
             <Trash size={20} />
           </button>
 
-          <span className="my-1 h-px bg-gray-200" />
+          <span className="my-1 h-px bg-border-default" />
 
           <button
             type="button"
@@ -672,7 +677,7 @@ export default function ImageCanvas({
             <ArrowDownSquare size={20} />
           </button>
 
-          <span className="my-1 h-px bg-gray-200" />
+          <span className="my-1 h-px bg-border-default" />
 
           <div className="relative" ref={settingsRef}>
             <button
@@ -687,7 +692,7 @@ export default function ImageCanvas({
               <Cog size={20} />
             </button>
             {showSettings && (
-              <div className="absolute left-full top-0 z-10 ml-2 flex w-48 flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-lg">
+              <div className="absolute left-full top-0 z-10 ml-2 flex w-48 flex-col gap-2 rounded-lg border border-border-default bg-surface-panel p-3 text-text-primary shadow-lg">
                 <div className="flex items-center justify-between gap-2">
                   <label className="text-sm">Width:</label>
                   <input
@@ -695,7 +700,7 @@ export default function ImageCanvas({
                     min="1"
                     value={tempWidth}
                     onChange={(e) => setTempWidth(e.target.value)}
-                    className="w-20 rounded border border-gray-300 px-2 py-1 text-sm"
+                    className="w-20 rounded border border-border-default bg-surface-muted px-2 py-1 text-sm text-text-primary"
                   />
                 </div>
                 <div className="flex items-center justify-between gap-2">
@@ -705,7 +710,7 @@ export default function ImageCanvas({
                     min="1"
                     value={tempHeight}
                     onChange={(e) => setTempHeight(e.target.value)}
-                    className="w-20 rounded border border-gray-300 px-2 py-1 text-sm"
+                    className="w-20 rounded border border-border-default bg-surface-muted px-2 py-1 text-sm text-text-primary"
                   />
                 </div>
                 <div className="flex items-center justify-between gap-2">
@@ -714,7 +719,7 @@ export default function ImageCanvas({
                     type="color"
                     value={tempBgColor}
                     onChange={(e) => setTempBgColor(e.target.value)}
-                    className="h-8 w-14 cursor-pointer rounded border border-gray-300"
+                    className="h-8 w-14 cursor-pointer rounded border border-border-default bg-surface-muted"
                   />
                 </div>
                 <button
@@ -734,17 +739,11 @@ export default function ImageCanvas({
           <div className="flex shrink-0 w-fit flex-col">
             {/* Canvas area */}
             <div
-              className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm"
+              className="overflow-hidden rounded-lg border border-border-default bg-surface-panel shadow-sm"
               style={{ width: displayWidth, height: displayHeight }}
             >
               <canvas ref={canvasRef} />
             </div>
-
-            <p className="mt-2 text-sm text-gray-600">
-              {canvasWidth} &times; {canvasHeight}px
-              {displayScale < 1 &&
-                ` (displayed at ${Math.round(displayScale * 100)}%)`}
-            </p>
 
             <div className="mt-4 flex flex-wrap gap-3">
               <button
@@ -766,10 +765,10 @@ export default function ImageCanvas({
           </div>
 
           {/* Image pool */}
-          <div className="flex flex-1 min-w-0 flex-col rounded-xl border border-gray-200 bg-white">
+          <div className="flex flex-1 min-w-0 flex-col rounded-xl border border-border-default bg-surface-panel">
             <div className="flex flex-1 min-h-0">
               {/* Vertical toolbar - left */}
-              <div className="flex shrink-0 flex-col gap-1 rounded-l-xl border-r border-gray-200 bg-white p-2">
+              <div className="flex shrink-0 flex-col gap-1 rounded-l-xl border-r border-border-default bg-surface-panel p-2">
                 <button
                   type="button"
                   className={iconBtnPool}
@@ -880,7 +879,7 @@ export default function ImageCanvas({
                             </div>
                             {isImgProcessing && (
                               <div className="absolute inset-0 flex items-center justify-center bg-black/40">
-                                <div className="h-1 w-3/4 overflow-hidden rounded-full bg-gray-700">
+                                <div className="h-1 w-3/4 overflow-hidden rounded-full bg-surface-hover">
                                   <div className="h-full w-2/5 animate-pool-loading rounded-full bg-violet-500" />
                                 </div>
                               </div>
@@ -890,7 +889,7 @@ export default function ImageCanvas({
                       })}
                     </div>
                   ) : (
-                    <div className="py-8 text-center text-sm text-gray-500">
+                    <div className="py-8 text-center text-sm text-text-muted">
                       No images uploaded yet. Use the upload icon to add some.
                     </div>
                   )}

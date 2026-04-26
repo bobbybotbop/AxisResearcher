@@ -32,44 +32,44 @@ function ListingDetails({ listing }) {
   }
 
   return (
-    <div className="mb-8 rounded-xl bg-white p-6 shadow-sm sm:p-8">
-      <h2 className="mb-6 text-2xl font-semibold leading-snug text-gray-800 sm:text-[1.8rem]">
+    <div className="mb-8 rounded-xl border border-border-default bg-surface-panel p-6 shadow-sm sm:p-8">
+      <h2 className="mb-6 text-2xl font-semibold leading-snug text-text-primary sm:text-[1.8rem]">
         {listing.title || 'N/A'}
       </h2>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
         <div className="flex flex-col gap-1">
-          <span className="text-sm font-semibold text-gray-600">Item ID:</span>
-          <span className="text-base text-gray-800">{listing.itemId || 'N/A'}</span>
+          <span className="text-sm font-semibold text-text-muted">Item ID:</span>
+          <span className="text-base text-text-primary">{listing.itemId || 'N/A'}</span>
         </div>
 
         <div className="flex flex-col gap-1">
-          <span className="text-sm font-semibold text-gray-600">Price:</span>
+          <span className="text-sm font-semibold text-text-muted">Price:</span>
           <span className="text-base font-bold text-success">{formatPrice()}</span>
         </div>
 
         <div className="flex flex-col gap-1">
-          <span className="text-sm font-semibold text-gray-600">Category ID:</span>
-          <span className="text-base text-gray-800">{listing.categoryId || 'N/A'}</span>
+          <span className="text-sm font-semibold text-text-muted">Category ID:</span>
+          <span className="text-base text-text-primary">{listing.categoryId || 'N/A'}</span>
         </div>
 
         <div className="flex flex-col gap-1">
-          <span className="text-sm font-semibold text-gray-600">Created:</span>
-          <span className="text-base text-gray-800">{formatDate(listing.itemCreationDate)}</span>
+          <span className="text-sm font-semibold text-text-muted">Created:</span>
+          <span className="text-base text-text-primary">{formatDate(listing.itemCreationDate)}</span>
         </div>
 
         {listing.estimatedSoldQuantity !== null && listing.estimatedSoldQuantity !== undefined && (
           <div className="flex flex-col gap-1">
-            <span className="text-sm font-semibold text-gray-600">Estimated Sold:</span>
-            <span className="text-base text-gray-800">{listing.estimatedSoldQuantity}</span>
+            <span className="text-sm font-semibold text-text-muted">Estimated Sold:</span>
+            <span className="text-base text-text-primary">{listing.estimatedSoldQuantity}</span>
           </div>
         )}
       </div>
 
       {listing.description && listing.description !== 'No description available' && (
-        <div className="mt-6 border-t border-gray-200 pt-6">
-          <h3 className="mb-2 text-lg text-gray-800">Description</h3>
-          <p className="leading-relaxed text-gray-600">{listing.description}</p>
+        <div className="mt-6 border-t border-border-default pt-6">
+          <h3 className="mb-2 text-lg text-text-primary">Description</h3>
+          <p className="leading-relaxed text-text-muted">{listing.description}</p>
         </div>
       )}
     </div>
