@@ -264,72 +264,178 @@ def call_openrouter_llm(prompt, model="deepseek/deepseek-v4-flash"):
         return None
 
 
+def _extract_listing_id(item_id):
+    """Return the bare numeric listing ID from either a raw ID or a v1|...|... string."""
+    if not item_id:
+        return item_id
+    if item_id.startswith('v1|'):
+        parts = item_id.split('|')
+        if len(parts) >= 2 and parts[1]:
+            return parts[1]
+    return item_id
+
+
+def find_variation_id(listing_id):
+    """
+    Look up the first available variation ID for a multi-variation eBay listing.
+
+    Calls the Browse API getItemsByItemGroup endpoint with the legacy listing ID
+    (which doubles as item_group_id for variation listings) and parses the
+    variation ID out of the first child item's RESTful itemId
+    (format: "v1|<listingId>|<variationId>").
+
+    Args:
+        listing_id (str): The numeric eBay listing ID. If a full
+            "v1|<listing>|<variation>" string is passed, only the listing
+            portion is used.
+
+    Returns:
+        str | None: The first variation ID if found, otherwise None.
+    """
+    listing_id = _extract_listing_id(listing_id)
+
+    valid_token = helper_get_valid_token()
+    if not valid_token:
+        print("❌ Error: Could not get valid access token (find_variation_id)")
+        return None
+
+    url = "https://api.ebay.com/buy/browse/v1/item/get_items_by_item_group"
+    params = {'item_group_id': listing_id}
+
+    def _do_request(token):
+        return requests.get(
+            url,
+            headers=browse_api_headers(token),
+            params=params,
+            timeout=30,
+        )
+
+    try:
+        print(f"🔍 Looking up variations for item group: {listing_id}")
+        response = _do_request(valid_token)
+
+        if response.status_code == 401:
+            print("🔄 Token expired, refreshing...")
+            new_token = _refresh_application_token_and_retry()
+            if not new_token:
+                print("❌ Could not refresh token (find_variation_id)")
+                return None
+            response = _do_request(new_token)
+
+        if response.status_code != 200:
+            handle_http_error(response, "find_variation_id")
+            return None
+
+        data = response.json()
+        items = data.get('items', []) or []
+        if not items:
+            print("⚠️  No variation items returned for item group")
+            return None
+
+        first_item_id = items[0].get('itemId', '')
+        parts = first_item_id.split('|')
+        if len(parts) < 3 or not parts[2] or parts[2] == '0':
+            print(f"⚠️  First item in group has no variation ID: {first_item_id}")
+            return None
+
+        variation_id = parts[2]
+        print(f"✅ Found variation ID: {variation_id} (of {len(items)} variation(s))")
+        return variation_id
+
+    except Exception as e:
+        print(f"❌ Error finding variation ID: {e}")
+        return None
+
+
 def single_get_detailed_item_data(item_id, verbose=True):
     """
-    Get complete detailed data for a specific item from eBay API
-    
+    Get complete detailed data for a specific item from eBay API.
+
+    For non-variation listings, the request uses the standard
+    "v1|<listingId>|0" form. If that call fails (variation listings cannot be
+    retrieved with a "|0" suffix), this function falls back to
+    find_variation_id() to look up the first available variation ID and
+    retries with "v1|<listingId>|<variationId>".
+
     Args:
-        item_id (str): The eBay item ID (e.g., "v1|123456789|0")
+        item_id (str): The eBay item ID (e.g., "123456789" or
+            "v1|123456789|0").
         verbose (bool): If True, prints detailed information. Default: True
-    
+
     Returns:
-        dict: Complete item data from eBay API
+        dict: Complete item data from eBay API, or None on failure.
     """
 
-    if item_id[0] != 'v':
-        item_id = "v1|" + item_id + "|0"
- 
-    # Get a valid token
+    listing_id = _extract_listing_id(item_id)
+    rest_item_id = f"v1|{listing_id}|0"
+
     valid_token = helper_get_valid_token()
     if not valid_token:
         print("❌ Error: Could not get valid access token")
         return None
-    
-    url = f"https://api.ebay.com/buy/browse/v1/item/{item_id}"
-    
+
     headers = {
         'X-EBAY-C-ENDUSERCTX': f'contextualLocation=country=US,zip={ZIP_CODE}',
         'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
         'Authorization': f'Bearer {valid_token}',
         'Content-Type': 'application/json'
     }
-    
-    try:
+
+    def _print_item_summary(item):
+        print(f"✅ Complete Item Data Retrieved:")
+        print(f"   Title: {item.get('title', 'N/A')}")
+        print(f"   Price: ${item.get('price', {}).get('value', 'N/A')} {item.get('price', {}).get('currency', '')}")
+        print(f"   Seller: {item.get('seller', {}).get('username', 'N/A')}")
+
+        estimated_availabilities = item.get('estimatedAvailabilities', [])
+        if estimated_availabilities:
+            print(f"\n📊 Sales Data:")
+            for availability in estimated_availabilities:
+                estimated_sold = availability.get('estimatedSoldQuantity')
+                estimated_available = availability.get('estimatedAvailableQuantity')
+
+                if estimated_sold is not None:
+                    print(f"    Estimated Sold: {estimated_sold} units")
+                else:
+                    print(f"    Estimated Sold: Not available")
+
+                if estimated_available is not None:
+                    print(f"    Estimated Available: {estimated_available} units")
+
+    def _attempt_get_item(rid):
+        url = f"https://api.ebay.com/buy/browse/v1/item/{rid}"
         if verbose:
-            print(f"🔍 Fetching complete item data for: {item_id}")
-        response = requests.get(url, headers=headers)
-        
+            print(f"🔍 Fetching complete item data for: {rid}")
+        return requests.get(url, headers=headers)
+
+    try:
+        response = _attempt_get_item(rest_item_id)
+
         if response.status_code == 200:
             item = response.json()
-            
             if verbose:
-                print(f"✅ Complete Item Data Retrieved:")
-                print(f"   Title: {item.get('title', 'N/A')}")
-                print(f"   Price: ${item.get('price', {}).get('value', 'N/A')} {item.get('price', {}).get('currency', '')}")
-                print(f"   Seller: {item.get('seller', {}).get('username', 'N/A')}")
-                
-                # Show estimated sales data if available
-                estimated_availabilities = item.get('estimatedAvailabilities', [])
-                if estimated_availabilities:
-                    print(f"\n📊 Sales Data:")
-                    for i, availability in enumerate(estimated_availabilities):
-                        estimated_sold = availability.get('estimatedSoldQuantity')
-                        estimated_available = availability.get('estimatedAvailableQuantity')
-                        
-                        if estimated_sold is not None:
-                            print(f"    Estimated Sold: {estimated_sold} units")
-                        else:
-                            print(f"    Estimated Sold: Not available")
-                        
-                        if estimated_available is not None:
-                            print(f"    Estimated Available: {estimated_available} units")
-            
-            # Return the complete item object
+                _print_item_summary(item)
             return item
-            
-        else:
+
+        # Initial call failed: fall back to variation lookup for multi-SKU listings.
+        print("ℹ️  Initial item fetch failed; attempting variation lookup...")
+        variation_id = find_variation_id(listing_id)
+        if not variation_id:
             handle_http_error(response, "single_get_detailed_item_data")
             return None
+
+        rest_item_id = f"v1|{listing_id}|{variation_id}"
+        retry_response = _attempt_get_item(rest_item_id)
+
+        if retry_response.status_code == 200:
+            item = retry_response.json()
+            if verbose:
+                _print_item_summary(item)
+            return item
+
+        handle_http_error(retry_response, "single_get_detailed_item_data (variation retry)")
+        return None
+
     except Exception as e:
         print(f"❌ Error fetching item data: {e}")
         return None
