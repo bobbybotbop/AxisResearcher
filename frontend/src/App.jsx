@@ -12,15 +12,29 @@ import { useLocation, useNavigate } from "react-router-dom";
 import CreateWorkflow from "./components/CreateWorkflow";
 import GeneratedListingCard from "./components/GeneratedListingCard";
 import UploadListingsToolbar from "./components/UploadListingsToolbar";
+import ApiKeyManagementSection from "./components/ApiKeyManagementSection";
+import TestAiModelSection from "./components/TestAiModelSection";
 import { MOCK_DATA } from "./mockData";
 import { createTestWorkflowState } from "./testWorkflowState";
 import { trimTransparentPadding } from "./utils/trimImage";
 import { isIncomplete } from "./utils/listingStatus";
 import { btnPill, btnPillSm } from "./styles/buttonPill";
 
-const TEXT_MODEL_OPTIONS = [
-  { value: "deepseek/deepseek-v4-flash", label: "DeepSeek V4 Flash" },
+// Default text model options shown before /api/text-models responds. The
+// server is the source of truth and may add Bedrock models when the
+// bedrock_api_key is set.
+const DEFAULT_TEXT_MODEL_OPTIONS = [
+  {
+    value: "deepseek/deepseek-v4-flash",
+    label: "DeepSeek V4 Flash",
+    provider: "openrouter",
+  },
 ];
+
+const PROVIDER_LABELS = {
+  openrouter: "OpenRouter",
+  bedrock: "Bedrock",
+};
 
 const IMAGE_MODEL_OPTIONS = [
   {
@@ -94,23 +108,17 @@ async function fetchWithProgress(url, options, onProgress) {
   return result;
 }
 
-/** Merge AI-generated URLs with originals: originals keep their URL; others consume aiGeneratedList in order. */
-function mergeGeneratedWithOriginals(
+/** Map AI-generated URLs back onto photosToProcess order. */
+function mergeGeneratedImages(
   photosToProcess,
   aiGeneratedList,
-  useOriginalPhotos,
   { allowPartial } = {},
 ) {
   const merged = [];
   let aiIndex = 0;
-  for (const photoUrl of photosToProcess) {
-    if (useOriginalPhotos.has(photoUrl)) {
-      merged.push(photoUrl);
-    } else if (allowPartial && aiIndex < aiGeneratedList.length) {
-      merged.push(aiGeneratedList[aiIndex++]);
-    } else if (!allowPartial) {
-      merged.push(aiGeneratedList[aiIndex++]);
-    }
+  for (const _photoUrl of photosToProcess) {
+    if (allowPartial && aiIndex >= aiGeneratedList.length) continue;
+    merged.push(aiGeneratedList[aiIndex++]);
   }
   return merged;
 }
@@ -124,11 +132,7 @@ function App() {
   const [isConfirming, setIsConfirming] = useState(false);
   const [error, setError] = useState(null);
   const [generatedImages, setGeneratedImages] = useState([]);
-  const [customPrompt, setCustomPrompt] = useState("");
-  const [selectedImagesForRegen, setSelectedImagesForRegen] = useState([]);
-  const [isTrimming, setIsTrimming] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
-  const [isAddingNewVersions, setIsAddingNewVersions] = useState(false);
   const [isCreatingListing, setIsCreatingListing] = useState(false);
   const [listingData, setListingData] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -184,6 +188,9 @@ function App() {
       return "deepseek/deepseek-v4-flash";
     }
   });
+  const [textModelOptions, setTextModelOptions] = useState(
+    DEFAULT_TEXT_MODEL_OPTIONS,
+  );
   const [imageModel, setImageModel] = useState(() => {
     try {
       return (
@@ -237,8 +244,6 @@ function App() {
     useState(false);
   const [currentSku, setCurrentSku] = useState(null);
   const [skippedPhotos, setSkippedPhotos] = useState(new Set());
-  const [useOriginalPhotos, setUseOriginalPhotos] = useState(new Set());
-  const [promptModifier, setPromptModifier] = useState("");
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editableTitle, setEditableTitle] = useState("");
   const [isTrimmingTitle, setIsTrimmingTitle] = useState(false);
@@ -505,7 +510,6 @@ function App() {
   const setTestUploadResult = setTestKey("uploadResult");
   const setTestCurrentSku = setTestKey("currentSku");
   const setTestSkippedPhotos = setTestKey("skippedPhotos");
-  const setTestUseOriginalPhotos = setTestKey("useOriginalPhotos");
   const setTestPromptModifier = setTestKey("promptModifier");
   const setTestIsEditorOpen = setTestKey("isEditorOpen");
   const setTestEditableTitle = setTestKey("editableTitle");
@@ -542,7 +546,6 @@ function App() {
     uploadResult: testUploadResult,
     currentSku: testCurrentSku,
     skippedPhotos: testSkippedPhotos,
-    useOriginalPhotos: testUseOriginalPhotos,
     promptModifier: testPromptModifier,
     isEditorOpen: testIsEditorOpen,
     editableTitle: testEditableTitle,
@@ -608,18 +611,6 @@ function App() {
     }
   }, [activeTab, listingLinkSubmitted, testListingLinkSubmitted]);
 
-  useEffect(() => {
-    if (!listingId.trim()) {
-      setListingLinkSubmitted(false);
-    }
-  }, [listingId]);
-
-  useEffect(() => {
-    if (!testListingId.trim()) {
-      setTestListingLinkSubmitted(false);
-    }
-  }, [testListingId]);
-
   const fetchListingPhotos = async () => {
     if (!listingId.trim()) {
       setError("Please enter an eBay listing ID or URL");
@@ -634,7 +625,6 @@ function App() {
     setListing(null);
     setCurrentSku(null);
     setSkippedPhotos(new Set());
-    setUseOriginalPhotos(new Set());
 
     // Initialize progress tracking
     const steps = classifyImagesEnabled
@@ -718,7 +708,6 @@ function App() {
       setListing(null);
       setCurrentSku(null);
       setSkippedPhotos(new Set());
-      setUseOriginalPhotos(new Set());
       setGeneratedImages([]);
       setFetchProgress({
         isActive: false,
@@ -784,62 +773,34 @@ function App() {
     });
   };
 
-  const handleUseOriginalPhoto = (photoUrl) => {
-    setUseOriginalPhotos((prev) => {
-      const newSet = new Set(prev);
-      if (newSet.has(photoUrl)) {
-        newSet.delete(photoUrl);
-      } else {
-        newSet.add(photoUrl);
-      }
-      return newSet;
-    });
-  };
-
   const handleConfirmCategories = async () => {
     console.log("Confirm categories button clicked");
     console.log("Photos:", photos);
     console.log("Editable categories:", editableCategories);
     console.log("Skipped photos:", skippedPhotos);
-    console.log("Use original photos:", useOriginalPhotos);
 
     setIsConfirming(true);
     setError(null);
 
     try {
-      // Filter out skipped photos
       const photosToProcess = photos.filter(
         (photoUrl) => !skippedPhotos.has(photoUrl),
-      );
-      const needsAIPhotos = photosToProcess.filter(
-        (photoUrl) => !useOriginalPhotos.has(photoUrl),
       );
 
       if (photosToProcess.length === 0) {
         throw new Error("All photos are skipped. Include at least one photo.");
       }
 
-      // All use original: no API call, use original URLs directly
-      if (needsAIPhotos.length === 0) {
-        setGeneratedImages(photosToProcess);
-        setCategories(editableCategories);
-        setSelectedImagesForRegen([]);
-        setCustomPrompt("");
-        setIsConfirming(false);
-        return;
-      }
-
       const categoriesToProcess = {};
-      needsAIPhotos.forEach((photoUrl) => {
+      photosToProcess.forEach((photoUrl) => {
         if (editableCategories[photoUrl]) {
           categoriesToProcess[photoUrl] = editableCategories[photoUrl];
         }
       });
 
       const requestBody = {
-        photos: needsAIPhotos,
+        photos: photosToProcess,
         categories: categoriesToProcess,
-        prompt_modifier: promptModifier.trim() || undefined,
         image_model: imageModel,
       };
       console.log("Sending request to /api/generate-images:", requestBody);
@@ -903,12 +864,9 @@ function App() {
               );
 
               setGeneratedImages(
-                mergeGeneratedWithOriginals(
-                  photosToProcess,
-                  aiGeneratedList,
-                  useOriginalPhotos,
-                  { allowPartial: false },
-                ),
+                mergeGeneratedImages(photosToProcess, aiGeneratedList, {
+                  allowPartial: false,
+                }),
               );
               setCategories(editableCategories);
               setSelectedImagesForRegen([]);
@@ -925,12 +883,9 @@ function App() {
               // Failed - show errors but return partial results if any
               const aiGeneratedList = statusData.generated_images || [];
               setGeneratedImages(
-                mergeGeneratedWithOriginals(
-                  photosToProcess,
-                  aiGeneratedList,
-                  useOriginalPhotos,
-                  { allowPartial: true },
-                ),
+                mergeGeneratedImages(photosToProcess, aiGeneratedList, {
+                  allowPartial: true,
+                }),
               );
 
               const errorMsg =
@@ -1547,6 +1502,34 @@ function App() {
     }
   }, [activeTab]);
 
+  const fetchTextModels = useCallback(async () => {
+    try {
+      const res = await fetch("/api/text-models");
+      const data = await res.json();
+      if (Array.isArray(data?.models) && data.models.length > 0) {
+        setTextModelOptions(data.models);
+      }
+    } catch {
+      // Keep defaults on failure; user can still pick the OpenRouter model.
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTextModels();
+  }, [fetchTextModels]);
+
+  useEffect(() => {
+    if (activeTab === "settings") fetchTextModels();
+  }, [activeTab, fetchTextModels]);
+
+  // If the persisted text model isn't in the available list (e.g. user
+  // removed the Bedrock key), fall back to the first available option.
+  useEffect(() => {
+    if (textModelOptions.length === 0) return;
+    const isValid = textModelOptions.some((o) => o.value === textModel);
+    if (!isValid) setTextModel(textModelOptions[0].value);
+  }, [textModelOptions, textModel]);
+
   const navItemClass = (tab, collapsed) =>
     `flex w-full items-center rounded-lg py-2 text-left text-sm transition-colors ${
       collapsed ? "justify-center px-2" : "gap-3 px-3"
@@ -1738,22 +1721,13 @@ function App() {
     const photosToProcess = testPhotos.filter(
       (url) => !testSkippedPhotos.has(url),
     );
-    const needsAI = photosToProcess.filter(
-      (url) => !testUseOriginalPhotos.has(url),
-    );
     if (photosToProcess.length === 0) {
       setTestError("All photos are skipped. Include at least one photo.");
       return;
     }
-    if (needsAI.length === 0) {
-      setTestGeneratedImages(photosToProcess);
-      setTestCategories(testEditableCategories);
-      setTestIsConfirming(false);
-      return;
-    }
     setTestIsConfirming(true);
     setTestError(null);
-    const total = needsAI.length;
+    const total = photosToProcess.length;
     setTestImageGenProgress({
       isActive: true,
       taskId: "mock",
@@ -1767,15 +1741,9 @@ function App() {
       setTestImageGenProgress((prev) => ({ ...prev, completed }));
       if (completed >= total) {
         clearInterval(interval);
-        const merged = [];
-        let aiIdx = 0;
-        for (const url of photosToProcess) {
-          merged.push(
-            testUseOriginalPhotos.has(url)
-              ? url
-              : MOCK_DATA.generatedImages[aiIdx++] || url,
-          );
-        }
+        const merged = photosToProcess.map(
+          (url, idx) => MOCK_DATA.generatedImages[idx] || url,
+        );
         setTestGeneratedImages(merged);
         setTestCategories(testEditableCategories);
         setTestImageGenProgress({
@@ -1983,7 +1951,7 @@ function App() {
   return (
     <div className="flex min-h-screen bg-surface-app text-text-primary">
       <aside
-        className={`sticky top-0 flex h-screen shrink-0 flex-col rounded-tr-xl border-r border-border-default bg-surface-panel shadow-sm transition-[width] duration-200 ease-out ${
+        className={`sticky top-0 flex h-screen shrink-0 flex-col border-r border-border-default bg-surface-panel shadow-sm transition-[width] duration-200 ease-out ${
           sidebarCollapsed ? "w-[4.25rem]" : "w-60"
         }`}
         aria-label="Main navigation"
@@ -2094,7 +2062,7 @@ function App() {
           } ${
             (activeTab === "create" && listingLinkSubmitted) ||
             (activeTab === "test-workflow" && testListingLinkSubmitted)
-              ? "justify-start"
+              ? "justify-start pb-32"
               : "justify-center"
           }`}
         >
@@ -2102,9 +2070,6 @@ function App() {
             <CreateWorkflow
               listingId={testListingId}
               listingLinkSubmitted={testListingLinkSubmitted}
-              shouldAutoHideMessageBar={
-                testListingLinkSubmitted && !testLoading
-              }
               sidebarCollapsed={sidebarCollapsed}
               photos={testPhotos}
               categories={testCategories}
@@ -2112,7 +2077,6 @@ function App() {
               listing={testListing}
               currentSku={testCurrentSku}
               skippedPhotos={testSkippedPhotos}
-              useOriginalPhotos={testUseOriginalPhotos}
               promptModifier={testPromptModifier}
               generatedImages={testGeneratedImages}
               selectedImagesForRegen={testSelectedImagesForRegen}
@@ -2144,13 +2108,6 @@ function App() {
               }
               onSkipPhoto={(url) =>
                 setTestSkippedPhotos((prev) => {
-                  const s = new Set(prev);
-                  s.has(url) ? s.delete(url) : s.add(url);
-                  return s;
-                })
-              }
-              onUseOriginalPhoto={(url) =>
-                setTestUseOriginalPhotos((prev) => {
                   const s = new Set(prev);
                   s.has(url) ? s.delete(url) : s.add(url);
                   return s;
@@ -2477,10 +2434,23 @@ function App() {
                       value={textModel}
                       onChange={(e) => setTextModel(e.target.value)}
                     >
-                      {TEXT_MODEL_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
+                      {Object.entries(
+                        textModelOptions.reduce((acc, option) => {
+                          const key = option.provider || "openrouter";
+                          (acc[key] = acc[key] || []).push(option);
+                          return acc;
+                        }, {}),
+                      ).map(([provider, options]) => (
+                        <optgroup
+                          key={provider}
+                          label={PROVIDER_LABELS[provider] || provider}
+                        >
+                          {options.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </optgroup>
                       ))}
                     </select>
                   </label>
@@ -2523,7 +2493,17 @@ function App() {
                     </select>
                   </label>
                 </div>
+                <TestAiModelSection
+                  textModel={textModel}
+                  imageModel={imageModel}
+                  textModelOptions={textModelOptions}
+                  imageModelOptions={IMAGE_MODEL_OPTIONS}
+                />
               </div>
+              <ApiKeyManagementSection
+                active={activeTab === "settings"}
+                onKeysSaved={fetchTextModels}
+              />
               <div className="rounded-xl border border-border-default bg-surface-muted p-5">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
                   <h3 className="m-0 text-lg font-semibold text-text-primary">
@@ -2646,7 +2626,6 @@ function App() {
             <CreateWorkflow
               listingId={listingId}
               listingLinkSubmitted={listingLinkSubmitted}
-              shouldAutoHideMessageBar={listingLinkSubmitted && !loading}
               sidebarCollapsed={sidebarCollapsed}
               photos={photos}
               categories={categories}
@@ -2654,7 +2633,6 @@ function App() {
               listing={listing}
               currentSku={currentSku}
               skippedPhotos={skippedPhotos}
-              useOriginalPhotos={useOriginalPhotos}
               promptModifier={promptModifier}
               generatedImages={generatedImages}
               selectedImagesForRegen={selectedImagesForRegen}
@@ -2683,7 +2661,6 @@ function App() {
               onSubmit={handleSubmit}
               onCategoryChange={handleCategoryChange}
               onSkipPhoto={handleSkipPhoto}
-              onUseOriginalPhoto={handleUseOriginalPhoto}
               onPromptModifierChange={setPromptModifier}
               onConfirmCategories={handleConfirmCategories}
               onImageSelection={handleImageSelection}

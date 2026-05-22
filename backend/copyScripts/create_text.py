@@ -19,7 +19,7 @@ def create_text(old_title, old_description, model="deepseek/deepseek-v4-flash"):
         dict: Optimized listing content with edited_title and edited_description, or None on failure
     """
     # Import here to avoid circular import issues
-    from backend.ebay_cli import call_openrouter_llm
+    from backend.ebay_cli import call_text_llm
     
     # Load prompt template from file
     prompt_template_path = "prompts/generateTextPrompt.txt"
@@ -39,8 +39,8 @@ def create_text(old_title, old_description, model="deepseek/deepseek-v4-flash"):
         original_description=old_description
     )
     
-    # Call OpenRouter API to get optimized content
-    llm_response = call_openrouter_llm(prompt, model=model)
+    # Call the configured text LLM (OpenRouter or Bedrock based on model id)
+    llm_response = call_text_llm(prompt, model=model)
     
     if llm_response:
         try:
@@ -62,5 +62,5 @@ def create_text(old_title, old_description, model="deepseek/deepseek-v4-flash"):
             print(f"Raw response: {llm_response}")
             return None
     else:
-        print("❌ Failed to get response from OpenRouter")
+        print("❌ Failed to get response from text LLM")
         return None

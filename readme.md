@@ -101,6 +101,7 @@ refresh_token - OAuth refresh token
 
 Optional:
 openrouter_api_key - For AI listing optimization
+bedrock_api_key - For AWS Bedrock AI provider (alternate)
 
 Command Reference
 

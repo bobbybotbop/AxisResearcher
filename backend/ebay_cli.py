@@ -43,6 +43,24 @@ OPENROUTER_API_KEY = os.getenv('openrouter_api_key')
 
 ZIP_CODE = 14853
 
+# Bedrock Converse uses the bedrock_api_key (.env) exposed to boto3 via the
+# AWS_BEARER_TOKEN_BEDROCK environment variable. Mirror it on import so
+# subsequent boto3 client construction in this process can authenticate.
+_BEDROCK_REGION = "us-east-1"
+
+
+def _sync_bedrock_bearer_token():
+    """Copy bedrock_api_key from the env into AWS_BEARER_TOKEN_BEDROCK so
+    boto3's Bedrock client picks it up. Safe to call repeatedly."""
+    key = os.getenv('bedrock_api_key')
+    if key:
+        os.environ['AWS_BEARER_TOKEN_BEDROCK'] = key
+    elif 'AWS_BEARER_TOKEN_BEDROCK' in os.environ:
+        del os.environ['AWS_BEARER_TOKEN_BEDROCK']
+
+
+_sync_bedrock_bearer_token()
+
 
 def _project_root_env_path():
     return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
@@ -262,6 +280,81 @@ def call_openrouter_llm(prompt, model="deepseek/deepseek-v4-flash"):
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
         return None
+
+
+def _extract_bedrock_message_text(response):
+    """Pull assistant text from a Bedrock Converse response."""
+    blocks = response.get("output", {}).get("message", {}).get("content", [])
+    parts = []
+    for block in blocks:
+        if isinstance(block, dict) and block.get("text"):
+            parts.append(block["text"])
+    return "\n".join(parts).strip() if parts else None
+
+
+def bedrock_converse_text(prompt, model_id):
+    """Call Bedrock Converse; return assistant text or None on failure."""
+    if not os.getenv("bedrock_api_key"):
+        print("❌ Bedrock API key not found. Please set bedrock_api_key in your .env file")
+        return None
+
+    _sync_bedrock_bearer_token()
+
+    try:
+        import boto3
+    except ImportError:
+        print("❌ boto3 is not installed. Run: pip install -r requirements.txt")
+        return None
+
+    try:
+        print(f"🤖 Calling Bedrock model: {model_id}...")
+        client = boto3.client(
+            service_name="bedrock-runtime",
+            region_name=_BEDROCK_REGION,
+        )
+        response = client.converse(
+            modelId=model_id,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [{"text": prompt}],
+                }
+            ],
+        )
+        content = _extract_bedrock_message_text(response)
+        if not content:
+            print("❌ Bedrock returned an empty response")
+            return None
+        print("✅ Received response from Bedrock")
+        return content
+    except Exception as e:
+        print(f"❌ Error calling Bedrock API: {e}")
+        return None
+
+
+def call_bedrock_llm(prompt, model):
+    """Call an AWS Bedrock chat model via the Converse API.
+
+    Authenticates with the bearer token exported from bedrock_api_key
+    (see _sync_bedrock_bearer_token). Returns the assistant text or None
+    on failure so callers can handle it the same way as call_openrouter_llm.
+    """
+    return bedrock_converse_text(prompt, model)
+
+
+def call_text_llm(prompt, model="deepseek/deepseek-v4-flash"):
+    """Provider-agnostic text LLM dispatcher.
+
+    Routes to Bedrock Converse for models in the Bedrock catalog and
+    falls back to OpenRouter for everything else. Keeps the return
+    contract identical to call_openrouter_llm so existing callers don't
+    need to change their parsing logic.
+    """
+    from backend.text_models import is_bedrock_model
+
+    if is_bedrock_model(model):
+        return call_bedrock_llm(prompt, model)
+    return call_openrouter_llm(prompt, model)
 
 
 def _extract_listing_id(item_id):

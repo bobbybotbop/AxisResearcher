@@ -11,10 +11,6 @@ function PhotoGallery({
   onPhotoClick,
   skippedPhotos = new Set(),
   onSkipPhoto,
-  useOriginalPhotos = new Set(),
-  onUseOriginalPhoto,
-  promptModifier = "",
-  onPromptModifierChange,
   onAddToOriginalPhotos,
   onOpenEditor,
   showClassification = true,
@@ -76,13 +72,6 @@ function PhotoGallery({
     }
   };
 
-  const handleUseOriginalClick = (e, photoUrl) => {
-    e.stopPropagation();
-    if (onUseOriginalPhoto) {
-      onUseOriginalPhoto(photoUrl);
-    }
-  };
-
   return (
     <div className="mt-8 rounded-2xl border border-border-default bg-surface-panel p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -108,7 +97,6 @@ function PhotoGallery({
         {photos.map((photoUrl, index) => {
           const category = editableCategories[photoUrl];
           const isSkipped = skippedPhotos.has(photoUrl);
-          const isUseOriginal = useOriginalPhotos.has(photoUrl);
           return (
             <div
               key={index}
@@ -119,7 +107,7 @@ function PhotoGallery({
             >
               {onSkipPhoto && (
                 <button
-                  className="absolute right-1.5 top-1.5 z-10 flex h-8 w-8 items-center justify-center rounded-full text-lg font-bold text-white shadow-md transition-colors hover:opacity-90"
+                  className="absolute right-1.5 top-1.5 z-10 flex h-8 w-8 items-center justify-center rounded-full text-lg font-bold text-white opacity-0 shadow-md transition-opacity hover:opacity-90 focus-visible:opacity-100 group-hover:opacity-100"
                   style={{
                     background: isSkipped ? "#4CAF50" : "#f44336",
                   }}
@@ -127,20 +115,6 @@ function PhotoGallery({
                   title={isSkipped ? "Include this photo" : "Skip this photo"}
                 >
                   {isSkipped ? "✓" : "×"}
-                </button>
-              )}
-              {onUseOriginalPhoto && !isSkipped && (
-                <button
-                  className="absolute left-1.5 top-1.5 z-10 flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold text-white shadow-md transition-colors hover:opacity-90"
-                  style={{
-                    background: isUseOriginal ? "#2196F3" : "rgba(0,0,0,0.4)",
-                  }}
-                  onClick={(e) => handleUseOriginalClick(e, photoUrl)}
-                  title={
-                    isUseOriginal ? "Edit with AI" : "Use original (no AI edit)"
-                  }
-                >
-                  {isUseOriginal ? "✓" : "O"}
                 </button>
               )}
               <img
@@ -161,15 +135,6 @@ function PhotoGallery({
               {isSkipped && (
                 <div className="absolute left-1/2 top-1/2 z-[5] -translate-x-1/2 -translate-y-1/2 rounded-md bg-black/70 px-2.5 py-1 font-bold text-white">
                   SKIPPED
-                </div>
-              )}
-              {isUseOriginal && !isSkipped && (
-                <div
-                  className={`absolute ${
-                    showClassification ? "bottom-9" : "bottom-2"
-                  } left-1/2 z-[5] -translate-x-1/2 rounded bg-blue-500/90 px-2 py-1 text-[11px] font-bold text-white`}
-                >
-                  USE ORIGINAL
                 </div>
               )}
               {showClassification && (
@@ -203,29 +168,6 @@ function PhotoGallery({
           );
         })}
       </div>
-      {onPromptModifierChange && (
-        <div className="my-4">
-          <label
-            htmlFor="prompt-modifier"
-            className="mb-1.5 block text-sm font-semibold"
-          >
-            Prompt Modifier (optional)
-          </label>
-          <p className="mb-2 text-[13px] text-text-muted">
-            Add instructions that apply to every generated image (e.g.,
-            &quot;change the blue plastic to black&quot;)
-          </p>
-          <textarea
-            id="prompt-modifier"
-            className="w-full resize-y rounded-md border border-border-default bg-surface-muted p-2.5 text-sm text-text-primary transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:bg-surface-hover"
-            value={promptModifier}
-            onChange={(e) => onPromptModifierChange(e.target.value)}
-            placeholder="e.g., change the color of the blue plastic to black instead"
-            rows={2}
-            disabled={isConfirming}
-          />
-        </div>
-      )}
       <div className="mt-8 flex justify-center">
         <button
           type="button"

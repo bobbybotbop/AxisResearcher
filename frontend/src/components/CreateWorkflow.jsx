@@ -8,11 +8,14 @@ import ProgressIndicator from "./ProgressIndicator";
 import ImageCanvas from "./ImageCanvas";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import { btnPillLg, btnPillSm } from "../styles/buttonPill";
+import {
+  DEFAULT_CHAT_CONTEXT,
+  getChatContextInputPlaceholder,
+} from "../constants/chatContextModes";
 
 function CreateWorkflow({
   listingId,
   listingLinkSubmitted = false,
-  shouldAutoHideMessageBar = false,
   sidebarCollapsed = false,
   photos,
   categories,
@@ -20,17 +23,10 @@ function CreateWorkflow({
   listing,
   currentSku,
   skippedPhotos,
-  useOriginalPhotos,
-  promptModifier,
   generatedImages,
-  selectedImagesForRegen,
-  customPrompt,
   loading,
   error,
   isConfirming,
-  isRegenerating,
-  isTrimming,
-  isAddingNewVersions,
   isCreatingListing,
   listingData,
   editableTitle,
@@ -49,14 +45,7 @@ function CreateWorkflow({
   onSubmit,
   onCategoryChange,
   onSkipPhoto,
-  onUseOriginalPhoto,
-  onPromptModifierChange,
   onConfirmCategories,
-  onImageSelection,
-  onRegenerateImages,
-  onTrimSelected,
-  onAddNewVersions,
-  onCustomPromptChange,
   onDragEnd,
   onRemoveFromListing,
   onAddToListing,
@@ -79,18 +68,13 @@ function CreateWorkflow({
   classifyImagesEnabled = true,
 }) {
   const [descriptionEditMode, setDescriptionEditMode] = useState(false);
-  const [isHoveringBarZone, setIsHoveringBarZone] = useState(false);
+  const [chatContext, setChatContext] = useState(DEFAULT_CHAT_CONTEXT);
 
-  // Bar is revealed while loading (always visible) or while user is hovering the
-  // top reveal zone / the bar itself after auto-hide kicks in.
-  const isBarRevealed = !shouldAutoHideMessageBar || isHoveringBarZone;
-
-  // Reset hover state when leaving auto-hide mode so reveal logic doesn't get stuck.
   useEffect(() => {
-    if (!shouldAutoHideMessageBar) {
-      setIsHoveringBarZone(false);
+    if (!listingLinkSubmitted) {
+      setChatContext(DEFAULT_CHAT_CONTEXT);
     }
-  }, [shouldAutoHideMessageBar]);
+  }, [listingLinkSubmitted]);
 
   useEffect(() => {
     if (!isEditorOpen) return;
@@ -105,42 +89,19 @@ function CreateWorkflow({
 
   const sidebarLeft = sidebarCollapsed ? "4.25rem" : "15rem";
   const barWrapperClassName = listingLinkSubmitted
-    ? "fixed right-0 top-0 z-40 flex w-auto flex-col items-center justify-center min-h-0 bg-surface-app/90 px-6 py-3 shadow-sm backdrop-blur md:px-8 transition-[left,margin,padding,min-height,background-color,box-shadow,border-color,backdrop-filter] duration-500 ease-in-out"
-    : "flex w-full flex-col items-center mb-[15%] min-h-[min(42vh,320px)] max-w-4xl self-center justify-center border-b border-transparent bg-transparent shadow-none backdrop-blur-none transition-[margin,padding,min-height,background-color,box-shadow,border-color,backdrop-filter] duration-500 ease-in-out";
+    ? "pointer-events-none fixed bottom-0 right-0 z-50 flex w-auto flex-col items-center justify-center bg-transparent px-6 py-4 md:px-8 transition-[left,padding] duration-500 ease-in-out"
+    : "flex w-full flex-col items-center mb-[15%] min-h-[min(42vh,320px)] max-w-4xl self-center justify-center border-t border-transparent bg-transparent backdrop-blur-none transition-[margin,padding,min-height,background-color,border-color,backdrop-filter] duration-500 ease-in-out";
 
   return (
     <>
-      {shouldAutoHideMessageBar && (
-        <motion.div
-          aria-hidden="true"
-          className="fixed right-0 top-0 z-30"
-          style={{ left: sidebarLeft, height: 96 }}
-          onHoverStart={() => setIsHoveringBarZone(true)}
-          onHoverEnd={() => setIsHoveringBarZone(false)}
-        />
-      )}
       <motion.div
+        layout
         style={
           listingLinkSubmitted
             ? { left: sidebarLeft, right: 0 }
             : undefined
         }
-        animate={
-          listingLinkSubmitted
-            ? { y: isBarRevealed ? 0 : "-120%" }
-            : { y: 0 }
-        }
         transition={{ type: "spring", stiffness: 260, damping: 30 }}
-        onHoverStart={
-          shouldAutoHideMessageBar
-            ? () => setIsHoveringBarZone(true)
-            : undefined
-        }
-        onHoverEnd={
-          shouldAutoHideMessageBar
-            ? () => setIsHoveringBarZone(false)
-            : undefined
-        }
         className={barWrapperClassName}
       >
         <div
@@ -158,17 +119,26 @@ function CreateWorkflow({
         <form
           onSubmit={onSubmit}
           className={`mx-auto flex w-full max-w-[min(42rem,100%)] transition-[margin] duration-500 ease-in-out ${
-            listingLinkSubmitted ? "mt-0" : "mt-12 md:mt-16"
+            listingLinkSubmitted
+              ? "pointer-events-auto mt-0"
+              : "mt-12 md:mt-16"
           }`}
         >
           <MessageBarInput
             fullWidth
             value={listingId}
             onChange={onListingIdChange}
-            placeholder="Paste any eBay link"
+            placeholder={
+              listingLinkSubmitted
+                ? getChatContextInputPlaceholder(chatContext)
+                : "Paste any eBay link"
+            }
             disabled={loading}
             loading={loading}
             aria-label="eBay listing URL or ID"
+            showChatContextSelector={listingLinkSubmitted}
+            chatContext={chatContext}
+            onChatContextChange={setChatContext}
           />
         </form>
       </motion.div>
@@ -193,10 +163,8 @@ function CreateWorkflow({
         </div>
       )}
 
-      {currentSku && (
-        <div className="my-5 rounded-md bg-surface-muted p-2.5 text-text-primary">
-          <strong>Current SKU:</strong> {currentSku}
-        </div>
+      {listingLinkSubmitted && listing && (
+        <ListingDetails listing={listing} photos={photos} sku={currentSku} />
       )}
 
       {photos?.length > 0 && (
@@ -210,10 +178,6 @@ function CreateWorkflow({
             onPhotoClick={onPhotoClick}
             skippedPhotos={skippedPhotos}
             onSkipPhoto={onSkipPhoto}
-            useOriginalPhotos={useOriginalPhotos}
-            onUseOriginalPhoto={onUseOriginalPhoto}
-            promptModifier={promptModifier}
-            onPromptModifierChange={onPromptModifierChange}
             onAddToOriginalPhotos={onAddToOriginalPhotos}
             onOpenEditor={onEditorToggle}
             showClassification={classifyImagesEnabled}
@@ -264,49 +228,43 @@ function CreateWorkflow({
                       draggableId={`img-${imageUrl}-${index}`}
                       index={index}
                     >
-                      {(provided, snapshot) => (
-                        <div
-                          ref={provided.innerRef}
-                          {...provided.draggableProps}
-                          className={`group relative aspect-square overflow-hidden rounded-xl transition-all ${
-                            snapshot.isDragging ? "opacity-80 shadow-lg" : ""
-                          }`}
-                        >
+                      {(provided, snapshot) => {
+                        return (
                           <div
-                            className="absolute left-1.5 top-1.5 z-20 cursor-grab text-text-muted hover:text-text-primary"
+                            ref={provided.innerRef}
+                            {...provided.draggableProps}
                             {...provided.dragHandleProps}
-                            title="Drag to reorder"
+                            className={`group relative aspect-square cursor-grab overflow-hidden rounded-xl transition-all active:cursor-grabbing ${
+                              snapshot.isDragging ? "opacity-80 shadow-lg" : ""
+                            }`}
                           >
-                            &#x2630;
-                          </div>
-                          <label className="absolute inset-0 z-10 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={selectedImagesForRegen?.includes(index)}
-                              onChange={() => onImageSelection(index)}
-                              className="peer sr-only"
+                            <button
+                              type="button"
+                              className="absolute right-1.5 top-1.5 z-20 flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-lg font-bold text-white opacity-0 shadow-md transition-opacity hover:bg-red-600 hover:opacity-90 focus-visible:opacity-100 group-hover:opacity-100"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onRemoveFromListing(index);
+                              }}
+                              title="Remove from listing"
+                            >
+                              &times;
+                            </button>
+                            <img
+                              src={imageUrl}
+                              alt={`New listing photo ${index + 1}`}
+                              className="pointer-events-none h-full w-full object-cover"
+                              loading="lazy"
+                              draggable={false}
                             />
-                            <span className="pointer-events-none absolute inset-0 hidden rounded-xl border-2 border-primary bg-primary/10 peer-checked:block" />
-                          </label>
-                          <div className="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-0.5 text-sm font-bold text-white">
-                            {index + 1}
+                            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
+                              <span className="text-2xl font-bold text-white">
+                                {index + 1}
+                              </span>
+                            </div>
                           </div>
-                          <button
-                            type="button"
-                            className="pointer-events-auto absolute right-1.5 top-1.5 z-20 flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-lg font-bold text-white shadow-md transition-colors hover:bg-red-600"
-                            onClick={() => onRemoveFromListing(index)}
-                            title="Remove from listing"
-                          >
-                            &times;
-                          </button>
-                          <img
-                            src={imageUrl}
-                            alt={`New listing photo ${index + 1}`}
-                            className="h-full w-full object-cover"
-                            loading="lazy"
-                          />
-                        </div>
-                      )}
+                        );
+                      }}
                     </Draggable>
                   ))}
                   {provided.placeholder}
@@ -314,68 +272,6 @@ function CreateWorkflow({
               )}
             </Droppable>
           </DragDropContext>
-
-          <div className="mt-8 rounded-xl border border-border-default bg-surface-muted p-6 shadow-sm">
-            <h3 className="mb-2 text-xl text-text-primary">
-              Optional: Edit Images Further
-            </h3>
-            <p className="mb-4 text-text-muted">
-              Enter a custom prompt to regenerate selected images
-            </p>
-            <textarea
-              className="w-full resize-y rounded-lg border-2 border-border-default bg-surface-panel p-3 text-base text-text-primary transition-colors focus:border-primary focus:outline-none disabled:cursor-not-allowed disabled:bg-surface-hover"
-              value={customPrompt}
-              onChange={(e) => onCustomPromptChange(e.target.value)}
-              placeholder="Enter your custom prompt for image editing..."
-              rows={4}
-              disabled={isRegenerating || isAddingNewVersions}
-            />
-            <div className="mt-4 flex justify-end gap-3">
-              {(() => {
-                const selCount = selectedImagesForRegen?.length ?? 0;
-                const totalCount = generatedImages?.length ?? 0;
-                const displayCount = selCount > 0 ? selCount : totalCount;
-                return (
-                  <>
-                    <button
-                      type="button"
-                      className={btnPillSm}
-                      onClick={onRegenerateImages}
-                      disabled={isRegenerating || !customPrompt?.trim()}
-                    >
-                      {isRegenerating
-                        ? "Regenerating..."
-                        : `Regenerate Selected (${displayCount})`}
-                    </button>
-                    <button
-                      type="button"
-                      className={btnPillSm}
-                      onClick={onTrimSelected}
-                      disabled={isTrimming}
-                    >
-                      {isTrimming
-                        ? "Trimming..."
-                        : `Trim Selected (${displayCount})`}
-                    </button>
-                    <button
-                      type="button"
-                      className={btnPillSm}
-                      onClick={onAddNewVersions}
-                      disabled={
-                        isAddingNewVersions ||
-                        isRegenerating ||
-                        !customPrompt?.trim()
-                      }
-                    >
-                      {isAddingNewVersions
-                        ? "Generating + syncing..."
-                        : `New version + sync (${displayCount})`}
-                    </button>
-                  </>
-                );
-              })()}
-            </div>
-          </div>
 
           <div className="mt-8 flex justify-center">
             <button
@@ -618,8 +514,6 @@ function CreateWorkflow({
           )}
         </div>
       )}
-
-      {listing && <ListingDetails listing={listing} />}
 
       {lightboxOpen && photos?.length > 0 && (
         <Lightbox

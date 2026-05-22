@@ -13,6 +13,9 @@ return_policy_id=
 # OpenRouter API (for AI content generation)
 openrouter_api_key=
 
+# AWS Bedrock API (optional alternate AI provider)
+bedrock_api_key=
+
 # eBay OAuth Tokens
 user_token=
 

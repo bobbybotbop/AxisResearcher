@@ -17,7 +17,12 @@ from flask import Flask, jsonify, request, Response, stream_with_context
 from flask_cors import CORS
 from werkzeug.serving import WSGIRequestHandler
 from backend.copyScripts.CopyListingMain import copy_listing_main, testing_function
-from backend.copyScripts.create_image import generate_image_from_urls, ImageType, categorize_images
+from backend.copyScripts.create_image import (
+    generate_image_from_urls,
+    ImageType,
+    categorize_images,
+    _openrouter_response_dict_to_image_bytes_and_mime,
+)
 from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, save_ebay_listing_id
 from backend.helper_functions import remove_html_tags
 import os
@@ -739,7 +744,7 @@ def _nudge_title_length(current_title, text_model):
     Returns (best_title, attempts_log) where best_title is the candidate
     closest to TITLE_TARGET_LEN that we produced (in-range if possible).
     """
-    from backend.ebay_cli import call_openrouter_llm
+    from backend.ebay_cli import call_text_llm
 
     try:
         decrease_template = _load_prompt("trimTitlePrompt.txt")
@@ -806,7 +811,7 @@ def _nudge_title_length(current_title, text_model):
             f"in_title='{working_title}'"
         )
 
-        raw_response = call_openrouter_llm(prompt, model=text_model)
+        raw_response = call_text_llm(prompt, model=text_model)
         new_title = _sanitize_title(raw_response)
 
         if not new_title:
@@ -1777,6 +1782,353 @@ def api_refresh_tokens():
         load_dotenv(env_path, override=True)
         return jsonify(result), 200
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+_API_KEY_NAMES = ('openrouter_api_key', 'bedrock_api_key')
+
+
+def _mask_secret(val):
+    if not val:
+        return ''
+    if len(val) > 30:
+        return val[:15] + '...' + val[-15:]
+    return val
+
+
+@app.route('/api/api-keys', methods=['GET'])
+def get_api_keys():
+    """Get current API key values (masked) from the .env file."""
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+    values = {name: '' for name in _API_KEY_NAMES}
+
+    try:
+        with open(env_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                stripped = line.strip()
+                for name in _API_KEY_NAMES:
+                    prefix = name + '='
+                    if stripped.startswith(prefix):
+                        values[name] = stripped[len(prefix):]
+                        break
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        return jsonify({"error": f"Failed to read .env: {str(e)}"}), 500
+
+    response = {}
+    for name in _API_KEY_NAMES:
+        response[name] = _mask_secret(values[name])
+        response[f'{name}_set'] = bool(values[name])
+    return jsonify(response)
+
+
+@app.route('/api/api-keys', methods=['POST'])
+def update_api_keys():
+    """
+    Update openrouter_api_key and/or bedrock_api_key in the .env file.
+    Writes values unquoted to preserve any special characters.
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        updates = {}
+        for name in _API_KEY_NAMES:
+            raw = data.get(name)
+            if raw is None:
+                continue
+            value = str(raw).strip()
+            if value:
+                updates[name] = value
+
+        if not updates:
+            return jsonify({"error": "At least one API key must be provided"}), 400
+
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+
+        try:
+            with open(env_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            lines = []
+
+        new_lines = []
+        found = {name: False for name in updates}
+        for line in lines:
+            stripped = line.strip()
+            replaced = False
+            for name, value in updates.items():
+                if stripped.startswith(name + '='):
+                    new_lines.append(f'{name}={value}\n')
+                    found[name] = True
+                    replaced = True
+                    break
+            if not replaced:
+                new_lines.append(line)
+
+        for name, was_found in found.items():
+            if not was_found:
+                if new_lines and not new_lines[-1].endswith('\n'):
+                    new_lines.append('\n')
+                new_lines.append(f'{name}={updates[name]}\n')
+
+        with open(env_path, 'w', encoding='utf-8') as f:
+            f.writelines(new_lines)
+
+        load_dotenv(env_path, override=True)
+
+        # ebay_cli caches openrouter_api_key at import time and mirrors
+        # bedrock_api_key into AWS_BEARER_TOKEN_BEDROCK for boto3; refresh
+        # both so new keys take effect without a server restart.
+        try:
+            import backend.ebay_cli as ebay_cli
+            if 'openrouter_api_key' in updates:
+                ebay_cli.OPENROUTER_API_KEY = os.getenv('openrouter_api_key')
+            if 'bedrock_api_key' in updates:
+                ebay_cli._sync_bedrock_bearer_token()
+        except Exception:
+            pass
+
+        print(
+            "[API] API keys updated in .env - "
+            + ", ".join(f"{name}: yes" for name in updates)
+        )
+
+        result = {"success": True, "message": "API keys updated successfully"}
+        for name in _API_KEY_NAMES:
+            result[f'{name}_updated'] = name in updates
+        return jsonify(result)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to update API keys: {str(e)}"}), 500
+
+
+@app.route('/api/text-models', methods=['GET'])
+def get_text_models():
+    """Return the text models the user can actually call right now,
+    gated by which provider API keys are set in the .env file."""
+    from backend.text_models import get_available_text_models
+    return jsonify({"models": get_available_text_models()})
+
+
+def _test_text_model_result(payload=None, error=None, log_lines=None):
+    """Structured result for api_test_ai_model (avoids tuple unpack mismatches)."""
+    return {
+        'payload': payload,
+        'error': error,
+        'server_log': '\n'.join(log_lines) if log_lines else None,
+    }
+
+
+def _test_text_model(prompt, model):
+    from backend.text_models import is_bedrock_model, is_openrouter_model
+
+    log = []
+
+    def add(line):
+        log.append(line)
+        print(line)
+
+    def fail(message):
+        return _test_text_model_result(error=message, log_lines=log)
+
+    def ok(content):
+        return _test_text_model_result(
+            payload={'content': content.strip()},
+            log_lines=log,
+        )
+
+    if is_bedrock_model(model):
+        if not os.getenv('bedrock_api_key'):
+            add('Bedrock API key is not set.')
+            return fail('Bedrock API key is not set. Add bedrock_api_key in Settings.')
+        add(f'Calling Bedrock model: {model}')
+        try:
+            from backend.ebay_cli import (
+                _BEDROCK_REGION,
+                _extract_bedrock_message_text,
+                _sync_bedrock_bearer_token,
+            )
+
+            _sync_bedrock_bearer_token()
+            import boto3
+
+            client = boto3.client(
+                service_name='bedrock-runtime',
+                region_name=_BEDROCK_REGION,
+            )
+            response = client.converse(
+                modelId=model,
+                messages=[
+                    {
+                        'role': 'user',
+                        'content': [{'text': prompt}],
+                    }
+                ],
+            )
+            content = _extract_bedrock_message_text(response)
+            if content:
+                add('Received response from Bedrock.')
+                return ok(content)
+            add('Bedrock returned no text content.')
+            return fail('No response from the text model.')
+        except ImportError:
+            add('boto3 is not installed. Run: pip install -r requirements.txt')
+            return fail('boto3 is not installed.')
+        except Exception as e:
+            add(f'Error calling Bedrock API: {e}')
+            import traceback
+            add(traceback.format_exc().strip())
+            return fail('No response from the text model.')
+
+    if is_openrouter_model(model) and not os.getenv('openrouter_api_key'):
+        add('OpenRouter API key is not set.')
+        return fail('OpenRouter API key is not set. Add openrouter_api_key in Settings.')
+
+    api_key = os.getenv('openrouter_api_key')
+    url = 'https://openrouter.ai/api/v1/chat/completions'
+    headers = {
+        'Authorization': f'Bearer {api_key}',
+        'Content-Type': 'application/json',
+    }
+    data = {
+        'model': model,
+        'messages': [{'role': 'user', 'content': prompt}],
+    }
+
+    add(f'Calling OpenRouter model: {model}')
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=60)
+        add(f'HTTP {response.status_code}')
+        body_preview = (response.text or '')[:4000]
+        if body_preview:
+            add(f'Response body: {body_preview}')
+        response.raise_for_status()
+        result = response.json()
+        if 'choices' in result and result['choices']:
+            content = result['choices'][0].get('message', {}).get('content', '')
+            if content:
+                add('Received response from OpenRouter.')
+                return ok(str(content))
+        add('Unexpected response format: no choices in response.')
+        return fail('No response from the text model.')
+    except requests.exceptions.RequestException as e:
+        add(f'Error calling OpenRouter API: {e}')
+        return fail('No response from the text model.')
+    except json.JSONDecodeError as e:
+        add(f'Error parsing OpenRouter response: {e}')
+        return fail('No response from the text model.')
+    except Exception as e:
+        add(f'Unexpected error: {e}')
+        import traceback
+        add(traceback.format_exc().strip())
+        return fail('No response from the text model.')
+
+
+def _test_image_model(prompt, model):
+    import base64
+
+    api_key = os.getenv('openrouter_api_key')
+    if not api_key:
+        return None, 'OpenRouter API key is not set. Add openrouter_api_key in Settings.'
+
+    url = 'https://openrouter.ai/api/v1/chat/completions'
+    headers = {
+        'Authorization': f'Bearer {api_key}',
+        'Content-Type': 'application/json',
+    }
+    data = {
+        'model': model,
+        'messages': [
+            {
+                'role': 'user',
+                'content': [{'type': 'text', 'text': prompt}],
+            }
+        ],
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=data, timeout=120)
+        response.raise_for_status()
+        result = response.json()
+    except requests.exceptions.RequestException as e:
+        detail = ''
+        if getattr(e, 'response', None) is not None:
+            try:
+                detail = e.response.json().get('error', {}).get('message', '')
+            except Exception:
+                detail = (e.response.text or '')[:300]
+        msg = str(e) if not detail else f'{e} — {detail}'
+        return None, msg
+
+    parsed = _openrouter_response_dict_to_image_bytes_and_mime(result)
+    if parsed:
+        image_bytes, mime_type = parsed
+        b64 = base64.b64encode(image_bytes).decode('ascii')
+        data_url = f'data:{mime_type};base64,{b64}'
+        return {
+            'content': 'Image generated successfully.',
+            'image_url': data_url,
+        }, None
+
+    if 'choices' in result and result['choices']:
+        message = result['choices'][0].get('message', {})
+        text = message.get('content', '')
+        if isinstance(text, list):
+            text = ' '.join(
+                part.get('text', '') for part in text if isinstance(part, dict)
+            )
+        if text and str(text).strip():
+            return {'content': str(text).strip()}, None
+
+    return None, (
+        'Model responded but no image was returned. '
+        'Try a different prompt or image model.'
+    )
+
+
+@app.route('/api/test-ai-model', methods=['POST'])
+def api_test_ai_model():
+    """
+    Quick connectivity test for text or image generation models via OpenRouter.
+
+    JSON body: { "kind": "text"|"image", "model": "...", "prompt": "..." }
+    """
+    try:
+        data = request.get_json() or {}
+        kind = (data.get('kind') or 'text').strip().lower()
+        model = (data.get('model') or '').strip()
+        prompt = (data.get('prompt') or '').strip()
+
+        if kind not in ('text', 'image'):
+            return jsonify({'error': 'kind must be "text" or "image"'}), 400
+        if not model:
+            return jsonify({'error': 'model is required'}), 400
+        if not prompt:
+            return jsonify({'error': 'prompt is required'}), 400
+
+        server_log = None
+        if kind == 'text':
+            text_result = _test_text_model(prompt, model)
+            payload = text_result['payload']
+            err = text_result['error']
+            server_log = text_result['server_log']
+        else:
+            payload, err = _test_image_model(prompt, model)
+
+        if err:
+            body = {'error': err}
+            if server_log:
+                body['server_log'] = server_log
+            return jsonify(body), 502
+        return jsonify({'error': None, **payload}), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 

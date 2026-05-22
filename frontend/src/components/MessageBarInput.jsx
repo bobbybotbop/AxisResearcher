@@ -1,6 +1,7 @@
 import React from 'react'
 import styled from 'styled-components'
 import { Loader2 } from 'lucide-react'
+import ChatContextSelector from './ChatContextSelector'
 
 const MessageBarInput = ({
   value,
@@ -10,10 +11,23 @@ const MessageBarInput = ({
   loading,
   'aria-label': ariaLabel,
   fullWidth,
+  chatContext,
+  onChatContextChange,
+  showChatContextSelector = false,
 }) => {
   return (
-    <StyledWrapper $fullWidth={Boolean(fullWidth)}>
+    <StyledWrapper $fullWidth={Boolean(fullWidth)} $hasContext={showChatContextSelector}>
       <div className="messageBox">
+        {showChatContextSelector && (
+          <>
+            <ChatContextSelector
+              value={chatContext}
+              onChange={onChatContextChange}
+              disabled={disabled}
+            />
+            <div className="contextDivider" aria-hidden />
+          </>
+        )}
         <input
           required
           placeholder={placeholder}
@@ -50,6 +64,7 @@ const MessageBarInput = ({
 
 const StyledWrapper = styled.div`
   ${(p) => (p.$fullWidth ? 'width: 100%;' : '')}
+
   .messageBox {
     width: fit-content;
     min-height: 56px;
@@ -62,10 +77,134 @@ const StyledWrapper = styled.div`
     border-radius: 9999px;
     border: 1px solid var(--border-default);
     transition: border-color 0.2s ease;
+    color-scheme: light;
   }
+
+  [data-theme='dark'] & .messageBox {
+    color-scheme: dark;
+  }
+
   .messageBox:focus-within:not(:has(.messageInput:disabled)) {
     border-color: var(--text-primary);
   }
+
+  .contextDivider {
+    width: 1px;
+    height: 28px;
+    margin: 0 4px 0 8px;
+    flex-shrink: 0;
+    background-color: var(--border-default);
+  }
+
+  .contextSelector {
+    position: relative;
+    flex-shrink: 0;
+    margin-left: -8px;
+  }
+
+  .contextTrigger {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 100%;
+    padding: 0 10px 0 12px;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    border-radius: 9999px;
+    transition: background-color 0.15s ease, color 0.15s ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .contextTrigger:hover:not(:disabled) {
+    background-color: var(--surface-hover);
+  }
+
+  .contextTrigger:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  .contextLabel {
+    font-size: 0.875rem;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    color: var(--text-primary);
+  }
+
+  .contextTrigger svg {
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .contextChevron {
+    transition: transform 0.2s ease;
+  }
+
+  .contextChevronOpen {
+    transform: rotate(180deg);
+  }
+
+  .contextMenu {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    z-index: 50;
+    min-width: 168px;
+    margin: 0;
+    padding: 4px;
+    list-style: none;
+    border-radius: 12px;
+    border: 1px solid var(--border-default);
+    background-color: var(--surface-panel);
+    color: var(--text-primary);
+    box-shadow:
+      0 4px 6px -1px rgb(0 0 0 / 0.08),
+      0 10px 20px -2px rgb(0 0 0 / 0.12);
+  }
+
+  [data-theme='dark'] & .contextMenu {
+    box-shadow:
+      0 4px 6px -1px rgb(0 0 0 / 0.4),
+      0 10px 20px -2px rgb(0 0 0 / 0.5);
+  }
+
+  .contextOption {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+  }
+
+  .contextOption svg {
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .contextOption:hover {
+    background-color: var(--surface-hover);
+  }
+
+  .contextOptionActive {
+    background-color: var(--surface-hover);
+  }
+
+  .contextOptionActive svg {
+    color: var(--text-primary);
+  }
+
   .messageInput {
     width: 200px;
     height: 100%;
@@ -126,6 +265,7 @@ const StyledWrapper = styled.div`
       transform: rotate(360deg);
     }
   }
+
   ${(p) =>
     p.$fullWidth
       ? `
@@ -136,6 +276,18 @@ const StyledWrapper = styled.div`
       flex: 1;
       min-width: 0;
       width: auto;
+    }
+  `
+      : ''}
+
+  ${(p) =>
+    p.$hasContext
+      ? `
+    .messageBox {
+      padding-left: 8px;
+    }
+    .messageInput {
+      padding-left: 8px;
     }
   `
       : ''}

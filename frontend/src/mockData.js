@@ -27,7 +27,22 @@ export const MOCK_LISTING = {
   price: 12.99,
   currency: 'USD',
   categoryId: '177906',
-  description: 'This is a mock description for testing the workflow. It includes placeholder text to verify the listing details display correctly.',
+  description:  `<p>This is a mock description for testing the workflow. It includes placeholder text to verify the listing details display correctly across different devices, templates, and storefront layouts.</p>
+  <p>The purpose of this sample content is to simulate a realistic product listing while validating formatting, spacing, HTML rendering, and bullet styling within the platform.</p>
+  <ul>
+    <li>Used for internal workflow and automation testing</li>
+    <li>Verifies HTML formatting and paragraph rendering</li>
+    <li>Tests compatibility with listing templates and themes</li>
+    <li>Ensures bullet points display properly on desktop and mobile</li>
+    <li>Can be copied into staging or development environments</li>
+    <li>Includes placeholder text for mock product demonstrations</li>
+    <li>Helpful for validating import/export listing pipelines</li>
+    <li>Confirms rich text formatting is preserved after publishing</li>
+  </ul>
+  <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>
+  <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
+  <p><strong>Note:</strong> This description is intended solely for testing and demonstration purposes and does not represent a real product listing.</p>`
+,
   itemCreationDate: '2026-02-16T12:00:00.000Z',
   estimatedSoldQuantity: 42,
 }
@@ -56,7 +71,21 @@ export const MOCK_LISTING_DATA = {
     product: {
       title: 'Test Product - Mock Listing for Workflow Testing',
       description:
-        '<p>This is a mock description for testing the workflow. It includes placeholder text to verify the listing details display correctly.</p>',
+        `<p>This is a mock description for testing the workflow. It includes placeholder text to verify the listing details display correctly across different devices, templates, and storefront layouts.</p>
+        <p>The purpose of this sample content is to simulate a realistic product listing while validating formatting, spacing, HTML rendering, and bullet styling within the platform.</p>
+        <ul>
+          <li>Used for internal workflow and automation testing</li>
+          <li>Verifies HTML formatting and paragraph rendering</li>
+          <li>Tests compatibility with listing templates and themes</li>
+          <li>Ensures bullet points display properly on desktop and mobile</li>
+          <li>Can be copied into staging or development environments</li>
+          <li>Includes placeholder text for mock product demonstrations</li>
+          <li>Helpful for validating import/export listing pipelines</li>
+          <li>Confirms rich text formatting is preserved after publishing</li>
+        </ul>
+        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>
+        <p>Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.</p>
+        <p><strong>Note:</strong> This description is intended solely for testing and demonstration purposes and does not represent a real product listing.</p>`,
       aspects: {
         Brand: ['Test Brand'],
         Color: ['Black'],

@@ -1,79 +1,77 @@
-function ListingDetails({ listing }) {
+import {
+  formatPrice,
+  formatListingDateTime,
+  formatCategoryShort,
+} from "../utils/listingDisplay";
+
+function ListingDetails({ listing, photos, sku }) {
   if (!listing) {
-    return null
+    return null;
   }
 
-  const formatPrice = () => {
-    const price = listing.price
-    const currency = listing.currency || 'USD'
-    if (price === 'N/A' || price === null || price === undefined) {
-      return 'N/A'
-    }
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: currency,
-    }).format(price)
-  }
-
-  const formatDate = (dateString) => {
-    if (!dateString || dateString === 'N/A') {
-      return 'N/A'
-    }
-    try {
-      const date = new Date(dateString)
-      return date.toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-      })
-    } catch {
-      return dateString
-    }
-  }
+  const title = listing.title || "No title";
+  const identifier = sku || listing.itemId || "—";
+  const imageCount = Array.isArray(photos) ? photos.length : 0;
+  const categoryId = String(listing.categoryId ?? "—");
+  const categoryShort = formatCategoryShort(listing.categoryId);
+  const description =
+    typeof listing.description === "string" ? listing.description.trim() : "";
+  const hasDescription =
+    description && description !== "No description available";
 
   return (
-    <div className="mb-8 rounded-xl border border-border-default bg-surface-panel p-6 shadow-sm sm:p-8">
-      <h2 className="mb-6 text-2xl font-semibold leading-snug text-text-primary sm:text-[1.8rem]">
-        {listing.title || 'N/A'}
-      </h2>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <div className="flex flex-col gap-1">
-          <span className="text-sm font-semibold text-text-muted">Item ID:</span>
-          <span className="text-base text-text-primary">{listing.itemId || 'N/A'}</span>
+    <div className="mb-6 rounded-xl border border-border-default bg-surface-panel px-4 pb-4 pt-6 shadow-sm sm:px-5 sm:pb-5 sm:pt-7">
+      <div className="flex flex-col gap-4">
+        <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="line-clamp-2 text-lg font-bold leading-tight text-text-primary sm:text-xl">
+                {title}
+              </h3>
+            </div>
+            <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-muted">
+              <span className="font-mono text-text-muted">{identifier}</span>
+              {listing.itemCreationDate && (
+                <>
+                  <span className="text-text-muted">·</span>
+                  <span>{formatListingDateTime(listing.itemCreationDate)}</span>
+                </>
+              )}
+              <span className="text-text-muted">·</span>
+              <span
+                className="whitespace-nowrap"
+                title="Number of images on the listing"
+              >
+                {imageCount} {imageCount === 1 ? "image" : "images"}
+              </span>
+              <span className="text-text-muted">·</span>
+              <span
+                className="whitespace-nowrap font-medium text-text-muted"
+                title={
+                  categoryId !== "—" ? `Category ID: ${categoryId}` : undefined
+                }
+              >
+                {categoryShort === "—" ? "—" : `Cat ${categoryShort}`}
+              </span>
+            </p>
+          </div>
+          <div className="shrink-0 text-left sm:text-right">
+            <div className="text-xl font-bold text-text-primary sm:text-2xl">
+              {formatPrice(listing.price, listing.currency)}
+            </div>
+          </div>
         </div>
 
-        <div className="flex flex-col gap-1">
-          <span className="text-sm font-semibold text-text-muted">Price:</span>
-          <span className="text-base font-bold text-success">{formatPrice()}</span>
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <span className="text-sm font-semibold text-text-muted">Category ID:</span>
-          <span className="text-base text-text-primary">{listing.categoryId || 'N/A'}</span>
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <span className="text-sm font-semibold text-text-muted">Created:</span>
-          <span className="text-base text-text-primary">{formatDate(listing.itemCreationDate)}</span>
-        </div>
-
-        {listing.estimatedSoldQuantity !== null && listing.estimatedSoldQuantity !== undefined && (
-          <div className="flex flex-col gap-1">
-            <span className="text-sm font-semibold text-text-muted">Estimated Sold:</span>
-            <span className="text-base text-text-primary">{listing.estimatedSoldQuantity}</span>
+        {hasDescription && (
+          <div className="rounded-lg border border-border-default bg-surface-muted p-3">
+            <p className="max-h-[calc(1.625em*6)] min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain whitespace-pre-wrap text-left text-sm leading-relaxed text-text-primary">
+              {description}
+            </p>
           </div>
         )}
       </div>
-
-      {listing.description && listing.description !== 'No description available' && (
-        <div className="mt-6 border-t border-border-default pt-6">
-          <h3 className="mb-2 text-lg text-text-primary">Description</h3>
-          <p className="leading-relaxed text-text-muted">{listing.description}</p>
-        </div>
-      )}
     </div>
-  )
+  );
 }
 
-export default ListingDetails
+export default ListingDetails;

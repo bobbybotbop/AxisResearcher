@@ -1,0 +1,31 @@
+---
+description: Project UI vocabulary — use Reference IDs from docs/UI_VOCABULARY.md
+alwaysApply: true
+---
+
+# UI vocabulary
+
+When the user refers to UI by informal names, map them using `docs/UI_VOCABULARY.md`.
+
+## Listing workflow MessageBarInput
+
+| Reference ID | Meaning |
+|--------------|---------|
+| `listing-bar-pre-link` | MessageBarInput in CreateWorkflow **before** a link is submitted — hero layout, “Reimagine Any Listing”, `listingLinkSubmitted === false` |
+| `listing-bar-post-link` | Same MessageBarInput **after** submit — fixed **bottom** float (transparent wrapper, pill only), always visible (no auto-hide), with integrated chat-context selector inside the pill, `listingLinkSubmitted === true` |
+
+Aliases: “message bar before/after link”, “hero bar”, “bottom bar / dock” → same IDs.
+
+Code: `CreateWorkflow.jsx` (wrapper + `listingLinkSubmitted`), `MessageBarInput.jsx`, `ChatContextSelector.jsx`, `constants/chatContextModes.js`, `App.jsx` (`listingLinkSubmitted` / `testListingLinkSubmitted`).
+
+Do not treat these as two different components — one `MessageBarInput`, two layout states.
+
+## Listing workflow source listing summary
+
+| Reference ID | Meaning |
+|-----|---|
+| `listing-source-summary` | Compact panel rendered by `ListingDetails` above `PhotoGallery` after link submit (`listingLinkSubmitted === true` and `listing` is loaded). Shows fetched eBay listing: title, `{sku} · date · N images · Cat …` meta line, price right-aligned, scrollable description. Replaces the old “Current SKU” banner and the bottom `ListingDetails` panel. |
+
+Aliases: “source listing card”, “listing summary”, “top listing details” → `listing-source-summary`.
+
+Code: `ListingDetails.jsx`, `CreateWorkflow.jsx` (placement + `listing`/`photos`/`sku` props), `utils/listingDisplay.js` (shared formatters with `GeneratedListingCard.jsx`).
