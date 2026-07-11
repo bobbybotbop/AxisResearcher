@@ -9,6 +9,13 @@ import {
 const THUMB_PX = 80;
 const THUMB_GAP = 8;
 
+/** "org/some-model-name-v2-fast" → "some-model-name-v2" (last segment, strip trailing "-fast"/"-flash"/"-pro") */
+function shortenModel(id) {
+  if (!id) return id;
+  const seg = id.split("/").pop();
+  return seg.replace(/-(fast|flash|pro|preview|latest)$/i, "");
+}
+
 /** Thumbnails for all images except the hero; overflow → last slot blurred with +N. */
 function RestGalleryStrip({ urls, heroIndex, onPickIndex }) {
   const containerRef = useRef(null);
@@ -92,6 +99,7 @@ export default function GeneratedListingCard({
   onUpload,
   isUploading,
   uploadResult,
+  quantity,
 }) {
   const urls = Array.isArray(listing.imageUrls) ? listing.imageUrls : [];
   const [imageIndex, setImageIndex] = useState(0);
@@ -260,6 +268,58 @@ export default function GeneratedListingCard({
               >
                 {categoryShort === "—" ? "—" : `Cat ${categoryShort}`}
               </span>
+              {quantity != null ? (
+                <>
+                  <span className="text-text-muted">·</span>
+                  <span className="whitespace-nowrap" title="Live eBay stock quantity">
+                    Qty: {quantity}
+                  </span>
+                </>
+              ) : quantity === null && String(listing.ebayListingId ?? "").trim() ? (
+                <>
+                  <span className="text-text-muted">·</span>
+                  <span className="whitespace-nowrap text-text-muted" title="Quantity unavailable">
+                    Qty: —
+                  </span>
+                </>
+              ) : null}
+              {listing.models && (
+                <>
+                  {listing.models.text_model && (
+                    <>
+                      <span className="text-text-muted">·</span>
+                      <span
+                        className="whitespace-nowrap font-mono text-xs text-text-muted opacity-70"
+                        title={`Text: ${listing.models.text_model}`}
+                      >
+                        {shortenModel(listing.models.text_model)}
+                      </span>
+                    </>
+                  )}
+                  {listing.models.image_model && (
+                    <>
+                      <span className="text-text-muted">·</span>
+                      <span
+                        className="whitespace-nowrap font-mono text-xs text-text-muted opacity-70"
+                        title={`Image: ${listing.models.image_model}`}
+                      >
+                        {shortenModel(listing.models.image_model)}
+                      </span>
+                    </>
+                  )}
+                  {listing.models.classifier_model && (
+                    <>
+                      <span className="text-text-muted">·</span>
+                      <span
+                        className="whitespace-nowrap font-mono text-xs text-text-muted opacity-70"
+                        title={`Classifier: ${listing.models.classifier_model}`}
+                      >
+                        {shortenModel(listing.models.classifier_model)}
+                      </span>
+                    </>
+                  )}
+                </>
+              )}
             </p>
           </div>
           <div className="shrink-0 text-left sm:text-right">

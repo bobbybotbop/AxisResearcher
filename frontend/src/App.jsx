@@ -28,6 +28,8 @@ const DEFAULT_TEXT_MODEL_OPTIONS = [
     value: "deepseek/deepseek-v4-flash",
     label: "DeepSeek V4 Flash",
     provider: "openrouter",
+    inputCostPer1M: 0.13,
+    outputCostPer1M: 0.4,
   },
 ];
 
@@ -36,19 +38,57 @@ const PROVIDER_LABELS = {
   bedrock: "Bedrock",
 };
 
+function modelCostLabel(m) {
+  if (m.costPerImage != null) return `$${m.costPerImage}/img`;
+  if (m.inputCostPer1M != null && m.outputCostPer1M != null)
+    return `$${m.inputCostPer1M}/$${m.outputCostPer1M} per 1M`;
+  return null;
+}
+
+function modelOptionLabel(m) {
+  const cost = modelCostLabel(m);
+  return cost ? `${m.label} — ${cost}` : m.label;
+}
+
+// cost fields: inputCostPer1M ($/1M input tokens), outputCostPer1M ($/1M output tokens),
+// or costPerImage (flat $/image) for image-only generation models.
 const IMAGE_MODEL_OPTIONS = [
   {
     value: "sourceful/riverflow-v2-fast",
     label: "Riverflow V2 Fast",
+    costPerImage: 0.019,
   },
   {
-    value: "google/gemini-2.5-flash-image",
-    label: "Gemini 2.5 Flash Image",
+    value: "sourceful/riverflow-v2.5-fast",
+    label: "Riverflow V2.5 Fast",
+    costPerImage: 0.019,
+  },
+  {
+    value: "google/gemini-3.1-flash-image",
+    label: "Gemini 3.1 Flash Image",
+    inputCostPer1M: 0.5,
+    outputCostPer1M: 3.0,
+  },
+  {
+    value: "google/gemini-3.1-flash-lite-image",
+    label: "Gemini 3.1 Flash Lite Image",
+    inputCostPer1M: 0.25,
+    outputCostPer1M: 1.5,
+  },
+  {
+    value: "bytedance-seed/seedream-4.5",
+    label: "Seedream 4.5",
+    costPerImage: 0.04,
   },
 ];
 
 const CLASSIFIER_MODEL_OPTIONS = [
-  { value: "bytedance-seed/seed-1.6-flash", label: "ByteDance Seed 1.6 Flash" },
+  {
+    value: "bytedance-seed/seed-1.6-flash",
+    label: "ByteDance Seed 1.6 Flash",
+    inputCostPer1M: 0.1,
+    outputCostPer1M: 0.1,
+  },
 ];
 
 /**
@@ -236,6 +276,11 @@ function App() {
   const [selectedListing, setSelectedListing] = useState(null);
   const [listingDetailData, setListingDetailData] = useState(null);
   const [loadingListingDetail, setLoadingListingDetail] = useState(false);
+  const [historyPage, setHistoryPage] = useState(0);
+  const [historyPageSize, setHistoryPageSize] = useState(10);
+  const [listingQuantities, setListingQuantities] = useState({});
+  const [loadingQuantities, setLoadingQuantities] = useState(false);
+  const quantitiesFetchedRef = useRef(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [listingId, setListingId] = useState("");
@@ -250,6 +295,11 @@ function App() {
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [editableDescription, setEditableDescription] = useState("");
   const [isSavingDescription, setIsSavingDescription] = useState(false);
+  const [customPrompt, setCustomPrompt] = useState("");
+  const [selectedImagesForRegen, setSelectedImagesForRegen] = useState([]);
+  const [isTrimming, setIsTrimming] = useState(false);
+  const [isAddingNewVersions, setIsAddingNewVersions] = useState(false);
+  const [promptModifier, setPromptModifier] = useState("");
 
   // Progress tracking states
   const [fetchProgress, setFetchProgress] = useState({
@@ -601,6 +651,16 @@ function App() {
     uploadListingsDateFrom,
     uploadListingsDateTo,
   ]);
+
+  const paginatedListings = useMemo(() => {
+    const start = historyPage * historyPageSize;
+    return filteredUploadListings.slice(start, start + historyPageSize);
+  }, [filteredUploadListings, historyPage, historyPageSize]);
+
+  const totalHistoryPages = Math.max(
+    1,
+    Math.ceil(filteredUploadListings.length / historyPageSize),
+  );
 
   useEffect(() => {
     const hasWorkflowLink =
@@ -1210,6 +1270,8 @@ function App() {
             generated_images: generatedImages,
             listing: listing,
             text_model: textModel,
+            image_model: imageModel,
+            ...(classifyImagesEnabled && { classifier_model: classifierModel }),
           }),
         },
         (event) => {
@@ -1373,13 +1435,41 @@ function App() {
         throw new Error(data.error);
       }
 
-      setAllListings(data.listings || []);
-      console.log("Loaded listings:", data.listings);
+      const listings = data.listings || [];
+      setAllListings(listings);
+      console.log("Loaded listings:", listings);
+      if (!quantitiesFetchedRef.current) {
+        quantitiesFetchedRef.current = true;
+        fetchQuantitiesForPage(listings);
+      }
     } catch (err) {
       console.error("Error fetching listings:", err);
       setError(err.message || "An error occurred while fetching listings");
     } finally {
       setLoadingListings(false);
+    }
+  };
+
+  const fetchQuantitiesForPage = async (listings) => {
+    const skus = listings
+      .filter((l) => String(l.ebayListingId ?? "").trim())
+      .map((l) => l.sku);
+    if (!skus.length) return;
+
+    setLoadingQuantities(true);
+    try {
+      const res = await fetch("/api/listings/quantities", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skus }),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setListingQuantities((prev) => ({ ...prev, ...data }));
+    } catch {
+      // silently ignore — quantities are non-critical
+    } finally {
+      setLoadingQuantities(false);
     }
   };
 
@@ -1501,6 +1591,19 @@ function App() {
       setTokenMessage(null);
     }
   }, [activeTab]);
+
+  // Reset to page 0 when filters change.
+  useEffect(() => {
+    setHistoryPage(0);
+  }, [uploadListingsSearch, uploadListingsDateFrom, uploadListingsDateTo, uploadListingsShowIncomplete]);
+
+  // Re-fetch quantities when navigating to a new page.
+  useEffect(() => {
+    if (paginatedListings.length > 0) {
+      fetchQuantitiesForPage(paginatedListings);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyPage, historyPageSize]);
 
   const fetchTextModels = useCallback(async () => {
     try {
@@ -2229,6 +2332,8 @@ function App() {
                 dateTo={uploadListingsDateTo}
                 onDateFromChange={setUploadListingsDateFrom}
                 onDateToChange={setUploadListingsDateTo}
+                onRefresh={() => fetchQuantitiesForPage(paginatedListings)}
+                isRefreshing={loadingQuantities}
               />
 
               {loadingListings ? (
@@ -2249,18 +2354,64 @@ function App() {
                   </p>
                 </div>
               ) : (
-                <div className="flex flex-col gap-4">
-                  {filteredUploadListings.map((listing) => (
-                    <GeneratedListingCard
-                      key={listing.sku}
-                      listing={listing}
-                      onCardClick={handleListingClick}
-                      onUpload={(l) => handleUploadToEbay(l.sku, l)}
-                      isUploading={uploadingSkus.has(listing.sku)}
-                      uploadResult={uploadResults[listing.sku]}
-                    />
-                  ))}
-                </div>
+                <>
+                  <div className="flex flex-col gap-4">
+                    {paginatedListings.map((listing) => (
+                      <GeneratedListingCard
+                        key={listing.sku}
+                        listing={listing}
+                        onCardClick={handleListingClick}
+                        onUpload={(l) => handleUploadToEbay(l.sku, l)}
+                        isUploading={uploadingSkus.has(listing.sku)}
+                        uploadResult={uploadResults[listing.sku]}
+                        quantity={listingQuantities[listing.sku]}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Pagination controls */}
+                  <div className="mt-6 flex flex-wrap items-center justify-between gap-4">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        aria-label="Previous page"
+                        disabled={historyPage === 0}
+                        onClick={() => setHistoryPage((p) => p - 1)}
+                        className="flex h-9 w-9 items-center justify-center rounded-lg border border-border-default bg-surface-panel text-text-primary shadow-sm transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        ‹
+                      </button>
+                      <span className="min-w-28 text-center text-sm text-text-muted">
+                        Page {historyPage + 1} of {totalHistoryPages}
+                      </span>
+                      <button
+                        type="button"
+                        aria-label="Next page"
+                        disabled={historyPage >= totalHistoryPages - 1}
+                        onClick={() => setHistoryPage((p) => p + 1)}
+                        className="flex h-9 w-9 items-center justify-center rounded-lg border border-border-default bg-surface-panel text-text-primary shadow-sm transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        ›
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-sm text-text-muted">
+                      <span>Per page:</span>
+                      <select
+                        value={historyPageSize}
+                        onChange={(e) => {
+                          setHistoryPageSize(Number(e.target.value));
+                          setHistoryPage(0);
+                        }}
+                        className="rounded-md border border-border-default bg-surface-panel px-2 py-1 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-border-default/40"
+                      >
+                        <option value={10}>10</option>
+                        <option value={25}>25</option>
+                        <option value={50}>50</option>
+                      </select>
+                    </div>
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -2447,7 +2598,7 @@ function App() {
                         >
                           {options.map((option) => (
                             <option key={option.value} value={option.value}>
-                              {option.label}
+                              {modelOptionLabel(option)}
                             </option>
                           ))}
                         </optgroup>
@@ -2463,7 +2614,7 @@ function App() {
                     >
                       {IMAGE_MODEL_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
-                          {option.label}
+                          {modelOptionLabel(option)}
                         </option>
                       ))}
                     </select>
@@ -2487,7 +2638,7 @@ function App() {
                     >
                       {CLASSIFIER_MODEL_OPTIONS.map((option) => (
                         <option key={option.value} value={option.value}>
-                          {option.label}
+                          {modelOptionLabel(option)}
                         </option>
                       ))}
                     </select>

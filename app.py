@@ -23,7 +23,7 @@ from backend.copyScripts.create_image import (
     categorize_images,
     _openrouter_response_dict_to_image_bytes_and_mime,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, save_ebay_listing_id
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, save_ebay_listing_id, update_listing_models
 from backend.helper_functions import remove_html_tags
 import os
 import json
@@ -548,6 +548,11 @@ def create_listing():
             listing = data.get("listing", {})
             sku = data.get("sku")
             text_model = data.get("text_model") or DEFAULT_TEXT_MODEL
+            image_model = data.get("image_model") or DEFAULT_IMAGE_MODEL
+            classifier_model_body = data.get("classifier_model")
+            models_payload = {"text_model": text_model, "image_model": image_model}
+            if classifier_model_body:
+                models_payload["classifier_model"] = classifier_model_body
 
             if not generated_images or not isinstance(generated_images, list):
                 yield error_event("generated_images must be a non-empty array")
@@ -568,10 +573,11 @@ def create_listing():
             from backend.copyScripts.combine_data import listing_file_exists
             if not listing_file_exists(sku):
                 print(f"[API] File doesn't exist for SKU {sku}, creating it...")
-                create_listing_with_preferences(sku=sku)
+                create_listing_with_preferences(sku=sku, models=models_payload)
                 print(f"[API] Created listing JSON file for SKU: {sku}")
             else:
                 print(f"[API] File exists for SKU {sku}, updating existing file")
+                update_listing_models(sku, models_payload)
 
             update_listing_images(sku, generated_images)
             print(f"[API] Added {len(generated_images)} image(s) to listing")
@@ -1138,6 +1144,7 @@ def list_all_listings():
                         'filename': filename,
                         'fileSku': filename.replace('.json', ''),  # SKU derived from filename
                         'ebayListingId': str(listing_data.get('ebayListingId') or '').strip(),
+                        'models': listing_data.get('models') or None,
                     })
                 except Exception as e:
                     print(f"[API] Error reading {filename}: {e}")
@@ -1394,6 +1401,44 @@ def api_test_user_token():
         return jsonify({'result': result, 'error': None}), 200
     except Exception as e:
         return jsonify({'result': None, 'error': str(e)}), 500
+
+
+@app.route('/api/listings/quantities', methods=['POST'])
+def api_listings_quantities():
+    """Fetch live eBay inventory quantity for a list of SKUs."""
+    body = request.get_json(silent=True) or {}
+    skus = body.get('skus', [])
+    if not skus:
+        return jsonify({}), 200
+
+    token = os.getenv('user_token', '').strip()
+    if not token:
+        return jsonify({sku: None for sku in skus}), 200
+
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json',
+    }
+
+    result = {}
+    for sku in skus:
+        try:
+            url = f'https://api.ebay.com/sell/inventory/v1/inventory_item/{sku}'
+            r = requests.get(url, headers=headers, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                qty = (
+                    data.get('availability', {})
+                        .get('shipToLocationAvailability', {})
+                        .get('quantity')
+                )
+                result[sku] = qty
+            else:
+                result[sku] = None
+        except Exception:
+            result[sku] = None
+
+    return jsonify(result), 200
 
 
 @app.route('/api/testing', methods=['POST'])

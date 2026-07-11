@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Search, Filter } from "@mynaui/icons-react";
+import { RefreshCw } from "lucide-react";
 
 export default function UploadListingsToolbar({
   searchQuery,
@@ -10,6 +11,8 @@ export default function UploadListingsToolbar({
   dateTo,
   onDateFromChange,
   onDateToChange,
+  onRefresh,
+  isRefreshing,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const rootRef = useRef(null);
@@ -56,87 +59,106 @@ export default function UploadListingsToolbar({
         />
       </div>
 
-      <div className="relative shrink-0 self-end md:self-start" ref={rootRef}>
-        <button
-          type="button"
-          aria-expanded={menuOpen}
-          aria-haspopup="menu"
-          aria-label="Open filters"
-          onClick={() => setMenuOpen((o) => !o)}
-          className="relative flex h-10 w-10 items-center justify-center rounded-lg border border-border-default bg-surface-panel text-text-primary shadow-sm transition-colors hover:border-border-default hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default/40"
-        >
-          <Filter size={20} aria-hidden />
-          {filtersActive ? (
-            <span
-              className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-text-primary"
-              aria-hidden
-            />
-          ) : null}
-        </button>
-
-        {menuOpen ? (
-          <div
-            role="menu"
-            aria-label="Listing filters"
-            className="absolute right-0 top-full z-30 mt-2 w-[min(calc(100vw-2rem),17rem)] origin-top-right rounded-xl border border-border-default bg-surface-panel py-3 shadow-[0_8px_30px_rgb(0,0,0,0.2)] ring-1 ring-border-default/40"
+      <div className="flex shrink-0 items-center gap-2 self-end md:self-start">
+        {onRefresh && (
+          <button
+            type="button"
+            aria-label="Refresh quantities"
+            title="Refresh quantities"
+            disabled={isRefreshing}
+            onClick={onRefresh}
+            className="flex h-10 w-10 items-center justify-center rounded-lg border border-border-default bg-surface-panel text-text-primary shadow-sm transition-colors hover:border-border-default hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default/40 disabled:opacity-50"
           >
-            <div className="px-4 pb-2">
-              <p className="text-[0.65rem] font-medium uppercase tracking-[0.12em] text-text-muted">
-                Visibility
-              </p>
-              <label className="mt-2 flex cursor-pointer items-center gap-3 text-sm text-text-primary">
-                <input
-                  type="checkbox"
-                  checked={showIncompleteListings}
-                  onChange={(e) =>
-                    onShowIncompleteListingsChange(e.target.checked)
-                  }
-                  className="h-3.5 w-3.5 rounded border-border-default text-text-primary focus:ring-border-default"
-                />
-                <span className="leading-snug">Show incomplete history</span>
-              </label>
-            </div>
+            <RefreshCw
+              size={18}
+              aria-hidden
+              className={isRefreshing ? "animate-spin" : ""}
+            />
+          </button>
+        )}
 
-            <div className="my-2 h-px bg-border-default" />
+        <div className="relative" ref={rootRef}>
+          <button
+            type="button"
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            aria-label="Open filters"
+            onClick={() => setMenuOpen((o) => !o)}
+            className="relative flex h-10 w-10 items-center justify-center rounded-lg border border-border-default bg-surface-panel text-text-primary shadow-sm transition-colors hover:border-border-default hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default/40"
+          >
+            <Filter size={20} aria-hidden />
+            {filtersActive ? (
+              <span
+                className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-text-primary"
+                aria-hidden
+              />
+            ) : null}
+          </button>
 
-            <div className="px-4 pt-1">
-              <div className="flex items-baseline justify-between gap-2">
+          {menuOpen ? (
+            <div
+              role="menu"
+              aria-label="Listing filters"
+              className="absolute right-0 top-full z-30 mt-2 w-[min(calc(100vw-2rem),17rem)] origin-top-right rounded-xl border border-border-default bg-surface-panel py-3 shadow-[0_8px_30px_rgb(0,0,0,0.2)] ring-1 ring-border-default/40"
+            >
+              <div className="px-4 pb-2">
                 <p className="text-[0.65rem] font-medium uppercase tracking-[0.12em] text-text-muted">
-                  Created
+                  Visibility
                 </p>
-                {(dateFrom || dateTo) && (
-                  <button
-                    type="button"
-                    onClick={clearDates}
-                    className="text-xs font-medium text-text-muted underline-offset-2 hover:text-text-primary hover:underline"
-                  >
-                    Clear
-                  </button>
-                )}
+                <label className="mt-2 flex cursor-pointer items-center gap-3 text-sm text-text-primary">
+                  <input
+                    type="checkbox"
+                    checked={showIncompleteListings}
+                    onChange={(e) =>
+                      onShowIncompleteListingsChange(e.target.checked)
+                    }
+                    className="h-3.5 w-3.5 rounded border-border-default text-text-primary focus:ring-border-default"
+                  />
+                  <span className="leading-snug">Show incomplete history</span>
+                </label>
               </div>
-              <div className="mt-3 grid grid-cols-1 gap-2.5">
-                <label className="block">
-                  <span className="mb-1 block text-xs text-text-muted">From</span>
-                  <input
-                    type="date"
-                    value={dateFrom}
-                    onChange={(e) => onDateFromChange(e.target.value)}
-                    className="w-full rounded-md border border-border-default bg-surface-muted px-2.5 py-1.5 text-sm text-text-primary transition-colors focus:border-border-default focus:bg-surface-panel focus:outline-none focus:ring-1 focus:ring-border-default/40"
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-1 block text-xs text-text-muted">To</span>
-                  <input
-                    type="date"
-                    value={dateTo}
-                    onChange={(e) => onDateToChange(e.target.value)}
-                    className="w-full rounded-md border border-border-default bg-surface-muted px-2.5 py-1.5 text-sm text-text-primary transition-colors focus:border-border-default focus:bg-surface-panel focus:outline-none focus:ring-1 focus:ring-border-default/40"
-                  />
-                </label>
+
+              <div className="my-2 h-px bg-border-default" />
+
+              <div className="px-4 pt-1">
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="text-[0.65rem] font-medium uppercase tracking-[0.12em] text-text-muted">
+                    Created
+                  </p>
+                  {(dateFrom || dateTo) && (
+                    <button
+                      type="button"
+                      onClick={clearDates}
+                      className="text-xs font-medium text-text-muted underline-offset-2 hover:text-text-primary hover:underline"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <div className="mt-3 grid grid-cols-1 gap-2.5">
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-text-muted">From</span>
+                    <input
+                      type="date"
+                      value={dateFrom}
+                      onChange={(e) => onDateFromChange(e.target.value)}
+                      className="w-full rounded-md border border-border-default bg-surface-muted px-2.5 py-1.5 text-sm text-text-primary transition-colors focus:border-border-default focus:bg-surface-panel focus:outline-none focus:ring-1 focus:ring-border-default/40"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-text-muted">To</span>
+                    <input
+                      type="date"
+                      value={dateTo}
+                      onChange={(e) => onDateToChange(e.target.value)}
+                      className="w-full rounded-md border border-border-default bg-surface-muted px-2.5 py-1.5 text-sm text-text-primary transition-colors focus:border-border-default focus:bg-surface-panel focus:outline-none focus:ring-1 focus:ring-border-default/40"
+                    />
+                  </label>
+                </div>
               </div>
             </div>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
     </div>
   );
