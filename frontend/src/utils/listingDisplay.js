@@ -13,17 +13,17 @@ export function formatPrice(value, currency = "USD") {
   }
 }
 
-/** e.g. "11 Jul 2026, 14:43" — compact fixed-width; local time 24 h. */
+/** e.g. "07/11/2026, 14:43" — MM/DD/YYYY, local time 24 h. */
 export function formatListingDateTime(iso) {
   if (!iso) return "—";
   try {
     const d = new Date(iso);
-    const day = d.toLocaleString("en-US", { day: "numeric" });
-    const mon = d.toLocaleString("en-US", { month: "short" });
+    const mo = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
     const yr = d.getFullYear();
     const hh = String(d.getHours()).padStart(2, "0");
     const mm = String(d.getMinutes()).padStart(2, "0");
-    return `${day} ${mon} ${yr}, ${hh}:${mm}`;
+    return `${mo}/${day}/${yr}, ${hh}:${mm}`;
   } catch {
     return "—";
   }
