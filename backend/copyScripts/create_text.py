@@ -66,6 +66,19 @@ def create_text(old_title, old_description, model="deepseek/deepseek-v4-flash"):
         return None
 
 
+def _find_closing_quote(s):
+    """Return index of first unescaped double-quote in s, or -1."""
+    i = 0
+    while i < len(s):
+        if s[i] == '\\':
+            i += 2  # skip escaped char
+            continue
+        if s[i] == '"':
+            return i
+        i += 1
+    return -1
+
+
 def create_text_stream(old_title, old_description, model="deepseek/deepseek-v4-flash"):
     """
     Stream optimized title/description tokens as they arrive from the LLM.
@@ -117,12 +130,17 @@ def create_text_stream(old_title, old_description, model="deepseek/deepseek-v4-f
                     if after_colon.startswith('"'):
                         # Everything after the opening quote is title content
                         title_content = after_colon[1:]
-                        # Strip any closing quote if already present
-                        if title_content.endswith('"'):
-                            title_content = title_content[:-1]
-                        if title_content:
-                            yield {"type": "token", "field": "title", "delta": title_content}
-                        state = "in_title"
+                        # Find the first unescaped closing quote in the buffered content
+                        close_pos = _find_closing_quote(title_content)
+                        if close_pos != -1:
+                            title_content = title_content[:close_pos]
+                            if title_content:
+                                yield {"type": "token", "field": "title", "delta": title_content}
+                            state = "before_desc"  # title already complete
+                        else:
+                            if title_content:
+                                yield {"type": "token", "field": "title", "delta": title_content}
+                            state = "in_title"
 
         elif state == "in_title":
             # Send the new token; stop at closing unescaped quote
@@ -150,9 +168,16 @@ def create_text_stream(old_title, old_description, model="deepseek/deepseek-v4-f
                         state = "in_description"
 
         elif state == "in_description":
-            # Description ends at a closing quote not preceded by backslash
-            # For simplicity, yield the whole token; the result event carries the clean version
-            yield {"type": "token", "field": "description", "delta": token}
+            if '"' in token:
+                parts = token.split('"', 1)
+                if parts[0]:
+                    yield {"type": "token", "field": "description", "delta": parts[0]}
+                state = "done"
+            else:
+                yield {"type": "token", "field": "description", "delta": token}
+
+        elif state == "done":
+            pass  # ignore remaining JSON tokens after description closes
 
     # Parse final accumulated JSON for the clean result
     try:
