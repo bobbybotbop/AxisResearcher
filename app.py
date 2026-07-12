@@ -31,7 +31,7 @@ import time
 import uuid
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from backend.copyScripts.create_text import create_text
+from backend.copyScripts.create_text import create_text, create_text_stream
 from backend.copyScripts.imageEditing import remove_background, compile_images
 from backend.copyScripts.upload_to_ebay import upload_complete_listing
 import requests
@@ -73,6 +73,39 @@ def streaming_response(generator):
             'X-Accel-Buffering': 'no'
         }
     )
+
+@app.route('/api/generate-text', methods=['POST'])
+def generate_text():
+    """
+    Stream AI-optimized title and description tokens as NDJSON.
+    Body: { title, description, text_model? }
+    Events:
+      { "type": "token",   "field": "title"|"description", "delta": "..." }
+      { "type": "result",  "data": { "edited_title": "...", "edited_description": "..." } }
+      { "type": "error",   "error": "..." }
+    """
+    data = request.get_json()
+
+    def generate():
+        if not data:
+            yield error_event("Request body must be JSON")
+            return
+
+        title = data.get("title", "")
+        description = data.get("description", "")
+        text_model = data.get("text_model") or DEFAULT_TEXT_MODEL
+
+        if not title:
+            yield error_event("title is required")
+            return
+
+        try:
+            for event in create_text_stream(title, description, model=text_model):
+                yield json.dumps(event) + "\n"
+        except Exception as e:
+            yield error_event(f"Text generation failed: {e}")
+
+    return streaming_response(generate())
 
 @app.route('/api/photos/<path:listing_id>', methods=['GET'])
 def get_listing_photos(listing_id):
@@ -548,6 +581,7 @@ def create_listing():
             listing = data.get("listing", {})
             sku = data.get("sku")
             text_model = data.get("text_model") or DEFAULT_TEXT_MODEL
+            pre_generated_text = data.get("pre_generated_text")  # {"edited_title": ..., "edited_description": ...}
             image_model = data.get("image_model") or DEFAULT_IMAGE_MODEL
             classifier_model_body = data.get("classifier_model")
             models_payload = {"text_model": text_model, "image_model": image_model}
@@ -583,26 +617,27 @@ def create_listing():
             print(f"[API] Added {len(generated_images)} image(s) to listing")
             yield progress_event('Updating images', 'completed')
 
-            # Step 2: Generating optimized text
+            # Step 2: Generating optimized text (skip LLM if text was pre-generated client-side)
             yield progress_event('Generating optimized text', 'in_progress')
 
             old_title = listing.get("title", "")
             old_description = listing.get("description", "")
 
-            if old_title and old_description:
+            if pre_generated_text and pre_generated_text.get("edited_title"):
+                # Text was already generated via /api/generate-text; just persist it
+                update_listing_title_description(sku, pre_generated_text)
+                print(f"[API] Used pre-generated text (skipped LLM)")
+            elif old_title and old_description:
                 print(f"[API] Generating optimized text...")
                 optimized_content = create_text(old_title, old_description, model=text_model)
-
                 if optimized_content:
                     update_listing_title_description(sku, optimized_content)
-                    print(f"[API] Updated listing with optimized text")
                 else:
                     print(f"[API] Warning: Failed to generate optimized text, using original")
-                    optimized_content = {
+                    update_listing_title_description(sku, {
                         "edited_title": old_title,
-                        "edited_description": old_description
-                    }
-                    update_listing_title_description(sku, optimized_content)
+                        "edited_description": old_description,
+                    })
             else:
                 print(f"[API] Warning: No title/description provided, skipping text generation")
 
