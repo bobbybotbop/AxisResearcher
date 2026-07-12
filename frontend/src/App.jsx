@@ -2484,6 +2484,7 @@ function App() {
               isSavingDescription={testIsSavingDescription}
               onListingIdChange={setTestListingId}
               onSubmit={testHandleSubmit}
+              onChatSubmit={() => {}}
               onCategoryChange={(url, cat) =>
                 setTestEditableCategories((prev) => ({ ...prev, [url]: cat }))
               }
