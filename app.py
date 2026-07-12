@@ -32,6 +32,7 @@ import uuid
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from backend.copyScripts.create_text import create_text, create_text_stream
+from backend.ebay_cli import call_text_llm
 from backend.copyScripts.imageEditing import remove_background, compile_images
 from backend.copyScripts.upload_to_ebay import upload_complete_listing
 import requests
@@ -785,8 +786,6 @@ def _nudge_title_length(current_title, text_model):
     Returns (best_title, attempts_log) where best_title is the candidate
     closest to TITLE_TARGET_LEN that we produced (in-range if possible).
     """
-    from backend.ebay_cli import call_text_llm
-
     try:
         decrease_template = _load_prompt("trimTitlePrompt.txt")
     except FileNotFoundError:
@@ -1098,7 +1097,10 @@ def regenerate_title():
         if not user_prompt:
             return jsonify({"error": "user_prompt is required"}), 400
 
-        from backend.ebay_cli import call_text_llm
+        listing_data = load_listing_data(sku=sku)
+        if not listing_data:
+            return jsonify({"error": f"Listing not found for SKU: {sku}"}), 404
+
         prompt = (
             f"Here is an eBay listing title:\n\n{current_title}\n\n"
             f"Please edit the title according to this instruction: {user_prompt}\n\n"
@@ -1109,14 +1111,13 @@ def regenerate_title():
             return jsonify({"error": "LLM returned no response"}), 500
 
         new_title = result.strip().strip('"').strip("'")
+        print(f"[API] Regenerated title for {sku}: '{new_title}' ({len(new_title)} chars)")
 
-        listing_data = load_listing_data(sku=sku)
-        if listing_data:
-            current_desc = listing_data.get("inventoryItem", {}).get("product", {}).get("description", "")
-            update_listing_title_description(sku, {
-                "edited_title": new_title,
-                "edited_description": current_desc
-            })
+        current_desc = listing_data.get("inventoryItem", {}).get("product", {}).get("description", "")
+        update_listing_title_description(sku, {
+            "edited_title": new_title,
+            "edited_description": current_desc
+        })
 
         updated_data = load_listing_data(sku=sku)
         return jsonify({"title": new_title, "listing_data": updated_data}), 200
@@ -1128,7 +1129,7 @@ def regenerate_title():
             error_msg = "An error occurred while regenerating title (encoding error)"
         import traceback
         traceback.print_exc()
-        return jsonify({"error": f"An error occurred: {error_msg}"}), 500
+        return jsonify({"error": f"An error occurred while regenerating title: {error_msg}"}), 500
 
 
 @app.route('/api/update-description', methods=['POST'])
