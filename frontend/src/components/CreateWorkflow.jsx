@@ -75,10 +75,12 @@ function CreateWorkflow({
 }) {
   const [descriptionEditMode, setDescriptionEditMode] = useState(false);
   const [chatContext, setChatContext] = useState(DEFAULT_CHAT_CONTEXT);
+  const [showOriginal, setShowOriginal] = useState(false);
 
   useEffect(() => {
     if (!listingLinkSubmitted) {
       setChatContext(DEFAULT_CHAT_CONTEXT);
+      setShowOriginal(false);
     }
   }, [listingLinkSubmitted]);
 
