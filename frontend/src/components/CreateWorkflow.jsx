@@ -407,43 +407,43 @@ function CreateWorkflow({
                 </div>
               )}
               {!isGeneratingText && (
-              <div className="flex gap-2">
-                {editableTitle?.length > 80 && (
-                  <button
-                    type="button"
-                    className={btnPillSm}
-                    onClick={onTrimTitle}
-                    disabled={isTrimmingTitle}
-                  >
-                    {isTrimmingTitle ? "Trimming..." : "AI Trim Title"}
-                  </button>
-                )}
-                {listingData &&
-                  editableTitle !==
-                    (listingData.inventoryItem?.product?.title || "") && (
+                <div className="flex gap-2">
+                  {editableTitle?.length > 80 && (
                     <button
                       type="button"
                       className={btnPillSm}
-                      onClick={onSaveTitle}
-                      disabled={isSavingTitle}
+                      onClick={onTrimTitle}
+                      disabled={isTrimmingTitle}
                     >
-                      {isSavingTitle ? "Saving..." : "Save Title"}
+                      {isTrimmingTitle ? "Trimming..." : "AI Trim Title"}
                     </button>
                   )}
-              </div>
+                  {listingData &&
+                    editableTitle !==
+                      (listingData.inventoryItem?.product?.title || "") && (
+                      <button
+                        type="button"
+                        className={btnPillSm}
+                        onClick={onSaveTitle}
+                        disabled={isSavingTitle}
+                      >
+                        {isSavingTitle ? "Saving..." : "Save Title"}
+                      </button>
+                    )}
+                </div>
               )}
             </div>
             <div className="border-b border-border-default pb-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <strong className="text-primary">Description:</strong>
                 {!isGeneratingText && (
-                <button
-                  type="button"
-                  className="rounded-lg border-2 border-border-default bg-surface-panel px-3 py-1.5 text-sm font-semibold text-text-primary transition-colors hover:border-primary hover:text-primary"
-                  onClick={() => setDescriptionEditMode((v) => !v)}
-                >
-                  {descriptionEditMode ? "Preview HTML" : "Edit HTML"}
-                </button>
+                  <button
+                    type="button"
+                    className="rounded-lg border-2 border-border-default bg-surface-panel px-3 py-1.5 text-sm font-semibold text-text-primary transition-colors hover:border-primary hover:text-primary"
+                    onClick={() => setDescriptionEditMode((v) => !v)}
+                  >
+                    {descriptionEditMode ? "Preview HTML" : "Edit HTML"}
+                  </button>
                 )}
               </div>
               {descriptionEditMode ? (
@@ -470,22 +470,19 @@ function CreateWorkflow({
                   }}
                 />
               )}
-              {!isGeneratingText && (
-              <div className="mt-2 flex gap-2">
-                {listingData &&
-                  editableDescription !==
-                    (listingData.inventoryItem?.product?.description || "") && (
-                    <button
-                      type="button"
-                      className={btnPillSm}
-                      onClick={onSaveDescription}
-                      disabled={isSavingDescription}
-                    >
-                      {isSavingDescription ? "Saving..." : "Save Description"}
-                    </button>
-                  )}
-              </div>
-              )}
+              {!isGeneratingText &&
+                listingData &&
+                editableDescription !==
+                  (listingData.inventoryItem?.product?.description || "") && (
+                  <button
+                    type="button"
+                    className={`mt-2 ${btnPillSm}`}
+                    onClick={onSaveDescription}
+                    disabled={isSavingDescription}
+                  >
+                    {isSavingDescription ? "Saving..." : "Save Description"}
+                  </button>
+                )}
             </div>
             {/* Original title/description disclosure */}
             <div>
