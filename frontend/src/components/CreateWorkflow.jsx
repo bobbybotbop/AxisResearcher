@@ -323,10 +323,34 @@ function CreateWorkflow({
       )}
 
       {listing && (isGeneratingText || editableTitle !== "") && (
-        <div className="mt-8">
-          <h2 className="mb-4 text-xl font-semibold text-text-primary">
-            {isGeneratingText ? "Writing Listing..." : "Generated Listing"}
-          </h2>
+        <div className="mt-8 rounded-xl border border-border-default bg-surface-panel px-4 pb-4 pt-5 shadow-sm sm:px-5 sm:pb-5 sm:pt-6">
+          {/* Metadata row */}
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {currentSku && (
+                <span className="rounded-md border border-border-default px-2 py-0.5 font-mono text-xs text-text-muted">
+                  {currentSku}
+                </span>
+              )}
+              {listing.itemCreationDate && (
+                <span className="rounded-md border border-border-default px-2 py-0.5 text-xs text-text-muted">
+                  {formatListingDateTime(listing.itemCreationDate)}
+                </span>
+              )}
+              <span className="rounded-md border border-border-default px-2 py-0.5 text-xs text-text-muted">
+                {generatedImages?.length ?? 0}{" "}
+                {(generatedImages?.length ?? 0) === 1 ? "image" : "images"}
+              </span>
+              {listing.categoryId != null && (
+                <span className="rounded-md border border-border-default px-2 py-0.5 text-xs text-text-muted">
+                  Cat {formatCategoryShort(listing.categoryId)}
+                </span>
+              )}
+            </div>
+            <div className="shrink-0 text-xl font-bold text-text-primary">
+              {formatPrice(listing.price, listing.currency)}
+            </div>
+          </div>
           <div className="space-y-4">
             <div className="flex flex-col gap-2 border-b border-border-default pb-4">
               <div className="flex items-center justify-between gap-2">
