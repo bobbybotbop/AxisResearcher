@@ -228,9 +228,7 @@ function App() {
       return "deepseek/deepseek-v4-flash";
     }
   });
-  const [textModelOptions, setTextModelOptions] = useState(
-    DEFAULT_TEXT_MODEL_OPTIONS,
-  );
+  const [textModelOptions, setTextModelOptions] = useState([]);
   const [imageModel, setImageModel] = useState(() => {
     try {
       return (
@@ -281,6 +279,11 @@ function App() {
   const [listingQuantities, setListingQuantities] = useState({});
   const [loadingQuantities, setLoadingQuantities] = useState(false);
   const quantitiesFetchedRef = useRef(false);
+  const [autoRestockEnabled, setAutoRestockEnabled] = useState(false);
+  const [autoRestockQuantity, setAutoRestockQuantity] = useState(15);
+  const [autoRestockConfirm, setAutoRestockConfirm] = useState(null);
+  const [isRestocking, setIsRestocking] = useState(false);
+  const autoRestockRanRef = useRef(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [listingId, setListingId] = useState("");
@@ -1483,6 +1486,94 @@ function App() {
     }
   };
 
+  const performRestock = async (targetQty) => {
+    const qty = Number(targetQty);
+    if (!Number.isFinite(qty) || qty < 0) return;
+
+    const skus = allListings
+      .filter((l) => String(l.ebayListingId ?? "").trim())
+      .filter((l) => listingQuantities[l.sku] !== qty)
+      .map((l) => l.sku);
+    if (!skus.length) return;
+
+    setIsRestocking(true);
+    try {
+      const res = await fetch("/api/listings/restock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ skus, quantity: qty }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to restock listings");
+
+      if (data.updated?.length) {
+        setListingQuantities((prev) => {
+          const next = { ...prev };
+          data.updated.forEach((sku) => {
+            next[sku] = qty;
+          });
+          return next;
+        });
+      }
+      if (data.failed?.length) {
+        setError(`Failed to restock ${data.failed.length} listing(s)`);
+      }
+    } catch (err) {
+      console.error("Error restocking listings:", err);
+      setError(err.message || "Failed to restock listings");
+    } finally {
+      setIsRestocking(false);
+    }
+  };
+
+  const handleAutoRestockEnabledChange = (checked) => {
+    if (checked) {
+      setAutoRestockConfirm({ nextEnabled: true, nextQuantity: autoRestockQuantity });
+    } else {
+      setAutoRestockEnabled(false);
+      fetch("/api/settings/auto-restock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: false }),
+      }).catch(() => {});
+    }
+  };
+
+  const handleAutoRestockQuantityChange = (qty) => {
+    if (autoRestockEnabled) {
+      setAutoRestockConfirm({ nextEnabled: true, nextQuantity: qty });
+    } else {
+      setAutoRestockQuantity(qty);
+      fetch("/api/settings/auto-restock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quantity: qty }),
+      }).catch(() => {});
+    }
+  };
+
+  const confirmAutoRestock = async () => {
+    if (!autoRestockConfirm) return;
+    const { nextEnabled, nextQuantity } = autoRestockConfirm;
+    setAutoRestockConfirm(null);
+    setAutoRestockEnabled(nextEnabled);
+    setAutoRestockQuantity(nextQuantity);
+    try {
+      await fetch("/api/settings/auto-restock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: nextEnabled, quantity: nextQuantity }),
+      });
+    } catch {
+      // settings persistence is non-critical to the immediate restock action
+    }
+    performRestock(nextQuantity);
+  };
+
+  const cancelAutoRestock = () => {
+    setAutoRestockConfirm(null);
+  };
+
   const handleUploadToEbay = async (sku, listingData = null) => {
     if (!sku) {
       setError("No SKU provided");
@@ -1593,8 +1684,35 @@ function App() {
 
   // Tab entry side-effects (also covers back/forward navigation).
   useEffect(() => {
-    if (activeTab === "upload") fetchAllListings();
+    if (activeTab === "upload") {
+      fetchAllListings();
+      fetch("/api/settings/auto-restock")
+        .then((res) => res.json())
+        .then((data) => {
+          if (typeof data.enabled === "boolean") setAutoRestockEnabled(data.enabled);
+          if (typeof data.quantity === "number") setAutoRestockQuantity(data.quantity);
+        })
+        .catch(() => {});
+    }
   }, [activeTab]);
+
+  // Auto-restock: run once per History tab load, after listings + quantities are in.
+  useEffect(() => {
+    if (
+      activeTab === "upload" &&
+      autoRestockEnabled &&
+      allListings.length > 0 &&
+      quantitiesFetchedRef.current &&
+      !autoRestockRanRef.current
+    ) {
+      autoRestockRanRef.current = true;
+      performRestock(autoRestockQuantity);
+    }
+    if (activeTab !== "upload") {
+      autoRestockRanRef.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, autoRestockEnabled, allListings, listingQuantities]);
   useEffect(() => {
     if (activeTab === "settings") {
       fetchTokenInfo();
@@ -1621,9 +1739,11 @@ function App() {
       const data = await res.json();
       if (Array.isArray(data?.models) && data.models.length > 0) {
         setTextModelOptions(data.models);
+      } else {
+        setTextModelOptions(DEFAULT_TEXT_MODEL_OPTIONS);
       }
     } catch {
-      // Keep defaults on failure; user can still pick the OpenRouter model.
+      setTextModelOptions(DEFAULT_TEXT_MODEL_OPTIONS);
     }
   }, []);
 
@@ -2344,6 +2464,12 @@ function App() {
                 onDateToChange={setUploadListingsDateTo}
                 onRefresh={() => fetchQuantitiesForPage(paginatedListings)}
                 isRefreshing={loadingQuantities}
+                autoRestockEnabled={autoRestockEnabled}
+                autoRestockQuantity={autoRestockQuantity}
+                onAutoRestockEnabledChange={handleAutoRestockEnabledChange}
+                onAutoRestockQuantityChange={handleAutoRestockQuantityChange}
+                onManualRestock={() => performRestock(autoRestockQuantity)}
+                isRestocking={isRestocking}
               />
 
               {loadingListings ? (
@@ -2375,6 +2501,7 @@ function App() {
                         isUploading={uploadingSkus.has(listing.sku)}
                         uploadResult={uploadResults[listing.sku]}
                         quantity={listingQuantities[listing.sku]}
+                        loadingQuantity={loadingQuantities}
                       />
                     ))}
                   </div>
@@ -2423,6 +2550,46 @@ function App() {
                   </div>
                 </>
               )}
+            </div>
+          )}
+
+          {/* Auto-restock confirmation modal */}
+          {autoRestockConfirm && (
+            <div
+              className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4"
+              onClick={cancelAutoRestock}
+            >
+              <div
+                className="max-w-md rounded-xl bg-surface-panel p-6 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h2 className="mb-3 text-lg font-semibold text-text-primary">
+                  Confirm auto-restock
+                </h2>
+                <p className="mb-6 text-sm text-text-primary">
+                  Auto-restock will set the stock of <strong>all</strong> live
+                  listings to{" "}
+                  <strong>{autoRestockConfirm.nextQuantity}</strong>,
+                  increasing or decreasing quantities as needed. This cannot
+                  be undone automatically. Continue?
+                </p>
+                <div className="flex justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={cancelAutoRestock}
+                    className="rounded-lg border border-border-default bg-surface-panel px-4 py-2 text-sm text-text-primary transition-colors hover:bg-surface-hover"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmAutoRestock}
+                    className="rounded-lg border border-border-default bg-primary px-4 py-2 text-sm text-white transition-colors hover:opacity-90"
+                  >
+                    Confirm
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 

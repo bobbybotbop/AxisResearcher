@@ -420,6 +420,76 @@ def save_ebay_listing_id(sku=None, filename=None, ebay_listing_id=None):
         return False
 
 
+def get_auto_restock_settings():
+    """
+    Read auto-restock settings from listingPreferences.json.
+
+    Returns:
+        dict: {"enabled": bool, "quantity": int}
+    """
+    config = load_config()
+    return {
+        "enabled": bool(config.get("auto_restock_enabled", False)),
+        "quantity": int(config.get("auto_restock_quantity", config["default_quantity"])),
+    }
+
+
+def save_auto_restock_settings(enabled=None, quantity=None):
+    """
+    Persist auto-restock settings to listingPreferences.json.
+
+    Args:
+        enabled (bool, optional): New enabled state. Unchanged if None.
+        quantity (int, optional): New target quantity. Unchanged if None.
+
+    Returns:
+        dict: {"enabled": bool, "quantity": int} reflecting the saved state.
+    """
+    config = load_config()
+    if enabled is not None:
+        config["auto_restock_enabled"] = bool(enabled)
+    if quantity is not None:
+        config["auto_restock_quantity"] = int(quantity)
+    save_config(config)
+    return {
+        "enabled": bool(config.get("auto_restock_enabled", False)),
+        "quantity": int(config.get("auto_restock_quantity", config["default_quantity"])),
+    }
+
+
+def update_local_listing_quantity(sku=None, quantity=None):
+    """
+    Update the locally cached offer quantity for a listing after a successful
+    eBay quantity write, so Generated_Listings/<sku>.json stays in sync.
+
+    Args:
+        sku: Used with load_listing_data rules when filename is None.
+        quantity (int): New quantity to store.
+
+    Returns:
+        bool: True if written successfully.
+    """
+    if quantity is None:
+        print("❌ update_local_listing_quantity: quantity is required")
+        return False
+
+    filepath = resolve_listing_json_path(sku=sku)
+    if not os.path.exists(filepath):
+        print(f"⚠️  update_local_listing_quantity: file not found: {filepath}")
+        return False
+
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            listing_data = json.load(f)
+        listing_data.setdefault("offer", {})["quantity"] = int(quantity)
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(listing_data, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"❌ update_local_listing_quantity error: {e}")
+        return False
+
+
 def backfill_ebay_listing_id_on_all_files():
     """
     Add ebayListingId: \"\" to each Generated_Listings/*.json that lacks the key.

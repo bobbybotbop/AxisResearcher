@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Search, Filter } from "@mynaui/icons-react";
 import { RefreshCw } from "lucide-react";
+import { btnPillSm } from "../styles/buttonPill";
 
 export default function UploadListingsToolbar({
   searchQuery,
@@ -13,12 +14,27 @@ export default function UploadListingsToolbar({
   onDateToChange,
   onRefresh,
   isRefreshing,
+  autoRestockEnabled,
+  autoRestockQuantity,
+  onAutoRestockEnabledChange,
+  onAutoRestockQuantityChange,
+  onManualRestock,
+  isRestocking,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const rootRef = useRef(null);
+  const [quantityDraft, setQuantityDraft] = useState(
+    String(autoRestockQuantity ?? ""),
+  );
+
+  useEffect(() => {
+    setQuantityDraft(String(autoRestockQuantity ?? ""));
+  }, [autoRestockQuantity]);
 
   const filtersActive =
-    showIncompleteListings || Boolean(dateFrom?.trim()) || Boolean(dateTo?.trim());
+    showIncompleteListings ||
+    Boolean(dateFrom?.trim()) ||
+    Boolean(dateTo?.trim());
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -46,37 +62,42 @@ export default function UploadListingsToolbar({
   };
 
   return (
-    <div className="mb-5 mt-8 flex flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-4">
-      <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-border-default bg-surface-panel px-3 py-2.5 shadow-sm transition-colors focus-within:border-border-default focus-within:ring-1 focus-within:ring-border-default/40">
-        <Search size={20} className="shrink-0 text-text-muted" aria-hidden />
-        <input
-          type="search"
-          value={searchQuery}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Search by title…"
-          className="min-w-0 flex-1 border-0 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted"
-          aria-label="Search history by title"
-        />
-      </div>
+    <div className="mb-5 mt-8 flex items-center gap-3">
+      {/* Search bar + Refresh + Filter: one connected group, fills available space */}
+      <div className="flex h-10 min-w-0 flex-1 items-stretch overflow-hidden rounded-lg border border-border-default bg-surface-panel shadow-sm transition-colors focus-within:ring-1 focus-within:ring-border-default/40">
+        <div className="flex flex-1 items-center gap-2 px-3">
+          <Search size={20} className="shrink-0 text-text-muted" aria-hidden />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Search by title…"
+            className="min-w-0 flex-1 border-0 bg-transparent text-sm text-text-primary outline-none placeholder:text-text-muted"
+            aria-label="Search history by title"
+          />
+        </div>
 
-      <div className="flex shrink-0 items-center gap-2 self-end md:self-start">
         {onRefresh && (
-          <button
-            type="button"
-            aria-label="Refresh quantities"
-            title="Refresh quantities"
-            disabled={isRefreshing}
-            onClick={onRefresh}
-            className="flex h-10 w-10 items-center justify-center rounded-lg border border-border-default bg-surface-panel text-text-primary shadow-sm transition-colors hover:border-border-default hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default/40 disabled:opacity-50"
-          >
-            <RefreshCw
-              size={18}
-              aria-hidden
-              className={isRefreshing ? "animate-spin" : ""}
-            />
-          </button>
+          <>
+            <span className="w-px bg-border-default" aria-hidden />
+            <button
+              type="button"
+              aria-label="Refresh quantities"
+              title="Refresh quantities"
+              disabled={isRefreshing}
+              onClick={onRefresh}
+              className="flex w-10 shrink-0 items-center justify-center text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-default/40 disabled:opacity-50"
+            >
+              <RefreshCw
+                size={18}
+                aria-hidden
+                className={isRefreshing ? "animate-spin" : ""}
+              />
+            </button>
+          </>
         )}
 
+        <span className="w-px bg-border-default" aria-hidden />
         <div className="relative" ref={rootRef}>
           <button
             type="button"
@@ -84,7 +105,7 @@ export default function UploadListingsToolbar({
             aria-haspopup="menu"
             aria-label="Open filters"
             onClick={() => setMenuOpen((o) => !o)}
-            className="relative flex h-10 w-10 items-center justify-center rounded-lg border border-border-default bg-surface-panel text-text-primary shadow-sm transition-colors hover:border-border-default hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default/40"
+            className="relative flex h-full w-10 items-center justify-center text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-default/40"
           >
             <Filter size={20} aria-hidden />
             {filtersActive ? (
@@ -137,7 +158,9 @@ export default function UploadListingsToolbar({
                 </div>
                 <div className="mt-3 grid grid-cols-1 gap-2.5">
                   <label className="block">
-                    <span className="mb-1 block text-xs text-text-muted">From</span>
+                    <span className="mb-1 block text-xs text-text-muted">
+                      From
+                    </span>
                     <input
                       type="date"
                       value={dateFrom}
@@ -146,7 +169,9 @@ export default function UploadListingsToolbar({
                     />
                   </label>
                   <label className="block">
-                    <span className="mb-1 block text-xs text-text-muted">To</span>
+                    <span className="mb-1 block text-xs text-text-muted">
+                      To
+                    </span>
                     <input
                       type="date"
                       value={dateTo}
@@ -160,6 +185,46 @@ export default function UploadListingsToolbar({
           ) : null}
         </div>
       </div>
+
+      {/* Auto-restock: far right */}
+      {onAutoRestockEnabledChange && (
+        <div className="flex h-10 shrink-0 items-center gap-3 rounded-lg border border-border-default bg-surface-panel px-3 shadow-sm">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-text-primary">
+            <input
+              type="checkbox"
+              checked={autoRestockEnabled}
+              onChange={(e) => onAutoRestockEnabledChange(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-border-default text-text-primary focus:ring-border-default"
+            />
+            <span className="whitespace-nowrap">Auto-restock</span>
+          </label>
+          <input
+            type="number"
+            min="0"
+            value={quantityDraft}
+            onChange={(e) => setQuantityDraft(e.target.value)}
+            onBlur={() => {
+              const n = parseInt(quantityDraft, 10);
+              if (Number.isFinite(n) && n >= 0) {
+                onAutoRestockQuantityChange(n);
+              } else {
+                setQuantityDraft(String(autoRestockQuantity ?? ""));
+              }
+            }}
+            aria-label="Auto-restock target quantity"
+            className="w-14 rounded border border-border-default bg-surface-muted px-2 py-1 text-sm text-text-primary"
+          />
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={onManualRestock}
+        disabled={isRestocking}
+        className={btnPillSm}
+      >
+        {isRestocking ? "Restocking…" : "Restock now"}
+      </button>
     </div>
   );
 }

@@ -100,6 +100,7 @@ export default function GeneratedListingCard({
   isUploading,
   uploadResult,
   quantity,
+  loadingQuantity,
 }) {
   const urls = Array.isArray(listing.imageUrls) ? listing.imageUrls : [];
   const [imageIndex, setImageIndex] = useState(0);
@@ -268,19 +269,22 @@ export default function GeneratedListingCard({
               >
                 {categoryShort === "—" ? "—" : `Cat ${categoryShort}`}
               </span>
-              {quantity != null ? (
+              {String(listing.ebayListingId ?? "").trim() ? (
                 <>
                   <span className="text-text-muted">·</span>
-                  <span className="whitespace-nowrap" title="Live eBay stock quantity">
-                    Qty: {quantity}
-                  </span>
-                </>
-              ) : quantity === null && String(listing.ebayListingId ?? "").trim() ? (
-                <>
-                  <span className="text-text-muted">·</span>
-                  <span className="whitespace-nowrap text-text-muted" title="Quantity unavailable">
-                    Qty: —
-                  </span>
+                  {quantity != null ? (
+                    <span className="whitespace-nowrap" title="Live eBay stock quantity">
+                      Qty: {quantity}
+                    </span>
+                  ) : loadingQuantity ? (
+                    <span className="whitespace-nowrap text-text-muted inline-flex items-center gap-1" title="Loading quantity">
+                      Qty: <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent opacity-50" />
+                    </span>
+                  ) : (
+                    <span className="whitespace-nowrap text-text-muted" title="Quantity unavailable">
+                      Qty: —
+                    </span>
+                  )}
                 </>
               ) : null}
               {listing.models && (

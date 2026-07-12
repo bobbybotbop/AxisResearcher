@@ -23,7 +23,7 @@ from backend.copyScripts.create_image import (
     categorize_images,
     _openrouter_response_dict_to_image_bytes_and_mime,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, save_ebay_listing_id, update_listing_models
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity
 from backend.helper_functions import remove_html_tags
 import os
 import json
@@ -1405,7 +1405,12 @@ def api_test_user_token():
 
 @app.route('/api/listings/quantities', methods=['POST'])
 def api_listings_quantities():
-    """Fetch live eBay inventory quantity for a list of SKUs."""
+    """Fetch live eBay offer-level quantity for a list of SKUs.
+
+    Reads from the Offer API (GET /offer?sku=...) which reflects what
+    buyers actually see on the listing, including sold-quantity adjustments.
+    Falls back to the inventory-item level if no offer exists.
+    """
     body = request.get_json(silent=True) or {}
     skus = body.get('skus', [])
     if not skus:
@@ -1423,22 +1428,162 @@ def api_listings_quantities():
     result = {}
     for sku in skus:
         try:
-            url = f'https://api.ebay.com/sell/inventory/v1/inventory_item/{sku}'
+            # Try offer endpoint first (reflects live listing quantity)
+            url = f'https://api.ebay.com/sell/inventory/v1/offer?sku={sku}'
             r = requests.get(url, headers=headers, timeout=10)
+            qty = None
             if r.status_code == 200:
-                data = r.json()
-                qty = (
-                    data.get('availability', {})
+                resp_data = r.json()
+                offers = resp_data.get('offers', [])
+                if offers:
+                    offer = offers[0]
+                    qty = offer.get('availableQuantity')
+                    if qty is None:
+                        qty = offer.get('quantity')
+                    if qty is None:
+                        print(f"[quantities] SKU {sku}: offer keys = {list(offer.keys())}")
+
+            # Fall back to inventory item quantity if offer didn't provide one
+            if qty is None:
+                inv_url = f'https://api.ebay.com/sell/inventory/v1/inventory_item/{sku}'
+                r2 = requests.get(inv_url, headers=headers, timeout=10)
+                if r2.status_code == 200:
+                    qty = (
+                        r2.json()
+                        .get('availability', {})
                         .get('shipToLocationAvailability', {})
                         .get('quantity')
-                )
-                result[sku] = qty
-            else:
-                result[sku] = None
-        except Exception:
+                    )
+
+            result[sku] = qty
+        except Exception as e:
+            print(f"[quantities] SKU {sku}: exception {e}")
             result[sku] = None
 
     return jsonify(result), 200
+
+
+@app.route('/api/settings/auto-restock', methods=['GET'])
+def api_get_auto_restock_settings():
+    """Read the persisted auto-restock enabled flag and target quantity."""
+    try:
+        return jsonify(get_auto_restock_settings()), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/settings/auto-restock', methods=['POST'])
+def api_save_auto_restock_settings():
+    """Persist the auto-restock enabled flag and/or target quantity."""
+    body = request.get_json(silent=True) or {}
+    enabled = body.get('enabled')
+    quantity = body.get('quantity')
+    try:
+        if quantity is not None:
+            quantity = int(quantity)
+            if quantity < 0:
+                return jsonify({'error': 'quantity must be a non-negative integer'}), 400
+        settings = save_auto_restock_settings(enabled=enabled, quantity=quantity)
+        return jsonify(settings), 200
+    except (TypeError, ValueError):
+        return jsonify({'error': 'quantity must be a non-negative integer'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/listings/restock', methods=['POST'])
+def api_restock_listings():
+    """
+    Set the live eBay quantity for a batch of SKUs using the Sell Inventory
+    API's bulkUpdatePriceQuantity call (up to 25 SKUs per eBay request).
+
+    Updates both the inventory-item level (shipToLocationAvailability) and
+    the offer level (offers[].availableQuantity) so that decreases are
+    reflected on the live listing, not just the inventory record.
+    """
+    body = request.get_json(silent=True) or {}
+    skus = [str(s).strip() for s in body.get('skus', []) if str(s).strip()]
+    quantity = body.get('quantity')
+
+    try:
+        quantity = int(quantity)
+        if quantity < 0:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({'error': 'quantity must be a non-negative integer'}), 400
+
+    if not skus:
+        return jsonify({'updated': [], 'failed': [], 'quantity': quantity}), 200
+
+    token = os.getenv('user_token', '').strip()
+    if not token:
+        return jsonify({'updated': [], 'failed': skus, 'quantity': quantity, 'error': 'No user token available'}), 200
+
+    headers = {
+        'Authorization': f'Bearer {token}',
+        'Content-Type': 'application/json',
+    }
+
+    # Fetch offer IDs for each SKU so we can update offer-level quantity too
+    sku_offer_ids = {}
+    for sku in skus:
+        try:
+            r = requests.get(
+                f'https://api.ebay.com/sell/inventory/v1/offer?sku={sku}',
+                headers=headers,
+                timeout=10,
+            )
+            if r.status_code == 200:
+                offers = r.json().get('offers', [])
+                if offers:
+                    sku_offer_ids[sku] = offers[0].get('offerId')
+        except Exception:
+            pass
+
+    updated = []
+    failed = []
+    batch_size = 25
+    for i in range(0, len(skus), batch_size):
+        batch = skus[i:i + batch_size]
+        requests_list = []
+        for sku in batch:
+            entry = {
+                'sku': sku,
+                'shipToLocationAvailability': {'quantity': quantity},
+            }
+            offer_id = sku_offer_ids.get(sku)
+            if offer_id:
+                entry['offers'] = [
+                    {'offerId': offer_id, 'availableQuantity': quantity}
+                ]
+            requests_list.append(entry)
+
+        payload = {'requests': requests_list}
+        try:
+            r = requests.post(
+                'https://api.ebay.com/sell/inventory/v1/bulk_update_price_quantity',
+                headers=headers,
+                json=payload,
+                timeout=30,
+            )
+            if r.status_code not in (200, 207):
+                failed.extend(batch)
+                continue
+            data = r.json() or {}
+            responses = data.get('responses', [])
+            status_by_sku = {resp.get('sku'): resp.get('statusCode') for resp in responses}
+            for sku in batch:
+                if status_by_sku.get(sku) == 200:
+                    updated.append(sku)
+                else:
+                    failed.append(sku)
+        except Exception:
+            failed.extend(batch)
+
+    for sku in updated:
+        update_local_listing_quantity(sku=sku, quantity=quantity)
+
+    return jsonify({'updated': updated, 'failed': failed, 'quantity': quantity}), 200
 
 
 @app.route('/api/testing', methods=['POST'])
