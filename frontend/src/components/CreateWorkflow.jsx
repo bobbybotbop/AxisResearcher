@@ -45,6 +45,7 @@ function CreateWorkflow({
   onCancelTextGen = () => {},
   onListingIdChange,
   onSubmit,
+  onChatSubmit,
   onCategoryChange,
   onSkipPhoto,
   onConfirmCategories,
@@ -118,7 +119,17 @@ function CreateWorkflow({
           </h1>
         </div>
         <form
-          onSubmit={onSubmit}
+          onSubmit={(e) => {
+            if (!listingLinkSubmitted) {
+              onSubmit(e);
+            } else {
+              e.preventDefault();
+              const prompt = listingId.trim();
+              if (!prompt) return;
+              onListingIdChange("");
+              onChatSubmit(prompt, chatContext);
+            }
+          }}
           className={`mx-auto flex w-full max-w-[min(42rem,100%)] transition-[margin] duration-500 ease-in-out ${
             listingLinkSubmitted
               ? "pointer-events-auto mt-0"

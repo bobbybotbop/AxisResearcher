@@ -931,6 +931,18 @@ function App() {
     fetchListingPhotos();
   };
 
+  const handleChatSubmit = (prompt, context) => {
+    if (context === "title") regenerateTitle(prompt);
+    else if (context === "description") regenerateDescription(prompt);
+    else if (context === "photos") enterPhotoSelectionMode(prompt);
+    else if (context === "metadata") regenerateMetadata(prompt);
+  };
+
+  const regenerateTitle = async (_prompt) => { /* TODO Task 2 */ };
+  const regenerateDescription = async (_prompt) => { /* TODO Task 3 */ };
+  const enterPhotoSelectionMode = (_prompt) => { /* TODO Task 4 */ };
+  const regenerateMetadata = async (_prompt) => { /* TODO Task 5 */ };
+
   const openLightbox = (index) => {
     setLightboxIndex(index);
     setLightboxOpen(true);
@@ -3125,6 +3137,7 @@ function App() {
               isSavingDescription={isSavingDescription}
               onListingIdChange={setListingId}
               onSubmit={handleSubmit}
+              onChatSubmit={handleChatSubmit}
               onCategoryChange={handleCategoryChange}
               onSkipPhoto={handleSkipPhoto}
               onPromptModifierChange={setPromptModifier}
