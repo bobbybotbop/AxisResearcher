@@ -342,6 +342,9 @@ function App() {
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [editableDescription, setEditableDescription] = useState("");
   const [isSavingDescription, setIsSavingDescription] = useState(false);
+  const [isRegeneratingTitle, setIsRegeneratingTitle] = useState(false);
+  const [isRegeneratingDescription, setIsRegeneratingDescription] = useState(false);
+  const [isRegeneratingMetadata, setIsRegeneratingMetadata] = useState(false);
   const [customPrompt, setCustomPrompt] = useState("");
   const [selectedImagesForRegen, setSelectedImagesForRegen] = useState([]);
   const [isTrimming, setIsTrimming] = useState(false);
@@ -938,7 +941,33 @@ function App() {
     else if (context === "metadata") regenerateMetadata(prompt);
   };
 
-  const regenerateTitle = async (_prompt) => { /* TODO Task 2 */ };
+  const regenerateTitle = async (prompt) => {
+    if (!currentSku || !editableTitle) return;
+    setIsRegeneratingTitle(true);
+    try {
+      const res = await fetch("/api/regenerate-title", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sku: currentSku,
+          current_title: editableTitle,
+          user_prompt: prompt,
+          model: textModel,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setError(data.error || "Failed to regenerate title");
+        return;
+      }
+      setEditableTitle(data.title);
+      if (data.listing_data) setListingData(data.listing_data);
+    } catch (err) {
+      setError(err.message || "Failed to regenerate title");
+    } finally {
+      setIsRegeneratingTitle(false);
+    }
+  };
   const regenerateDescription = async (_prompt) => { /* TODO Task 3 */ };
   const enterPhotoSelectionMode = (_prompt) => { /* TODO Task 4 */ };
   const regenerateMetadata = async (_prompt) => { /* TODO Task 5 */ };
@@ -3116,7 +3145,7 @@ function App() {
               generatedImages={generatedImages}
               selectedImagesForRegen={selectedImagesForRegen}
               customPrompt={customPrompt}
-              loading={loading}
+              loading={loading || isRegeneratingTitle || isRegeneratingDescription || isRegeneratingMetadata}
               error={error}
               isConfirming={isConfirming}
               isRegenerating={isRegenerating}

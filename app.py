@@ -1067,6 +1067,70 @@ def update_title():
         }), 500
 
 
+@app.route('/api/regenerate-title', methods=['POST'])
+def regenerate_title():
+    """
+    Regenerate the listing title using the LLM.
+
+    Accepts JSON body:
+    {
+        "sku": "AXIS_XX",
+        "current_title": "current editable title",
+        "user_prompt": "make it shorter and highlight the brand",
+        "model": "deepseek/deepseek-v4-flash"
+    }
+    """
+    try:
+        print("[API] /api/regenerate-title endpoint called")
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Request body must be JSON"}), 400
+
+        sku = data.get("sku")
+        current_title = data.get("current_title", "")
+        user_prompt = data.get("user_prompt", "")
+        model = data.get("model", DEFAULT_TEXT_MODEL)
+
+        if not sku:
+            return jsonify({"error": "sku is required"}), 400
+        if not current_title:
+            return jsonify({"error": "current_title is required"}), 400
+        if not user_prompt:
+            return jsonify({"error": "user_prompt is required"}), 400
+
+        from backend.ebay_cli import call_text_llm
+        prompt = (
+            f"Here is an eBay listing title:\n\n{current_title}\n\n"
+            f"Please edit the title according to this instruction: {user_prompt}\n\n"
+            "Return only the new title text, no quotes, no explanation."
+        )
+        result = call_text_llm(prompt, model=model)
+        if not result:
+            return jsonify({"error": "LLM returned no response"}), 500
+
+        new_title = result.strip().strip('"').strip("'")
+
+        listing_data = load_listing_data(sku=sku)
+        if listing_data:
+            current_desc = listing_data.get("inventoryItem", {}).get("product", {}).get("description", "")
+            update_listing_title_description(sku, {
+                "edited_title": new_title,
+                "edited_description": current_desc
+            })
+
+        updated_data = load_listing_data(sku=sku)
+        return jsonify({"title": new_title, "listing_data": updated_data}), 200
+
+    except Exception as e:
+        try:
+            error_msg = str(e)
+        except UnicodeEncodeError:
+            error_msg = "An error occurred while regenerating title (encoding error)"
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"An error occurred: {error_msg}"}), 500
+
+
 @app.route('/api/update-description', methods=['POST'])
 def update_description():
     """
