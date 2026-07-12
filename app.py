@@ -23,7 +23,7 @@ from backend.copyScripts.create_image import (
     categorize_images,
     _openrouter_response_dict_to_image_bytes_and_mime,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path
 from backend.helper_functions import remove_html_tags
 import os
 import json
@@ -1273,15 +1273,12 @@ def regenerate_metadata():
         listing_data["inventoryItem"] = inventory
         listing_data["offer"] = offer
 
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        output_dir = os.path.join(base_dir, "Generated_Listings")
-        filepath = os.path.join(output_dir, f"{sku}.json")
+        filepath = resolve_listing_json_path(sku=sku)
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(listing_data, f, indent=2, ensure_ascii=False)
 
         print(f"[API] Regenerated metadata for {sku}")
-        updated_data = load_listing_data(sku=sku)
-        return jsonify({"metadata": updated_metadata, "listing_data": updated_data}), 200
+        return jsonify({"metadata": updated_metadata, "listing_data": listing_data}), 200
 
     except Exception as e:
         try:
