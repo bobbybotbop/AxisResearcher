@@ -25,7 +25,7 @@ function CreateWorkflow({
   skippedPhotos,
   generatedImages,
   loading,
-  error,
+  error = null,
   isConfirming,
   isCreatingListing,
   listingData,
@@ -68,6 +68,10 @@ function CreateWorkflow({
   lightboxOpen,
   lightboxIndex,
   classifyImagesEnabled = true,
+  photoSelectionActive = false,
+  pendingPhotoPrompt = "",
+  onConfirmPhotoRegeneration,
+  onCancelPhotoRegeneration,
 }) {
   const [descriptionEditMode, setDescriptionEditMode] = useState(false);
   const [chatContext, setChatContext] = useState(DEFAULT_CHAT_CONTEXT);
@@ -151,11 +155,15 @@ function CreateWorkflow({
             showChatContextSelector={listingLinkSubmitted}
             chatContext={chatContext}
             onChatContextChange={setChatContext}
+            hasError={!listingLinkSubmitted && Boolean(error)}
           />
         </form>
+        {!listingLinkSubmitted && error && (
+          <p className="mt-3 text-center text-sm text-red-500">{error}</p>
+        )}
       </motion.div>
 
-      {error && (
+      {listingLinkSubmitted && error && (
         <div className="mb-8 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
           <p>{error}</p>
         </div>
@@ -286,6 +294,30 @@ function CreateWorkflow({
               )}
             </Droppable>
           </DragDropContext>
+          {photoSelectionActive && (
+            <div className="mt-3 flex items-center gap-3 rounded-xl border border-border-default bg-surface-panel px-4 py-3">
+              <span className="flex-1 text-sm text-text-muted">
+                Regenerate selected with:{" "}
+                <span className="font-medium text-text-primary">
+                  &quot;{pendingPhotoPrompt}&quot;
+                </span>
+              </span>
+              <button
+                type="button"
+                className={btnPillSm}
+                onClick={onCancelPhotoRegeneration}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={btnPillLg}
+                onClick={onConfirmPhotoRegeneration}
+              >
+                Regenerate Selected
+              </button>
+            </div>
+          )}
         </div>
       )}
 

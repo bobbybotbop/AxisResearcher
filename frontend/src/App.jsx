@@ -345,6 +345,8 @@ function App() {
   const [isRegeneratingTitle, setIsRegeneratingTitle] = useState(false);
   const [isRegeneratingDescription, setIsRegeneratingDescription] = useState(false);
   const [isRegeneratingMetadata, setIsRegeneratingMetadata] = useState(false);
+  const [photoSelectionActive, setPhotoSelectionActive] = useState(false);
+  const [pendingPhotoPrompt, setPendingPhotoPrompt] = useState("");
   const [customPrompt, setCustomPrompt] = useState("");
   const [selectedImagesForRegen, setSelectedImagesForRegen] = useState([]);
   const [isTrimming, setIsTrimming] = useState(false);
@@ -996,7 +998,26 @@ function App() {
       setIsRegeneratingDescription(false);
     }
   };
-  const enterPhotoSelectionMode = (_prompt) => { /* TODO Task 4 */ };
+  const enterPhotoSelectionMode = (prompt) => {
+    if (!generatedImages || generatedImages.length === 0) return;
+    setPendingPhotoPrompt(prompt);
+    setPhotoSelectionActive(true);
+    setSelectedImagesForRegen(generatedImages.map((_, i) => i));
+  };
+
+  const handleConfirmPhotoRegeneration = () => {
+    const prompt = pendingPhotoPrompt;
+    setPhotoSelectionActive(false);
+    setPendingPhotoPrompt("");
+    handleRegenerateImages(prompt);
+  };
+
+  const handleCancelPhotoRegeneration = () => {
+    setPhotoSelectionActive(false);
+    setPendingPhotoPrompt("");
+    setSelectedImagesForRegen([]);
+  };
+
   const regenerateMetadata = async (_prompt) => { /* TODO Task 5 */ };
 
   const openLightbox = (index) => {
@@ -1252,8 +1273,9 @@ function App() {
     });
   };
 
-  const handleRegenerateImages = async () => {
-    if (!customPrompt?.trim()) {
+  const handleRegenerateImages = async (promptOverride) => {
+    const promptToUse = (promptOverride ?? customPrompt)?.trim();
+    if (!promptToUse) {
       setError("Please enter a prompt to guide the regeneration");
       return;
     }
@@ -1270,7 +1292,6 @@ function App() {
       const imagesToRegen = selectedImagesForRegen.map(
         (index) => generatedImages[index],
       );
-      const promptToUse = customPrompt.trim();
       console.log("Regenerating images:", imagesToRegen);
       console.log("Custom prompt:", promptToUse);
 
@@ -3223,6 +3244,10 @@ function App() {
               lightboxOpen={lightboxOpen}
               lightboxIndex={lightboxIndex}
               classifyImagesEnabled={classifyImagesEnabled}
+              photoSelectionActive={photoSelectionActive}
+              pendingPhotoPrompt={pendingPhotoPrompt}
+              onConfirmPhotoRegeneration={handleConfirmPhotoRegeneration}
+              onCancelPhotoRegeneration={handleCancelPhotoRegeneration}
             />
           )}
         </div>
