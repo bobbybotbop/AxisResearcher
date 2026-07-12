@@ -2399,6 +2399,20 @@ function App() {
     }, 600);
   };
 
+  const testHandleChatSubmit = (prompt, context) => {
+    console.log("[Test] chat submit:", context, prompt);
+    if (context === "title") {
+      setTimeout(() => {
+        setTestEditableTitle(`[Regenerated] ${prompt}`);
+      }, 1500);
+    } else if (context === "description") {
+      setTimeout(() => {
+        setTestEditableDescription(`<p>[Regenerated description for: ${prompt}]</p>`);
+      }, 1500);
+    }
+    // photos and metadata: no-op in test mode
+  };
+
   const testHandleTrimSelected = async () => {
     const indices =
       testSelectedImagesForRegen.length > 0
@@ -2585,7 +2599,11 @@ function App() {
               isSavingDescription={testIsSavingDescription}
               onListingIdChange={setTestListingId}
               onSubmit={testHandleSubmit}
-              onChatSubmit={() => {}}
+              onChatSubmit={testHandleChatSubmit}
+              photoSelectionActive={false}
+              pendingPhotoPrompt=""
+              onConfirmPhotoRegeneration={() => {}}
+              onCancelPhotoRegeneration={() => {}}
               onCategoryChange={(url, cat) =>
                 setTestEditableCategories((prev) => ({ ...prev, [url]: cat }))
               }
