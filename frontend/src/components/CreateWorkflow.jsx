@@ -52,7 +52,6 @@ function CreateWorkflow({
   onRemoveFromListing,
   onAddToListing,
   onAddToOriginalPhotos,
-  onConfirmAndEditText,
   onEditableTitleChange,
   onTrimTitle,
   onSaveTitle,

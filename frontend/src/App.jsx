@@ -3138,7 +3138,6 @@ function App() {
               onRemoveFromListing={handleRemoveFromListing}
               onAddToListing={handleAddToListing}
               onAddToOriginalPhotos={handleAddToOriginalPhotos}
-              onConfirmAndEditText={handleCreateListing}
               isGeneratingText={isGeneratingText}
               onCancelTextGen={cancelTextGeneration}
               onEditableTitleChange={setEditableTitle}
