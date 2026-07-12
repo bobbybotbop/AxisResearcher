@@ -1740,11 +1740,26 @@ def get_tokens():
             return val[:15] + '...' + val[-15:]
         return val
 
+    user_valid = None
+    app_valid = None
+    if tokens['user_token']:
+        try:
+            user_valid = _test_user_token().get('ok', False)
+        except Exception:
+            user_valid = False
+    if tokens['application_token']:
+        try:
+            app_valid = _test_application_token().get('ok', False)
+        except Exception:
+            app_valid = False
+
     return jsonify({
         'user_token': mask(tokens['user_token']),
         'application_token': mask(tokens['application_token']),
         'user_token_set': bool(tokens['user_token']),
         'application_token_set': bool(tokens['application_token']),
+        'user_token_valid': user_valid,
+        'application_token_valid': app_valid,
         'token_last_updated_ms': token_last_updated_ms
     })
 

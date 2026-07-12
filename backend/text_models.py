@@ -15,6 +15,8 @@ OPENROUTER_TEXT_MODELS = [
         "value": "deepseek/deepseek-v4-flash",
         "label": "DeepSeek V4 Flash",
         "provider": "openrouter",
+        "inputCostPer1M": 0.13,
+        "outputCostPer1M": 0.4,
     },
 ]
 
@@ -25,16 +27,22 @@ BEDROCK_TEXT_MODELS = [
         "value": "us.anthropic.claude-sonnet-4-6",
         "label": "Claude Sonnet 4.6",
         "provider": "bedrock",
+        "inputCostPer1M": 3.0,
+        "outputCostPer1M": 15.0,
     },
     {
         "value": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
         "label": "Claude Haiku 4.5",
         "provider": "bedrock",
+        "inputCostPer1M": 0.8,
+        "outputCostPer1M": 4.0,
     },
     {
         "value": "deepseek.v3.2",
         "label": "DeepSeek V3.2",
         "provider": "bedrock",
+        "inputCostPer1M": 0.27,
+        "outputCostPer1M": 1.1,
     },
 ]
 

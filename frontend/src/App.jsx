@@ -452,6 +452,16 @@ function App() {
           user_token: data.user_token || "",
           application_token: data.application_token || "",
         });
+        if (data.user_token_valid === false) {
+          setUserTokenResult({ ok: false, message: "Token is invalid or expired" });
+        } else if (data.user_token_valid === true) {
+          setUserTokenResult({ ok: true, message: "User token is valid" });
+        }
+        if (data.application_token_valid === false) {
+          setAppTokenResult({ ok: false, message: "Token is invalid or expired" });
+        } else if (data.application_token_valid === true) {
+          setAppTokenResult({ ok: true, message: "Application token is valid" });
+        }
         if (
           typeof data.token_last_updated_ms === "number" &&
           Number.isFinite(data.token_last_updated_ms)
@@ -2672,7 +2682,7 @@ function App() {
                 <div className="mb-4 flex flex-col gap-1.5 font-mono text-sm">
                   <span
                     className={`rounded px-2 py-1 break-all ${
-                      tokenInfo.user_token_set
+                      tokenInfo.user_token_set && !(userTokenResult && !userTokenResult.ok)
                         ? "bg-emerald-100 text-emerald-900"
                         : "bg-red-100 text-red-900"
                     }`}
@@ -2684,7 +2694,7 @@ function App() {
                   </span>
                   <span
                     className={`rounded px-2 py-1 break-all ${
-                      tokenInfo.application_token_set
+                      tokenInfo.application_token_set && !(appTokenResult && !appTokenResult.ok)
                         ? "bg-emerald-100 text-emerald-900"
                         : "bg-red-100 text-red-900"
                     }`}

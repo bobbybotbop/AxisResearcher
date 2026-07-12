@@ -188,13 +188,18 @@ def exchange_code_for_user_token(authorization_code):
         'Content-Type': 'application/x-www-form-urlencoded',
         'Authorization': f'Basic {auth_bytes}'
     }
-    decoded_code = urllib.parse.unquote(authorization_code)
+    # Decode the code if user copied it from the URL bar (where it's percent-encoded).
+    # requests will re-encode the form body, so we need the raw value here.
+    code = urllib.parse.unquote(authorization_code)
     data = {
         'grant_type': 'authorization_code',
-        'code': decoded_code,
+        'code': code,
         'redirect_uri': REDIRECT_URI,
-        'scope': ' '.join(DEFAULT_USER_SCOPES)
     }
+    print(f"  [DEBUG] redirect_uri: {REDIRECT_URI}")
+    print(f"  [DEBUG] code starts with: {code[:20]}...")
+    print(f"  [DEBUG] code length (decoded): {len(code)}")
+    print(f"  [DEBUG] client_id: {CLIENT_ID[:10]}..." if CLIENT_ID else "  [DEBUG] client_id: MISSING")
     try:
         response = requests.post(TOKEN_URL, headers=headers, data=data)
         if response.status_code == 200:

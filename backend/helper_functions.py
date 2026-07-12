@@ -90,8 +90,20 @@ def handle_http_error(response, context=""):
 
 
 def refreshToken():
-    """Open eBay OAuth link for token refresh"""
-    import webbrowser
-    webbrowser.open("https://developer.ebay.com/my/auth/?env=production&index=0")
+    """Refresh both application and user tokens using the OAuth endpoint."""
+    from backend.refreshToken import refresh_user_and_app_token
+    results = refresh_user_and_app_token()
+    if results['application_token_refreshed']:
+        print("✅ Application token refreshed")
+    if results['user_token_refreshed']:
+        print("✅ User token refreshed")
+    if results['errors']:
+        for err in results['errors']:
+            print(f"❌ {err}")
+        print("💡 If refresh_token is revoked (e.g. password change), run:")
+        print("   python -m backend.refreshToken open-consent")
+        print("   Then exchange the code:")
+        print("   python testing/test_update_tokens.py exchange <code>")
+    return results.get('application_token_refreshed')
 
     

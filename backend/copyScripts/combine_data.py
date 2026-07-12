@@ -237,17 +237,20 @@ def create_listing_with_preferences(
     sku=None,
     inventory_item_data=None,
     offer_data=None,
-    output_filename=None
+    output_filename=None,
+    models=None,
 ):
     """
     Create an inventory and offer object and save it to a JSON file in Generated_Listings folder.
-    
+
     Args:
         sku (str, optional): SKU for the listing. If None, generates a new SKU using get_next_sku().
         inventory_item_data (dict, optional): Inventory item data. If None, uses TEST_INVENTORY_ITEM_DATA.
         offer_data (dict, optional): Offer data. If None, uses TEST_OFFER_DATA.
         output_filename (str, optional): Output filename. If None, generates timestamped filename.
-    
+        models (dict, optional): AI models used, e.g. {"text_model": "...", "image_model": "...", "classifier_model": "..."}.
+            classifier_model is optional. If None, the key is omitted entirely.
+
     Returns:
         str: The SKU that was used/created
     """
@@ -278,10 +281,12 @@ def create_listing_with_preferences(
     listing_object = {
         "sku": sku,
         "createdDateTime": created_datetime,
-        "ebayListingId": "",
-        "inventoryItem": inventory_item_data,
-        "offer": offer_data
     }
+    if models:
+        listing_object["models"] = models
+    listing_object["ebayListingId"] = ""
+    listing_object["inventoryItem"] = inventory_item_data
+    listing_object["offer"] = offer_data
     
     # Create Generated_Listings directory if it doesn't exist
     # Use absolute path to ensure we're saving in the right directory (project root)
@@ -344,17 +349,14 @@ def load_listing_data(sku=None, filename=None):
     
     try:
         if not os.path.exists(filepath):
-            print(f"⚠️  Listing data file not found: {filepath}")
             return None
-        
-        # Load from JSON file
+
         with open(filepath, 'r', encoding='utf-8') as f:
             listing_data = json.load(f)
-        
-        print(f"✅ Loaded listing data from: {os.path.basename(filepath)}")
+
         return listing_data
     except Exception as e:
-        print(f"❌ Error loading listing data file: {e}")
+        print(f"Error loading listing data file: {e}")
         return None
 
 
@@ -470,6 +472,33 @@ def listing_file_exists(sku):
     output_dir = os.path.join(base_dir, "Generated_Listings")
     filepath = os.path.join(output_dir, f"{sku}.json")
     return os.path.exists(filepath)
+
+
+def update_listing_models(sku, models):
+    """
+    Write or overwrite the "models" key in an existing listing JSON file.
+
+    Args:
+        sku (str): The SKU of the listing to update
+        models (dict): e.g. {"text_model": "...", "image_model": "...", "classifier_model": "..."}
+
+    Returns:
+        bool: True if successful
+    """
+    if not listing_file_exists(sku):
+        print(f"⚠️  update_listing_models: file not found for SKU: {sku}")
+        return False
+    filepath = resolve_listing_json_path(sku=sku)
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            listing_data = json.load(f)
+        listing_data["models"] = models
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(listing_data, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"❌ update_listing_models error: {e}")
+        return False
 
 
 def update_listing_title_description(sku, new_text):
