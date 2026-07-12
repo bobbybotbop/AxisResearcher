@@ -23,7 +23,7 @@ from backend.copyScripts.create_image import (
     categorize_images,
     _openrouter_response_dict_to_image_bytes_and_mime,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm
 from backend.helper_functions import remove_html_tags
 import os
 import json
@@ -1196,6 +1196,101 @@ def regenerate_description():
         import traceback
         traceback.print_exc()
         return jsonify({"error": f"An error occurred while regenerating description: {error_msg}"}), 500
+
+
+@app.route('/api/regenerate-metadata', methods=['POST'])
+def regenerate_metadata():
+    """
+    Regenerate listing metadata (aspects, condition, price, category) using LLM.
+
+    Accepts JSON body:
+    {
+        "sku": "AXIS_XX",
+        "user_prompt": "it is black and made in the US",
+        "model": "deepseek/deepseek-v4-flash"
+    }
+    """
+    try:
+        print("[API] /api/regenerate-metadata endpoint called")
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Request body must be JSON"}), 400
+
+        sku = data.get("sku")
+        user_prompt = data.get("user_prompt", "")
+        model = data.get("model", DEFAULT_TEXT_MODEL)
+
+        if not sku:
+            return jsonify({"error": "sku is required"}), 400
+        if not user_prompt:
+            return jsonify({"error": "user_prompt is required"}), 400
+
+        listing_data = load_listing_data(sku=sku)
+        if not listing_data:
+            return jsonify({"error": f"Listing not found for SKU: {sku}"}), 404
+
+        metadata = extract_metadata_for_llm(listing_data)
+        metadata_json = json.dumps(metadata, indent=2)
+
+        prompt = (
+            f"{metadata_json}\n\n"
+            f"Please edit the JSON according to this instruction and keep it in JSON format.\n\n"
+            f"{user_prompt}"
+        )
+        result = call_text_llm(prompt, model=model)
+        if not result:
+            return jsonify({"error": "LLM returned no response"}), 500
+
+        # Strip markdown fences if present
+        clean = result.strip()
+        if clean.startswith("```"):
+            parts = clean.split("```")
+            clean = parts[1] if len(parts) > 1 else clean
+            if clean.startswith("json"):
+                clean = clean[4:]
+        clean = clean.strip()
+
+        try:
+            updated_metadata = json.loads(clean)
+        except json.JSONDecodeError as e:
+            return jsonify({"error": f"LLM returned malformed JSON: {str(e)}. Raw: {result[:300]}"}), 400
+
+        # Merge updated fields back into the listing
+        inventory = listing_data.get("inventoryItem", {})
+        product = inventory.get("product", {})
+        offer = listing_data.get("offer", {})
+
+        if "condition" in updated_metadata:
+            inventory["condition"] = updated_metadata["condition"]
+        if "aspects" in updated_metadata:
+            product["aspects"] = updated_metadata["aspects"]
+        if "price" in updated_metadata:
+            offer.setdefault("pricingSummary", {})["price"] = updated_metadata["price"]
+        if "categoryId" in updated_metadata:
+            offer["categoryId"] = updated_metadata["categoryId"]
+
+        inventory["product"] = product
+        listing_data["inventoryItem"] = inventory
+        listing_data["offer"] = offer
+
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        output_dir = os.path.join(base_dir, "Generated_Listings")
+        filepath = os.path.join(output_dir, f"{sku}.json")
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(listing_data, f, indent=2, ensure_ascii=False)
+
+        print(f"[API] Regenerated metadata for {sku}")
+        updated_data = load_listing_data(sku=sku)
+        return jsonify({"metadata": updated_metadata, "listing_data": updated_data}), 200
+
+    except Exception as e:
+        try:
+            error_msg = str(e)
+        except UnicodeEncodeError:
+            error_msg = "An error occurred while regenerating metadata (encoding error)"
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"An error occurred while regenerating metadata: {error_msg}"}), 500
 
 
 @app.route('/api/update-description', methods=['POST'])

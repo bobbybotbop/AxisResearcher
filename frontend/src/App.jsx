@@ -1018,7 +1018,31 @@ function App() {
     setSelectedImagesForRegen([]);
   };
 
-  const regenerateMetadata = async (_prompt) => { /* TODO Task 5 */ };
+  const regenerateMetadata = async (prompt) => {
+    if (!currentSku) return;
+    setIsRegeneratingMetadata(true);
+    try {
+      const res = await fetch("/api/regenerate-metadata", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sku: currentSku,
+          user_prompt: prompt,
+          model: textModel,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setError(data.error || "Failed to regenerate metadata");
+        return;
+      }
+      if (data.listing_data) setListingData(data.listing_data);
+    } catch (err) {
+      setError(err.message || "Failed to regenerate metadata");
+    } finally {
+      setIsRegeneratingMetadata(false);
+    }
+  };
 
   const openLightbox = (index) => {
     setLightboxIndex(index);

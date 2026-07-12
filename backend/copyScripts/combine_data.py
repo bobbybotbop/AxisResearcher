@@ -360,6 +360,23 @@ def load_listing_data(sku=None, filename=None):
         return None
 
 
+def extract_metadata_for_llm(listing_data):
+    """
+    Extract only the eBay-upload-relevant fields from a draft listing dict,
+    suitable for sending to an LLM for editing.
+    """
+    inventory = listing_data.get("inventoryItem", {})
+    product = inventory.get("product", {})
+    offer = listing_data.get("offer", {})
+
+    return {
+        "condition": inventory.get("condition", ""),
+        "aspects": product.get("aspects", {}),
+        "price": offer.get("pricingSummary", {}).get("price", {}),
+        "categoryId": offer.get("categoryId", ""),
+    }
+
+
 def _get_generated_listings_dir():
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     return os.path.join(base_dir, "Generated_Listings")
