@@ -487,6 +487,37 @@ function CreateWorkflow({
               </div>
               )}
             </div>
+            {/* Original title/description disclosure */}
+            <div>
+              <button
+                type="button"
+                className="flex items-center gap-1 text-sm text-text-muted hover:text-text-primary"
+                onClick={() => setShowOriginal((v) => !v)}
+              >
+                <span>{showOriginal ? "▼" : "▶"}</span>
+                <span>
+                  {showOriginal
+                    ? "Hide original title and description"
+                    : "View original title and description"}
+                </span>
+              </button>
+              {showOriginal && (
+                <div className="mt-3 space-y-2">
+                  <p className="text-sm font-semibold text-text-primary">
+                    {listing.title || "No title"}
+                  </p>
+                  {listing.description &&
+                    listing.description.trim() !== "" &&
+                    listing.description !== "No description available" && (
+                      <div className="max-h-[calc(1.625em*6)] overflow-y-auto overscroll-contain rounded-lg border border-border-default bg-surface-muted p-3">
+                        <p className="whitespace-pre-wrap text-sm leading-relaxed text-text-primary">
+                          {listing.description.trim()}
+                        </p>
+                      </div>
+                    )}
+                </div>
+              )}
+            </div>
           </div>
 
           {isCreatingListing &&
