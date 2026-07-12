@@ -758,7 +758,6 @@ function App() {
       return;
     }
 
-    setListingLinkSubmitted(true);
     setLoading(true);
     setError(null);
     setPhotos([]);
@@ -814,6 +813,7 @@ function App() {
         },
       );
 
+      setListingLinkSubmitted(true);
       setPhotos(data.photos || []);
       const initialCategories = classifyImagesEnabled
         ? data.categories || {}
@@ -854,6 +854,7 @@ function App() {
       });
     } catch (err) {
       setError(err.message || "An error occurred while fetching the listing");
+      setListingLinkSubmitted(false);
       setPhotos([]);
       setCategories({});
       setEditableCategories({});
@@ -968,7 +969,33 @@ function App() {
       setIsRegeneratingTitle(false);
     }
   };
-  const regenerateDescription = async (_prompt) => { /* TODO Task 3 */ };
+  const regenerateDescription = async (prompt) => {
+    if (!currentSku || !editableDescription) return;
+    setIsRegeneratingDescription(true);
+    try {
+      const res = await fetch("/api/regenerate-description", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sku: currentSku,
+          current_description: editableDescription,
+          user_prompt: prompt,
+          model: textModel,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        setError(data.error || "Failed to regenerate description");
+        return;
+      }
+      setEditableDescription(data.description);
+      if (data.listing_data) setListingData(data.listing_data);
+    } catch (err) {
+      setError(err.message || "Failed to regenerate description");
+    } finally {
+      setIsRegeneratingDescription(false);
+    }
+  };
   const enterPhotoSelectionMode = (_prompt) => { /* TODO Task 4 */ };
   const regenerateMetadata = async (_prompt) => { /* TODO Task 5 */ };
 
@@ -3165,7 +3192,7 @@ function App() {
               isTrimmingTitle={isTrimmingTitle}
               isSavingTitle={isSavingTitle}
               isSavingDescription={isSavingDescription}
-              onListingIdChange={setListingId}
+              onListingIdChange={(v) => { setListingId(v); if (!listingLinkSubmitted) setError(null); }}
               onSubmit={handleSubmit}
               onChatSubmit={handleChatSubmit}
               onCategoryChange={handleCategoryChange}

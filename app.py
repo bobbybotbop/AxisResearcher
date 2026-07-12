@@ -1132,6 +1132,72 @@ def regenerate_title():
         return jsonify({"error": f"An error occurred while regenerating title: {error_msg}"}), 500
 
 
+@app.route('/api/regenerate-description', methods=['POST'])
+def regenerate_description():
+    """
+    Regenerate the listing description using the LLM.
+
+    Accepts JSON body:
+    {
+        "sku": "AXIS_XX",
+        "current_description": "<p>...</p>",
+        "user_prompt": "add bullet points for features",
+        "model": "deepseek/deepseek-v4-flash"
+    }
+    """
+    try:
+        print("[API] /api/regenerate-description endpoint called")
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Request body must be JSON"}), 400
+
+        sku = data.get("sku")
+        current_description = data.get("current_description", "")
+        user_prompt = data.get("user_prompt", "")
+        model = data.get("model", DEFAULT_TEXT_MODEL)
+
+        if not sku:
+            return jsonify({"error": "sku is required"}), 400
+        if not current_description:
+            return jsonify({"error": "current_description is required"}), 400
+        if not user_prompt:
+            return jsonify({"error": "user_prompt is required"}), 400
+
+        listing_data = load_listing_data(sku=sku)
+        if not listing_data:
+            return jsonify({"error": f"Listing not found for SKU: {sku}"}), 404
+
+        prompt = (
+            f"Here is an eBay listing description (HTML):\n\n{current_description}\n\n"
+            f"Please edit the description according to this instruction: {user_prompt}\n\n"
+            "Return only the new description HTML, no explanation, no markdown fences."
+        )
+        result = call_text_llm(prompt, model=model)
+        if not result:
+            return jsonify({"error": "LLM returned no response"}), 500
+
+        new_description = result.strip()
+        print(f"[API] Regenerated description for {sku}: {len(new_description)} chars")
+
+        current_title = listing_data.get("inventoryItem", {}).get("product", {}).get("title", "")
+        update_listing_title_description(sku, {
+            "edited_title": current_title,
+            "edited_description": new_description
+        })
+
+        updated_data = load_listing_data(sku=sku)
+        return jsonify({"description": new_description, "listing_data": updated_data}), 200
+
+    except Exception as e:
+        try:
+            error_msg = str(e)
+        except UnicodeEncodeError:
+            error_msg = "An error occurred while regenerating description (encoding error)"
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"An error occurred while regenerating description: {error_msg}"}), 500
+
+
 @app.route('/api/update-description', methods=['POST'])
 def update_description():
     """
