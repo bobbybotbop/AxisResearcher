@@ -182,7 +182,9 @@ async function fetchWithTextStream(url, options, onToken, onResult) {
       const event = JSON.parse(buffer);
       if (event.type === "result") onResult(event.data);
       else if (event.type === "error") errorMsg = event.error;
-    } catch (e) {}
+    } catch (e) {
+      console.warn("Failed to parse final text stream buffer:", buffer, e);
+    }
   }
   if (errorMsg) throw new Error(errorMsg);
 }
@@ -739,7 +741,13 @@ function App() {
       handleCreateListing();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [generatedImages, textGenComplete, isGeneratingText]);
+  }, [generatedImages, textGenComplete, isGeneratingText, isCreatingListing]);
+
+  useEffect(() => {
+    return () => {
+      textGenControllerRef.current?.abort();
+    };
+  }, []);
 
   const fetchListingPhotos = async () => {
     if (!listingId.trim()) {
@@ -915,6 +923,7 @@ function App() {
       textGenControllerRef.current = null;
     }
     setIsGeneratingText(false);
+    setTextGenComplete(false);
   };
 
   const handleSubmit = (e) => {
@@ -2575,6 +2584,8 @@ function App() {
               lightboxOpen={testLightboxOpen}
               lightboxIndex={testLightboxIndex}
               classifyImagesEnabled={classifyImagesEnabled}
+              isGeneratingText={false}
+              onCancelTextGen={() => {}}
             />
           )}
 
