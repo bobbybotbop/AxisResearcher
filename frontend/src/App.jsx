@@ -148,6 +148,45 @@ async function fetchWithProgress(url, options, onProgress) {
   return result;
 }
 
+async function fetchWithTextStream(url, options, onToken, onResult) {
+  const response = await fetch(url, options);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let errorMsg = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line);
+        if (event.type === "token") {
+          onToken(event.field, event.delta);
+        } else if (event.type === "result") {
+          onResult(event.data);
+        } else if (event.type === "error") {
+          errorMsg = event.error;
+        }
+      } catch (e) {
+        console.warn("Failed to parse text stream event:", line, e);
+      }
+    }
+  }
+  if (buffer.trim()) {
+    try {
+      const event = JSON.parse(buffer);
+      if (event.type === "result") onResult(event.data);
+      else if (event.type === "error") errorMsg = event.error;
+    } catch (e) {}
+  }
+  if (errorMsg) throw new Error(errorMsg);
+}
+
 /** Map AI-generated URLs back onto photosToProcess order. */
 function mergeGeneratedImages(
   photosToProcess,
@@ -174,6 +213,9 @@ function App() {
   const [generatedImages, setGeneratedImages] = useState([]);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isCreatingListing, setIsCreatingListing] = useState(false);
+  const [isGeneratingText, setIsGeneratingText] = useState(false);
+  const [textGenComplete, setTextGenComplete] = useState(false);
+  const textGenControllerRef = useRef(null);
   const [listingData, setListingData] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
@@ -684,6 +726,21 @@ function App() {
     }
   }, [activeTab, listingLinkSubmitted, testListingLinkSubmitted]);
 
+  useEffect(() => {
+    if (
+      generatedImages.length > 0 &&
+      textGenComplete &&
+      !isGeneratingText &&
+      !isCreatingListing &&
+      !listingData &&
+      currentSku &&
+      listing
+    ) {
+      handleCreateListing();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generatedImages, textGenComplete, isGeneratingText]);
+
   const fetchListingPhotos = async () => {
     if (!listingId.trim()) {
       setError("Please enter an eBay listing ID or URL");
@@ -698,6 +755,11 @@ function App() {
     setListing(null);
     setCurrentSku(null);
     setSkippedPhotos(new Set());
+    setIsGeneratingText(false);
+    setTextGenComplete(false);
+    setEditableTitle("");
+    setEditableDescription("");
+    setListingData(null);
 
     // Initialize progress tracking
     const steps = classifyImagesEnabled
@@ -753,6 +815,12 @@ function App() {
       setListing(data.listing || null);
       setCurrentSku(data.sku || null);
       setGeneratedImages([]);
+      if (data.listing?.title) {
+        startTextGeneration(
+          data.listing.title,
+          data.listing.description || "",
+        );
+      }
 
       // Auto-skip images categorized as real_world_image or edited_image
       // (only when classification is enabled; otherwise nothing is auto-skipped)
@@ -782,6 +850,10 @@ function App() {
       setCurrentSku(null);
       setSkippedPhotos(new Set());
       setGeneratedImages([]);
+      setIsGeneratingText(false);
+      setTextGenComplete(false);
+      setEditableTitle("");
+      setEditableDescription("");
       setFetchProgress({
         isActive: false,
         currentStep: null,
@@ -791,6 +863,58 @@ function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const startTextGeneration = async (title, description) => {
+    if (textGenControllerRef.current) {
+      textGenControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    textGenControllerRef.current = controller;
+
+    setIsGeneratingText(true);
+    setTextGenComplete(false);
+    setEditableTitle("");
+    setEditableDescription("");
+
+    try {
+      await fetchWithTextStream(
+        "/api/generate-text",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, description, text_model: textModel }),
+          signal: controller.signal,
+        },
+        (field, delta) => {
+          if (field === "title") {
+            setEditableTitle((prev) => prev + delta);
+          } else if (field === "description") {
+            setEditableDescription((prev) => prev + delta);
+          }
+        },
+        (data) => {
+          setEditableTitle(data.edited_title || "");
+          setEditableDescription(data.edited_description || "");
+          setTextGenComplete(true);
+        },
+      );
+    } catch (err) {
+      if (err.name !== "AbortError") {
+        console.error("Text generation error:", err);
+        setError(err.message || "Text generation failed");
+      }
+    } finally {
+      setIsGeneratingText(false);
+    }
+  };
+
+  const cancelTextGeneration = () => {
+    if (textGenControllerRef.current) {
+      textGenControllerRef.current.abort();
+      textGenControllerRef.current = null;
+    }
+    setIsGeneratingText(false);
   };
 
   const handleSubmit = (e) => {
@@ -1234,7 +1358,7 @@ function App() {
     }
   };
 
-  const handleConfirmAndEditText = async () => {
+  const handleCreateListing = async () => {
     if (generatedImages.length === 0) {
       setError("No generated images to add to listing");
       return;
@@ -1285,6 +1409,9 @@ function App() {
             text_model: textModel,
             image_model: imageModel,
             ...(classifyImagesEnabled && { classifier_model: classifierModel }),
+            pre_generated_text: (editableTitle || editableDescription)
+              ? { edited_title: editableTitle, edited_description: editableDescription }
+              : undefined,
           }),
         },
         (event) => {
@@ -3000,7 +3127,9 @@ function App() {
               onRemoveFromListing={handleRemoveFromListing}
               onAddToListing={handleAddToListing}
               onAddToOriginalPhotos={handleAddToOriginalPhotos}
-              onConfirmAndEditText={handleConfirmAndEditText}
+              onConfirmAndEditText={handleCreateListing}
+              isGeneratingText={isGeneratingText}
+              onCancelTextGen={cancelTextGeneration}
               onEditableTitleChange={setEditableTitle}
               onTrimTitle={handleTrimTitle}
               onSaveTitle={handleSaveTitle}
