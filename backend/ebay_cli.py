@@ -282,6 +282,45 @@ def call_openrouter_llm(prompt, model="deepseek/deepseek-v4-flash"):
         return None
 
 
+def call_openrouter_llm_stream(prompt, model="deepseek/deepseek-v4-flash"):
+    """Stream token deltas from OpenRouter SSE. Yields raw token strings."""
+    if not OPENROUTER_API_KEY:
+        yield None
+        return
+
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    data = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": True,
+    }
+
+    try:
+        with requests.post(url, headers=headers, json=data, stream=True, timeout=60) as response:
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if not line:
+                    continue
+                decoded = line.decode("utf-8")
+                if decoded.startswith("data: "):
+                    payload = decoded[6:]
+                    if payload.strip() == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(payload)
+                        delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content")
+                        if delta:
+                            yield delta
+                    except (json.JSONDecodeError, IndexError, KeyError):
+                        continue
+    except Exception as e:
+        print(f"❌ Error streaming from OpenRouter: {e}")
+
+
 def _extract_bedrock_message_text(response):
     """Pull assistant text from a Bedrock Converse response."""
     blocks = response.get("output", {}).get("message", {}).get("content", [])
@@ -332,6 +371,37 @@ def bedrock_converse_text(prompt, model_id):
         return None
 
 
+def bedrock_converse_stream_text(prompt, model_id):
+    """Stream token deltas from Bedrock converse_stream. Yields raw token strings."""
+    if not os.getenv("bedrock_api_key"):
+        yield None
+        return
+
+    _sync_bedrock_bearer_token()
+
+    try:
+        import boto3
+    except ImportError:
+        print("❌ boto3 not installed")
+        return
+
+    try:
+        client = boto3.client(service_name="bedrock-runtime", region_name=_BEDROCK_REGION)
+        response = client.converse_stream(
+            modelId=model_id,
+            messages=[{"role": "user", "content": [{"text": prompt}]}],
+        )
+        stream = response.get("stream")
+        if not stream:
+            return
+        for event in stream:
+            delta = event.get("contentBlockDelta", {}).get("delta", {}).get("text")
+            if delta:
+                yield delta
+    except Exception as e:
+        print(f"❌ Error streaming from Bedrock: {e}")
+
+
 def call_bedrock_llm(prompt, model):
     """Call an AWS Bedrock chat model via the Converse API.
 
@@ -355,6 +425,15 @@ def call_text_llm(prompt, model="deepseek/deepseek-v4-flash"):
     if is_bedrock_model(model):
         return call_bedrock_llm(prompt, model)
     return call_openrouter_llm(prompt, model)
+
+
+def call_text_llm_stream(prompt, model="deepseek/deepseek-v4-flash"):
+    """Provider-agnostic streaming dispatcher. Yields token delta strings."""
+    from backend.text_models import is_bedrock_model
+    if is_bedrock_model(model):
+        yield from bedrock_converse_stream_text(prompt, model)
+    else:
+        yield from call_openrouter_llm_stream(prompt, model)
 
 
 def _extract_listing_id(item_id):
