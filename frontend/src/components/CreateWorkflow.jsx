@@ -41,6 +41,8 @@ function CreateWorkflow({
   isTrimmingTitle,
   isSavingTitle,
   isSavingDescription,
+  isGeneratingText = false,
+  onCancelTextGen,
   onListingIdChange,
   onSubmit,
   onCategoryChange,
@@ -164,7 +166,9 @@ function CreateWorkflow({
       )}
 
       {listingLinkSubmitted && listing && (
-        <ListingDetails listing={listing} photos={photos} sku={currentSku} />
+        <div className="mt-4">
+          <ListingDetails listing={listing} photos={photos} sku={currentSku} />
+        </div>
       )}
 
       {photos?.length > 0 && (
@@ -272,45 +276,29 @@ function CreateWorkflow({
               )}
             </Droppable>
           </DragDropContext>
-
-          <div className="mt-8 flex justify-center">
-            <button
-              type="button"
-              className={btnPillLg}
-              onClick={onConfirmAndEditText}
-              disabled={isCreatingListing}
-            >
-              {isCreatingListing
-                ? "Updating Listing..."
-                : "Confirm and Edit Text"}
-            </button>
-          </div>
-          {isCreatingListing &&
-            createListingProgress?.isActive &&
-            createListingProgress?.totalSteps?.length > 0 && (
-              <div className="mt-4">
-                <ProgressIndicator
-                  steps={createListingProgress.totalSteps}
-                  currentStep={createListingProgress.currentStep}
-                  completedSteps={createListingProgress.completedSteps}
-                />
-              </div>
-            )}
         </div>
       )}
 
-      {listingData && (
+      {listing && (isGeneratingText || editableTitle !== undefined) && (
         <div className="mt-8">
           <h2 className="mb-4 text-xl font-semibold text-text-primary">
-            Generated Listing
+            {isGeneratingText ? "Writing Listing..." : "Generated Listing"}
           </h2>
           <div className="space-y-4">
-            <div className="border-b border-border-default pb-4">
-              <strong className="text-primary">SKU:</strong> {listingData.sku}
-            </div>
             <div className="flex flex-col gap-2 border-b border-border-default pb-4">
-              <div className="flex items-center justify-between">
-                <strong className="text-primary">Title:</strong>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <strong className="text-primary">Title:</strong>
+                  {isGeneratingText && (
+                    <button
+                      type="button"
+                      className="rounded-md border border-border-default px-2 py-0.5 text-xs text-text-muted hover:border-red-400 hover:text-red-600"
+                      onClick={onCancelTextGen}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
                 <span
                   className={`rounded-full px-2.5 py-1 text-sm font-semibold ${
                     editableTitle?.length > 80
@@ -337,6 +325,11 @@ function CreateWorkflow({
                 onChange={(e) => onEditableTitleChange(e.target.value)}
                 placeholder="Listing title..."
               />
+              {isGeneratingText && (
+                <p className="animate-pulse text-xs text-text-muted">
+                  AI is writing...
+                </p>
+              )}
               {editableTitle?.length > 80 && (
                 <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                   Title exceeds 80 characters. Edit manually or use AI to trim
@@ -354,17 +347,18 @@ function CreateWorkflow({
                     {isTrimmingTitle ? "Trimming..." : "AI Trim Title"}
                   </button>
                 )}
-                {editableTitle !==
-                  (listingData.inventoryItem?.product?.title || "") && (
-                  <button
-                    type="button"
-                    className={btnPillSm}
-                    onClick={onSaveTitle}
-                    disabled={isSavingTitle}
-                  >
-                    {isSavingTitle ? "Saving..." : "Save Title"}
-                  </button>
-                )}
+                {listingData &&
+                  editableTitle !==
+                    (listingData.inventoryItem?.product?.title || "") && (
+                    <button
+                      type="button"
+                      className={btnPillSm}
+                      onClick={onSaveTitle}
+                      disabled={isSavingTitle}
+                    >
+                      {isSavingTitle ? "Saving..." : "Save Title"}
+                    </button>
+                  )}
               </div>
             </div>
             <div className="border-b border-border-default pb-4">
@@ -398,119 +392,142 @@ function CreateWorkflow({
                 />
               )}
               <div className="mt-2 flex gap-2">
-                {editableDescription !==
-                  (listingData.inventoryItem?.product?.description || "") && (
-                  <button
-                    type="button"
-                    className={btnPillSm}
-                    onClick={onSaveDescription}
-                    disabled={isSavingDescription}
-                  >
-                    {isSavingDescription ? "Saving..." : "Save Description"}
-                  </button>
-                )}
-              </div>
-            </div>
-            <div className="border-b border-border-default pb-4">
-              <strong className="text-primary">Price:</strong> $
-              {listingData.offer?.pricingSummary?.price?.value || "N/A"}
-            </div>
-            <div className="border-b border-border-default pb-4">
-              <strong className="text-primary">Category ID:</strong>{" "}
-              {listingData.offer?.categoryId || "N/A"}
-            </div>
-            <div className="border-b border-border-default pb-4">
-              <strong className="text-primary">
-                Images (
-                {listingData.inventoryItem?.product?.imageUrls?.length || 0}):
-              </strong>
-              <div className="mt-2 space-y-2">
-                {listingData.inventoryItem?.product?.imageUrls?.map(
-                  (url, idx) => (
-                    <div
-                      key={idx}
-                      className="rounded-md bg-surface-muted p-2 text-sm text-text-muted break-all"
+                {listingData &&
+                  editableDescription !==
+                    (listingData.inventoryItem?.product?.description || "") && (
+                    <button
+                      type="button"
+                      className={btnPillSm}
+                      onClick={onSaveDescription}
+                      disabled={isSavingDescription}
                     >
-                      {idx + 1}. {url}
-                    </div>
-                  ),
-                ) || "No images"}
+                      {isSavingDescription ? "Saving..." : "Save Description"}
+                    </button>
+                  )}
               </div>
-            </div>
-            <div className="border-b border-border-default pb-4">
-              <strong className="text-primary">Created:</strong>{" "}
-              {listingData.createdDateTime || "N/A"}
             </div>
           </div>
 
-          <div className="mt-8 flex justify-center border-t-2 border-border-default pt-8">
-            <button
-              type="button"
-              className={btnPillLg}
-              onClick={() => onUploadToEbay(listingData.sku, listingData)}
-              disabled={
-                uploadingSkus?.has(listingData?.sku) || !listingData?.sku
-              }
-            >
-              {uploadingSkus?.has(listingData?.sku)
-                ? "Uploading to eBay..."
-                : "Upload to eBay"}
-            </button>
-          </div>
-          {uploadingSkus?.has(listingData?.sku) &&
-            uploadProgress?.isActive &&
-            uploadProgress?.totalSteps?.length > 0 && (
+          {isCreatingListing &&
+            createListingProgress?.isActive &&
+            createListingProgress?.totalSteps?.length > 0 && (
               <div className="mt-4">
                 <ProgressIndicator
-                  steps={uploadProgress.totalSteps}
-                  currentStep={uploadProgress.currentStep}
-                  completedSteps={uploadProgress.completedSteps}
+                  steps={createListingProgress.totalSteps}
+                  currentStep={createListingProgress.currentStep}
+                  completedSteps={createListingProgress.completedSteps}
                 />
               </div>
             )}
 
-          {uploadResult && (
-            <div className="mt-8 rounded-xl bg-gradient-to-br from-success to-emerald-600 p-6 text-white">
-              <h3 className="mb-4 text-2xl font-semibold">
-                Upload Successful!
-              </h3>
-              <div className="flex flex-col gap-3">
-                {uploadResult.listingId && (
-                  <div>
-                    <strong>Listing ID:</strong>{" "}
-                    <a
-                      href={`https://www.ebay.com/itm/${uploadResult.listingId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-semibold underline hover:no-underline"
-                    >
-                      {uploadResult.listingId}
-                    </a>
+          {listingData && (
+            <>
+              <div className="mt-4 space-y-4">
+                <div className="border-b border-border-default pb-4">
+                  <strong className="text-primary">SKU:</strong> {listingData.sku}
+                </div>
+                <div className="border-b border-border-default pb-4">
+                  <strong className="text-primary">Price:</strong> $
+                  {listingData.offer?.pricingSummary?.price?.value || "N/A"}
+                </div>
+                <div className="border-b border-border-default pb-4">
+                  <strong className="text-primary">Category ID:</strong>{" "}
+                  {listingData.offer?.categoryId || "N/A"}
+                </div>
+                <div className="border-b border-border-default pb-4">
+                  <strong className="text-primary">
+                    Images (
+                    {listingData.inventoryItem?.product?.imageUrls?.length || 0}):
+                  </strong>
+                  <div className="mt-2 space-y-2">
+                    {listingData.inventoryItem?.product?.imageUrls?.map(
+                      (url, idx) => (
+                        <div
+                          key={idx}
+                          className="rounded-md bg-surface-muted p-2 text-sm text-text-muted break-all"
+                        >
+                          {idx + 1}. {url}
+                        </div>
+                      ),
+                    ) || "No images"}
                   </div>
-                )}
-                {uploadResult.ebayId && (
-                  <div>
-                    <strong>eBay ID:</strong> {uploadResult.ebayId}
-                  </div>
-                )}
-                {uploadResult.href && (
-                  <div>
-                    <strong>Listing URL:</strong>{" "}
-                    <a
-                      href={uploadResult.href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-semibold underline hover:no-underline"
-                    >
-                      View on eBay
-                    </a>
-                  </div>
-                )}
-                <div>
-                  <strong>Status:</strong> Listing is now live on eBay!
+                </div>
+                <div className="border-b border-border-default pb-4">
+                  <strong className="text-primary">Created:</strong>{" "}
+                  {listingData.createdDateTime || "N/A"}
                 </div>
               </div>
-            </div>
+
+              <div className="mt-8 flex justify-center border-t-2 border-border-default pt-8">
+                <button
+                  type="button"
+                  className={btnPillLg}
+                  onClick={() => onUploadToEbay(listingData.sku, listingData)}
+                  disabled={
+                    uploadingSkus?.has(listingData?.sku) || !listingData?.sku
+                  }
+                >
+                  {uploadingSkus?.has(listingData?.sku)
+                    ? "Uploading to eBay..."
+                    : "Upload to eBay"}
+                </button>
+              </div>
+              {uploadingSkus?.has(listingData?.sku) &&
+                uploadProgress?.isActive &&
+                uploadProgress?.totalSteps?.length > 0 && (
+                  <div className="mt-4">
+                    <ProgressIndicator
+                      steps={uploadProgress.totalSteps}
+                      currentStep={uploadProgress.currentStep}
+                      completedSteps={uploadProgress.completedSteps}
+                    />
+                  </div>
+                )}
+
+              {uploadResult && (
+                <div className="mt-8 rounded-xl bg-linear-to-br from-success to-emerald-600 p-6 text-white">
+                  <h3 className="mb-4 text-2xl font-semibold">
+                    Upload Successful!
+                  </h3>
+                  <div className="flex flex-col gap-3">
+                    {uploadResult.listingId && (
+                      <div>
+                        <strong>Listing ID:</strong>{" "}
+                        <a
+                          href={`https://www.ebay.com/itm/${uploadResult.listingId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-semibold underline hover:no-underline"
+                        >
+                          {uploadResult.listingId}
+                        </a>
+                      </div>
+                    )}
+                    {uploadResult.ebayId && (
+                      <div>
+                        <strong>eBay ID:</strong> {uploadResult.ebayId}
+                      </div>
+                    )}
+                    {uploadResult.href && (
+                      <div>
+                        <strong>Listing URL:</strong>{" "}
+                        <a
+                          href={uploadResult.href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-semibold underline hover:no-underline"
+                        >
+                          View on eBay
+                        </a>
+                      </div>
+                    )}
+                    <div>
+                      <strong>Status:</strong> Listing is now live on eBay!
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
