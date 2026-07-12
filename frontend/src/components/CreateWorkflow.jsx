@@ -42,7 +42,7 @@ function CreateWorkflow({
   isSavingTitle,
   isSavingDescription,
   isGeneratingText = false,
-  onCancelTextGen,
+  onCancelTextGen = () => {},
   onListingIdChange,
   onSubmit,
   onCategoryChange,
@@ -278,7 +278,7 @@ function CreateWorkflow({
         </div>
       )}
 
-      {listing && (isGeneratingText || editableTitle !== undefined) && (
+      {listing && (isGeneratingText || editableTitle !== "") && (
         <div className="mt-8">
           <h2 className="mb-4 text-xl font-semibold text-text-primary">
             {isGeneratingText ? "Writing Listing..." : "Generated Listing"}
