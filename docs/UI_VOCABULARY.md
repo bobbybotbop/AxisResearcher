@@ -47,27 +47,27 @@ Both states use the **same** `MessageBarInput` component in `CreateWorkflow.jsx`
 
 ---
 
-## Listing workflow — source listing summary
+## Listing workflow — generated listing card
 
 | Reference ID | Short name | When | What the user sees |
 |--------------|------------|------|-------------------|
-| `listing-source-summary` | **Source listing summary** | After link submit (`listingLinkSubmitted === true`) and listing data is loaded | Compact panel above Original Photos showing the fetched eBay listing: title, `{sku} · date · N images · Cat …` meta line, price on the right, scrollable description. Replaces the old standalone “Current SKU” banner and the bottom `ListingDetails` panel. |
+| `listing-generated-card` | **Generated listing card** | After link submit, once `listing` is set and text generation begins | Single unified card: metadata row (badged SKU, date, live image count, category + right-aligned price), editable title (locked while streaming), editable description (locked while streaming), “View original title and description” disclosure at bottom. Replaces the old two-panel `ListingDetails` + “Generated Listing” layout. |
 
 ### Aliases (same thing)
 
-- “source listing card” / “listing summary” / “top listing details” → `listing-source-summary`
+- “generated card” / “unified listing card” / “live listing editor” → `listing-generated-card`
 
 ### Code map
 
 | Reference ID | Component | Wrapper / state |
 |--------------|-----------|-----------------|
-| `listing-source-summary` | `ListingDetails` | `CreateWorkflow` renders it once when `listingLinkSubmitted && listing`, above `PhotoGallery`. Header layout mirrors `GeneratedListingCard`’s content column. |
+| `listing-generated-card` | `GeneratedListingCard` | `CreateWorkflow` renders it once when `listingLinkSubmitted && listing`, below message bar. Owns title and description editable state. |
 
 **Files**
 
-- `frontend/src/components/ListingDetails.jsx` — summary panel
-- `frontend/src/components/CreateWorkflow.jsx` — placement above `PhotoGallery`, passes `listing`, `photos`, `sku={currentSku}`
-- `frontend/src/utils/listingDisplay.js` — shared `formatPrice`, `formatListingDateTime`, `formatCategoryShort` (also used by `GeneratedListingCard`)
+- `frontend/src/components/GeneratedListingCard.jsx` — unified card with editable title/description
+- `frontend/src/components/CreateWorkflow.jsx` — placement; passes `listing`, `photos`, `sku={currentSku}`, handlers for title/description edits
+- `frontend/src/utils/listingDisplay.js` — shared `formatPrice`, `formatListingDateTime`, `formatCategoryShort`
 
 ---
 
