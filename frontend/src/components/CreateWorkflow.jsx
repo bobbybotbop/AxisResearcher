@@ -384,13 +384,16 @@ function CreateWorkflow({
               <input
                 type="text"
                 className={`w-full rounded-lg border-2 px-3 py-2.5 transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20 ${
-                  editableTitle?.length > 80
-                    ? "border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500/20"
-                    : "border-border-default bg-surface-panel text-text-primary focus:border-primary"
+                  isGeneratingText
+                    ? "cursor-not-allowed border-border-default bg-surface-muted text-text-muted opacity-60"
+                    : editableTitle?.length > 80
+                      ? "border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500/20"
+                      : "border-border-default bg-surface-panel text-text-primary focus:border-primary"
                 }`}
                 value={editableTitle}
                 onChange={(e) => onEditableTitleChange(e.target.value)}
                 placeholder="Listing title..."
+                disabled={isGeneratingText}
               />
               {isGeneratingText && (
                 <p className="animate-pulse text-xs text-text-muted">
@@ -403,6 +406,7 @@ function CreateWorkflow({
                   it.
                 </div>
               )}
+              {!isGeneratingText && (
               <div className="flex gap-2">
                 {editableTitle?.length > 80 && (
                   <button
@@ -427,10 +431,12 @@ function CreateWorkflow({
                     </button>
                   )}
               </div>
+              )}
             </div>
             <div className="border-b border-border-default pb-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <strong className="text-primary">Description:</strong>
+                {!isGeneratingText && (
                 <button
                   type="button"
                   className="rounded-lg border-2 border-border-default bg-surface-panel px-3 py-1.5 text-sm font-semibold text-text-primary transition-colors hover:border-primary hover:text-primary"
@@ -438,15 +444,21 @@ function CreateWorkflow({
                 >
                   {descriptionEditMode ? "Preview HTML" : "Edit HTML"}
                 </button>
+                )}
               </div>
               {descriptionEditMode ? (
                 <textarea
-                  className="mt-2 min-h-[200px] w-full resize-y rounded-lg border-2 border-border-default bg-surface-panel p-3 font-mono text-sm text-text-primary transition-colors focus:border-primary focus:outline-none"
+                  className={`mt-2 min-h-[200px] w-full resize-y rounded-lg border-2 p-3 font-mono text-sm transition-colors focus:outline-none ${
+                    isGeneratingText
+                      ? "cursor-not-allowed border-border-default bg-surface-muted text-text-muted opacity-60"
+                      : "border-border-default bg-surface-panel text-text-primary focus:border-primary"
+                  }`}
                   value={editableDescription}
                   onChange={(e) => onEditableDescriptionChange(e.target.value)}
                   placeholder="HTML description..."
                   rows={12}
                   spellCheck={false}
+                  disabled={isGeneratingText}
                 />
               ) : (
                 <div
@@ -458,6 +470,7 @@ function CreateWorkflow({
                   }}
                 />
               )}
+              {!isGeneratingText && (
               <div className="mt-2 flex gap-2">
                 {listingData &&
                   editableDescription !==
@@ -472,6 +485,7 @@ function CreateWorkflow({
                     </button>
                   )}
               </div>
+              )}
             </div>
           </div>
 
