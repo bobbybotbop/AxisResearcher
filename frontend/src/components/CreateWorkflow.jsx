@@ -3,7 +3,6 @@ import { motion } from "motion/react";
 import PhotoGallery from "./PhotoGallery";
 import MessageBarInput from "./MessageBarInput";
 import Lightbox from "./Lightbox";
-import ListingDetails from "./ListingDetails";
 import ProgressIndicator from "./ProgressIndicator";
 import ImageCanvas from "./ImageCanvas";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
@@ -190,11 +189,6 @@ function CreateWorkflow({
         </div>
       )}
 
-      {listingLinkSubmitted && listing && (
-        <div className="mt-4">
-          <ListingDetails listing={listing} photos={photos} sku={currentSku} />
-        </div>
-      )}
 
       {photos?.length > 0 && (
         <>
