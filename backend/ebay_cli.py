@@ -285,7 +285,7 @@ def call_openrouter_llm(prompt, model="deepseek/deepseek-v4-flash"):
 def call_openrouter_llm_stream(prompt, model="deepseek/deepseek-v4-flash"):
     """Stream token deltas from OpenRouter SSE. Yields raw token strings."""
     if not OPENROUTER_API_KEY:
-        yield None
+        print("❌ OpenRouter API key not found. Please set OPENROUTER_API_KEY in your .env file")
         return
 
     url = "https://openrouter.ai/api/v1/chat/completions"
@@ -374,7 +374,7 @@ def bedrock_converse_text(prompt, model_id):
 def bedrock_converse_stream_text(prompt, model_id):
     """Stream token deltas from Bedrock converse_stream. Yields raw token strings."""
     if not os.getenv("bedrock_api_key"):
-        yield None
+        print("❌ Bedrock API key not found. Please set bedrock_api_key in your .env file")
         return
 
     _sync_bedrock_bearer_token()
