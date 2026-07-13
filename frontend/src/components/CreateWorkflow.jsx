@@ -190,138 +190,6 @@ function CreateWorkflow({
       )}
 
 
-      {photos?.length > 0 && (
-        <>
-          <PhotoGallery
-            photos={photos}
-            editableCategories={editableCategories}
-            onCategoryChange={onCategoryChange}
-            onConfirm={onConfirmCategories}
-            isConfirming={isConfirming}
-            onPhotoClick={onPhotoClick}
-            skippedPhotos={skippedPhotos}
-            onSkipPhoto={onSkipPhoto}
-            onAddToOriginalPhotos={onAddToOriginalPhotos}
-            onOpenEditor={onEditorToggle}
-            showClassification={classifyImagesEnabled}
-          />
-          {isConfirming && imageGenProgress?.isActive && (
-            <div className="my-5 rounded-lg border border-border-default bg-surface-muted p-4">
-              <h3 className="mb-2.5 text-lg text-text-primary">
-                Generating Images
-              </h3>
-              <div className="mt-2.5">
-                <p className="text-text-muted">
-                  Progress: {imageGenProgress.completed} of{" "}
-                  {imageGenProgress.total} images complete
-                </p>
-                {imageGenProgress.total > 0 && (
-                  <div className="relative mt-2.5 h-5 w-full overflow-hidden rounded bg-surface-hover">
-                    <div
-                      className="h-full rounded bg-green-500 transition-[width] duration-300"
-                      style={{
-                        width: `${(imageGenProgress.completed / imageGenProgress.total) * 100}%`,
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-        </>
-      )}
-
-      {generatedImages?.length > 0 && (
-        <div className="mt-8 rounded-2xl border border-border-default bg-surface-panel p-6">
-          <h2 className="mb-5 text-xl font-semibold text-text-primary">
-            New Listing Photos
-          </h2>
-          <DragDropContext onDragEnd={onDragEnd}>
-            <Droppable droppableId="new-listing-photos" direction="horizontal">
-              {(provided) => (
-                <div
-                  className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:gap-5"
-                  ref={provided.innerRef}
-                  {...provided.droppableProps}
-                >
-                  {generatedImages.map((imageUrl, index) => (
-                    <Draggable
-                      key={`img-${imageUrl}-${index}`}
-                      draggableId={`img-${imageUrl}-${index}`}
-                      index={index}
-                    >
-                      {(provided, snapshot) => {
-                        return (
-                          <div
-                            ref={provided.innerRef}
-                            {...provided.draggableProps}
-                            {...provided.dragHandleProps}
-                            className={`group relative aspect-square cursor-grab overflow-hidden rounded-xl transition-all active:cursor-grabbing ${
-                              snapshot.isDragging ? "opacity-80 shadow-lg" : ""
-                            }`}
-                          >
-                            <button
-                              type="button"
-                              className="absolute right-1.5 top-1.5 z-20 flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-lg font-bold text-white opacity-0 shadow-md transition-opacity hover:bg-red-600 hover:opacity-90 focus-visible:opacity-100 group-hover:opacity-100"
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onRemoveFromListing(index);
-                              }}
-                              title="Remove from listing"
-                            >
-                              &times;
-                            </button>
-                            <img
-                              src={imageUrl}
-                              alt={`New listing photo ${index + 1}`}
-                              className="pointer-events-none h-full w-full object-cover"
-                              loading="lazy"
-                              draggable={false}
-                            />
-                            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
-                              <span className="text-2xl font-bold text-white">
-                                {index + 1}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      }}
-                    </Draggable>
-                  ))}
-                  {provided.placeholder}
-                </div>
-              )}
-            </Droppable>
-          </DragDropContext>
-          {photoSelectionActive && (
-            <div className="mt-3 flex items-center gap-3 rounded-xl border border-border-default bg-surface-panel px-4 py-3">
-              <span className="flex-1 text-sm text-text-muted">
-                Regenerate selected with:{" "}
-                <span className="font-medium text-text-primary">
-                  &quot;{pendingPhotoPrompt}&quot;
-                </span>
-              </span>
-              <button
-                type="button"
-                className={btnPillSm}
-                onClick={onCancelPhotoRegeneration}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className={btnPillLg}
-                onClick={onConfirmPhotoRegeneration}
-              >
-                Regenerate Selected
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
       {listing && (isGeneratingText || editableTitle !== "") && (
         <div className="mt-8 rounded-xl border border-border-default bg-surface-panel px-4 pb-4 pt-5 shadow-sm sm:px-5 sm:pb-5 sm:pt-6">
           {/* Metadata row */}
@@ -637,6 +505,138 @@ function CreateWorkflow({
                 </div>
               )}
             </>
+          )}
+        </div>
+      )}
+
+      {photos?.length > 0 && (
+        <>
+          <PhotoGallery
+            photos={photos}
+            editableCategories={editableCategories}
+            onCategoryChange={onCategoryChange}
+            onConfirm={onConfirmCategories}
+            isConfirming={isConfirming}
+            onPhotoClick={onPhotoClick}
+            skippedPhotos={skippedPhotos}
+            onSkipPhoto={onSkipPhoto}
+            onAddToOriginalPhotos={onAddToOriginalPhotos}
+            onOpenEditor={onEditorToggle}
+            showClassification={classifyImagesEnabled}
+          />
+          {isConfirming && imageGenProgress?.isActive && (
+            <div className="my-5 rounded-lg border border-border-default bg-surface-muted p-4">
+              <h3 className="mb-2.5 text-lg text-text-primary">
+                Generating Images
+              </h3>
+              <div className="mt-2.5">
+                <p className="text-text-muted">
+                  Progress: {imageGenProgress.completed} of{" "}
+                  {imageGenProgress.total} images complete
+                </p>
+                {imageGenProgress.total > 0 && (
+                  <div className="relative mt-2.5 h-5 w-full overflow-hidden rounded bg-surface-hover">
+                    <div
+                      className="h-full rounded bg-green-500 transition-[width] duration-300"
+                      style={{
+                        width: `${(imageGenProgress.completed / imageGenProgress.total) * 100}%`,
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+        </>
+      )}
+
+      {generatedImages?.length > 0 && (
+        <div className="mt-8 rounded-2xl border border-border-default bg-surface-panel p-6">
+          <h2 className="mb-5 text-xl font-semibold text-text-primary">
+            New Listing Photos
+          </h2>
+          <DragDropContext onDragEnd={onDragEnd}>
+            <Droppable droppableId="new-listing-photos" direction="horizontal">
+              {(provided) => (
+                <div
+                  className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:gap-5"
+                  ref={provided.innerRef}
+                  {...provided.droppableProps}
+                >
+                  {generatedImages.map((imageUrl, index) => (
+                    <Draggable
+                      key={`img-${imageUrl}-${index}`}
+                      draggableId={`img-${imageUrl}-${index}`}
+                      index={index}
+                    >
+                      {(provided, snapshot) => {
+                        return (
+                          <div
+                            ref={provided.innerRef}
+                            {...provided.draggableProps}
+                            {...provided.dragHandleProps}
+                            className={`group relative aspect-square cursor-grab overflow-hidden rounded-xl transition-all active:cursor-grabbing ${
+                              snapshot.isDragging ? "opacity-80 shadow-lg" : ""
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              className="absolute right-1.5 top-1.5 z-20 flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-lg font-bold text-white opacity-0 shadow-md transition-opacity hover:bg-red-600 hover:opacity-90 focus-visible:opacity-100 group-hover:opacity-100"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onRemoveFromListing(index);
+                              }}
+                              title="Remove from listing"
+                            >
+                              &times;
+                            </button>
+                            <img
+                              src={imageUrl}
+                              alt={`New listing photo ${index + 1}`}
+                              className="pointer-events-none h-full w-full object-cover"
+                              loading="lazy"
+                              draggable={false}
+                            />
+                            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
+                              <span className="text-2xl font-bold text-white">
+                                {index + 1}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      }}
+                    </Draggable>
+                  ))}
+                  {provided.placeholder}
+                </div>
+              )}
+            </Droppable>
+          </DragDropContext>
+          {photoSelectionActive && (
+            <div className="mt-3 flex items-center gap-3 rounded-xl border border-border-default bg-surface-panel px-4 py-3">
+              <span className="flex-1 text-sm text-text-muted">
+                Regenerate selected with:{" "}
+                <span className="font-medium text-text-primary">
+                  &quot;{pendingPhotoPrompt}&quot;
+                </span>
+              </span>
+              <button
+                type="button"
+                className={btnPillSm}
+                onClick={onCancelPhotoRegeneration}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={btnPillLg}
+                onClick={onConfirmPhotoRegeneration}
+              >
+                Regenerate Selected
+              </button>
+            </div>
           )}
         </div>
       )}

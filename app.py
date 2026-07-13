@@ -10,8 +10,8 @@ import io
 
 # Set UTF-8 encoding for stdout/stderr to handle Unicode characters
 if sys.platform == 'win32':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
 
 from flask import Flask, jsonify, request, Response, stream_with_context
 from flask_cors import CORS
@@ -425,12 +425,18 @@ def generate_images():
                         except Exception as e:
                             print(f"[API] Future exception for image {idx + 1}: {e}")
                 
-                # Mark task as completed
+                # Mark task completed or failed based on whether any images succeeded
                 with image_generation_lock:
                     if task_id in image_generation_tasks:
-                        image_generation_tasks[task_id]["status"] = "completed"
-                
-                print(f"[API] Task {task_id} completed: {len(image_generation_tasks[task_id]['results'])} images generated")
+                        t = image_generation_tasks[task_id]
+                        if t["results"]:
+                            t["status"] = "completed"
+                        else:
+                            t["status"] = "failed"
+
+                with image_generation_lock:
+                    t = image_generation_tasks.get(task_id, {})
+                print(f"[API] Task {task_id} finished: {len(t.get('results', []))} images generated, {len(t.get('errors', []))} errors")
             except Exception as e:
                 print(f"[API] Error in background generation thread: {e}")
                 import traceback
@@ -624,23 +630,53 @@ def create_listing():
             old_title = listing.get("title", "")
             old_description = listing.get("description", "")
 
+            pending_title = None
+            pending_description = None
+
             if pre_generated_text and pre_generated_text.get("edited_title"):
                 # Text was already generated via /api/generate-text; just persist it
-                update_listing_title_description(sku, pre_generated_text)
+                pending_title = pre_generated_text["edited_title"]
+                pending_description = pre_generated_text.get("edited_description", "")
                 print(f"[API] Used pre-generated text (skipped LLM)")
             elif old_title and old_description:
                 print(f"[API] Generating optimized text...")
                 optimized_content = create_text(old_title, old_description, model=text_model)
                 if optimized_content:
-                    update_listing_title_description(sku, optimized_content)
+                    pending_title = optimized_content.get("edited_title", old_title)
+                    pending_description = optimized_content.get("edited_description", old_description)
                 else:
                     print(f"[API] Warning: Failed to generate optimized text, using original")
-                    update_listing_title_description(sku, {
-                        "edited_title": old_title,
-                        "edited_description": old_description,
-                    })
+                    pending_title = old_title
+                    pending_description = old_description
             else:
                 print(f"[API] Warning: No title/description provided, skipping text generation")
+
+            if pending_title:
+                title_len = len(pending_title)
+                if not (TITLE_MIN_LEN <= title_len <= TITLE_MAX_LEN):
+                    print(
+                        f"[API] Title length {title_len} outside [{TITLE_MIN_LEN},{TITLE_MAX_LEN}], "
+                        f"auto-nudging..."
+                    )
+                    nudged_title, nudge_log = _nudge_title_length(pending_title, text_model)
+                    if nudged_title:
+                        pending_title = nudged_title
+                        print(
+                            f"[API] Nudge result: {len(nudged_title)} chars, "
+                            f"{len(nudge_log)} attempt(s), title='{nudged_title}'"
+                        )
+                # If description is empty (e.g. streaming failed), fall back to what's on disk
+                desc_to_save = pending_description
+                if not desc_to_save:
+                    existing = load_listing_data(sku=sku)
+                    desc_to_save = (
+                        existing.get("inventoryItem", {}).get("product", {}).get("description", "")
+                        if existing else ""
+                    )
+                update_listing_title_description(sku, {
+                    "edited_title": pending_title,
+                    "edited_description": desc_to_save,
+                })
 
             yield progress_event('Generating optimized text', 'completed')
 
@@ -748,9 +784,9 @@ def update_listing_images_endpoint():
         return jsonify({"error": error_msg, "listing_data": None}), 500
 
 
-TITLE_MIN_LEN = 70
+TITLE_MIN_LEN = 75
 TITLE_MAX_LEN = 80
-TITLE_TARGET_LEN = 75
+TITLE_TARGET_LEN = 80
 TITLE_MAX_ATTEMPTS = 3
 
 
@@ -2143,26 +2179,13 @@ def get_tokens():
             return val[:15] + '...' + val[-15:]
         return val
 
-    user_valid = None
-    app_valid = None
-    if tokens['user_token']:
-        try:
-            user_valid = _test_user_token().get('ok', False)
-        except Exception:
-            user_valid = False
-    if tokens['application_token']:
-        try:
-            app_valid = _test_application_token().get('ok', False)
-        except Exception:
-            app_valid = False
-
     return jsonify({
         'user_token': mask(tokens['user_token']),
         'application_token': mask(tokens['application_token']),
         'user_token_set': bool(tokens['user_token']),
         'application_token_set': bool(tokens['application_token']),
-        'user_token_valid': user_valid,
-        'application_token_valid': app_valid,
+        'user_token_valid': None,
+        'application_token_valid': None,
         'token_last_updated_ms': token_last_updated_ms
     })
 

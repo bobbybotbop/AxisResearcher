@@ -608,8 +608,8 @@ def update_listing_title_description(sku, new_text):
     new_title = new_text.get('edited_title', '')
     new_description = new_text.get('edited_description', '')
     
-    if not new_title or not new_description:
-        print(f"❌ Error: new_text dict must contain 'edited_title' and 'edited_description' keys")
+    if not new_title:
+        print(f"❌ Error: new_text dict must contain a non-empty 'edited_title' key")
         return False
     
     # Use absolute path to ensure we're looking in the right directory

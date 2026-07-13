@@ -20,11 +20,11 @@ Requirements: Python 3.x, pip
 
 AxisResearcher uses two types of eBay OAuth tokens:
 
-| Token | Purpose | Lifetime | How to get |
-|-------|---------|----------|------------|
-| **Application token** | Browse API, Commerce Taxonomy (read-only) | 2 hours | Auto-minted via client credentials |
-| **User token** | Sell Inventory API, Trading API (write operations) | 2 hours | Refreshed from refresh_token |
-| **Refresh token** | Used to mint new user tokens | ~18 months | Obtained via user consent flow |
+| Token                 | Purpose                                            | Lifetime   | How to get                         |
+| --------------------- | -------------------------------------------------- | ---------- | ---------------------------------- |
+| **Application token** | Browse API, Commerce Taxonomy (read-only)          | 2 hours    | Auto-minted via client credentials |
+| **User token**        | Sell Inventory API, Trading API (write operations) | 2 hours    | Refreshed from refresh_token       |
+| **Refresh token**     | Used to mint new user tokens                       | ~18 months | Obtained via user consent flow     |
 
 ### Normal operation: refreshing the user token
 
@@ -35,6 +35,7 @@ python -m backend.ebay_cli refresh
 ```
 
 Or programmatically:
+
 ```
 python testing/test_update_tokens.py refresh-user
 ```
@@ -44,6 +45,7 @@ This uses your long-lived `refresh_token` (in `.env`) to mint a new short-lived 
 ### When refresh stops working: full re-consent
 
 The refresh token becomes **invalid** if you:
+
 - Change your eBay password
 - Revoke app consent in eBay account settings
 - Let the refresh token expire (~18 months)
@@ -118,13 +120,13 @@ Optimizations include: keyword rich SEO titles, material and color specification
 
 ## Additional Commands
 
-| Command | Description |
-|---------|-------------|
-| `python -m backend.ebay_cli search <query>` | Search eBay items |
-| `python -m backend.ebay_cli seller <username> [query] [limit]` | Browse seller inventory |
-| `python -m backend.ebay_cli item <item_id>` | Get complete item information |
+| Command                                                             | Description                             |
+| ------------------------------------------------------------------- | --------------------------------------- |
+| `python -m backend.ebay_cli search <query>`                         | Search eBay items                       |
+| `python -m backend.ebay_cli seller <username> [query] [limit]`      | Browse seller inventory                 |
+| `python -m backend.ebay_cli item <item_id>`                         | Get complete item information           |
 | `python -m backend.ebay_cli top [input_file] [top_n] [output_file]` | Extract top sellers from processed data |
-| `python -m backend.ebay_cli refresh` | Refresh application + user tokens |
+| `python -m backend.ebay_cli refresh`                                | Refresh application + user tokens       |
 
 ## Quick Start Workflow
 
@@ -154,21 +156,21 @@ npm run dev          # starts both backend (port 5000) and frontend (port 4000)
 
 ### Required Environment Variables (.env)
 
-| Variable | Purpose |
-|----------|---------|
-| `client_id` | eBay App Client ID |
-| `client_secret` | eBay App Client Secret |
-| `redirect_uri` | eBay App RuName (redirect URI for OAuth consent) |
-| `application_token` | OAuth application token (auto-refreshed) |
-| `user_token` | OAuth user token (refreshed from refresh_token) |
-| `refresh_token` | Long-lived OAuth refresh token (~18 months) |
+| Variable            | Purpose                                          |
+| ------------------- | ------------------------------------------------ |
+| `client_id`         | eBay App Client ID                               |
+| `client_secret`     | eBay App Client Secret                           |
+| `redirect_uri`      | eBay App RuName (redirect URI for OAuth consent) |
+| `application_token` | OAuth application token (auto-refreshed)         |
+| `user_token`        | OAuth user token (refreshed from refresh_token)  |
+| `refresh_token`     | Long-lived OAuth refresh token (~18 months)      |
 
 ### Optional
 
-| Variable | Purpose |
-|----------|---------|
+| Variable             | Purpose                                    |
+| -------------------- | ------------------------------------------ |
 | `openrouter_api_key` | For AI listing optimization via OpenRouter |
-| `bedrock_api_key` | For AWS Bedrock AI provider (alternate) |
+| `bedrock_api_key`    | For AWS Bedrock AI provider (alternate)    |
 
 ## Troubleshooting
 
@@ -178,15 +180,33 @@ npm run dev          # starts both backend (port 5000) and frontend (port 4000)
 2. If that fails, your refresh token is likely revoked — redo the consent flow (see Authentication section above)
 
 ### Rate Limiting
+
 Wait between retries (built-in delays included).
 
 ### Missing Sales Data
+
 Normal for some items; appears in "without sales data" section.
 
 ### File Not Found
+
 Ensure you run `collect` before `process`. Verify seller username matches folder names.
 
 ## Limitations
 
 - Cannot do currency conversions yet
 - Images do not generate square formats (will fix by cropping input to square)
+
+## Things to prompt:
+
+- Create two buttons next to the image editor and the upload images button in the Create tab, within the Original Photos section. One button should be a Select button, and the other a Bulk Actions button with a drop‑down that currently only includes Delete. Gray out the Bulk Actions button if nothing is selected. When the Select button is pressed, it enters select mode, allowing users to click images to select them. Remove the always‑visible select button at the top right; selection should only be possible via this mode. Also, fix the Select button’s visual placement—it is currently underneath the images but still clickable—so that it appears correctly and only when in select mode.
+
+-The input text bar does not clear when A valid link is provided. I want that to be empty so the user can continuously prompt based on their selected item. Please clear it and ensure the functionality works. I believe it was made; confirm with me and make a table explaining what the current code does.
+
+- Once I click Confirm Categories, the title I generated suddenly has the correct character length, but the iterative character length code only runs after you press Confirm Categories, which is not intended. I want it to find the correct and final title and description before they click Confirm Categories and when the initial auto‑generation happens. Please clean up the code so that the text generates first and then finishes, and later in the flow the text shouldn't change at all. The flow is not really smooth as the metadata gets generated at the end. Please generate it in the initial auto generation of the title and description. The metadata should also be hidden by default. Similar to the view original title and description, it should be visible only if the user toggles them on, and they should be hidden behind a view button.
+
+- Systematically debug the upload to eBay button error (I can't upload the listing to eBay. check axis_48.json to see the data i had to give to ebay) . Alongside the fact that my server logs are not working, I don't see them. When I look at the console, I just see this message: App.jsx:1934 Error uploading listing: Error: Failed to upload listing to eBay. Check server logs for details.
+  at fetchWithProgress (App.jsx:145:11)
+  at async handleUploadToEbay (App.jsx:1871:20)
+  (anonymous) @ App.jsx:1934
+  await in (anonymous)
+  (anonymous) @ CreateWorkflow.jsx:442

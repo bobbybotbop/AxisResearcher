@@ -198,8 +198,9 @@ function mergeGeneratedImages(
   const merged = [];
   let aiIndex = 0;
   for (const _photoUrl of photosToProcess) {
-    if (allowPartial && aiIndex >= aiGeneratedList.length) continue;
-    merged.push(aiGeneratedList[aiIndex++]);
+    if (aiIndex >= aiGeneratedList.length) continue;
+    const url = aiGeneratedList[aiIndex++];
+    if (url !== undefined && url !== null) merged.push(url);
   }
   return merged;
 }
@@ -535,8 +536,11 @@ function App() {
   const handleRefreshTokens = async () => {
     setIsRefreshing(true);
     setTokenMessage(null);
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 45000);
     try {
-      const res = await fetch("/api/refresh-tokens", { method: "POST" });
+      const res = await fetch("/api/refresh-tokens", { method: "POST", signal: ac.signal });
+      clearTimeout(timer);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to refresh tokens");
       const now = Date.now();
@@ -558,9 +562,10 @@ function App() {
       }
       fetchTokenInfo();
     } catch (err) {
+      clearTimeout(timer);
       setTokenMessage({
         type: "error",
-        text: err.message || "Failed to refresh tokens",
+        text: err.name === "AbortError" ? "Refresh timed out — check server logs" : (err.message || "Failed to refresh tokens"),
       });
     } finally {
       setIsRefreshing(false);
@@ -891,36 +896,53 @@ function App() {
     setEditableTitle("");
     setEditableDescription("");
 
-    try {
-      await fetchWithTextStream(
-        "/api/generate-text",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title, description, text_model: textModel }),
-          signal: controller.signal,
-        },
-        (field, delta) => {
-          if (field === "title") {
-            setEditableTitle((prev) => prev + delta);
-          } else if (field === "description") {
-            setEditableDescription((prev) => prev + delta);
-          }
-        },
-        (data) => {
-          setEditableTitle(data.edited_title || "");
-          setEditableDescription(data.edited_description || "");
-          setTextGenComplete(true);
-        },
-      );
-    } catch (err) {
-      if (err.name !== "AbortError") {
-        console.error("Text generation error:", err);
-        setError(err.message || "Text generation failed");
+    const MAX_ATTEMPTS = 3;
+    let succeeded = false;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      if (controller.signal.aborted) break;
+      try {
+        await fetchWithTextStream(
+          "/api/generate-text",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title, description, text_model: textModel }),
+            signal: controller.signal,
+          },
+          (field, delta) => {
+            if (field === "title") {
+              setEditableTitle((prev) => prev + delta);
+            } else if (field === "description") {
+              setEditableDescription((prev) => prev + delta);
+            }
+          },
+          (data) => {
+            setEditableTitle(data.edited_title || "");
+            setEditableDescription(data.edited_description || "");
+            setTextGenComplete(true);
+          },
+        );
+        succeeded = true;
+        break;
+      } catch (err) {
+        if (err.name === "AbortError") break;
+        console.error(`Text generation error (attempt ${attempt}/${MAX_ATTEMPTS}):`, err);
+        if (attempt < MAX_ATTEMPTS) {
+          setEditableTitle("");
+          setEditableDescription("");
+        }
       }
-    } finally {
-      setIsGeneratingText(false);
     }
+
+    if (!succeeded && !controller.signal.aborted) {
+      // All retries exhausted — surface whatever partial title was streamed, mark complete
+      // so the UI shows the result (possibly wrong char count) rather than a broken state.
+      console.error("Text generation failed after", MAX_ATTEMPTS, "attempts — displaying partial result");
+      setTextGenComplete(true);
+    }
+
+    setIsGeneratingText(false);
   };
 
   const cancelTextGeneration = () => {

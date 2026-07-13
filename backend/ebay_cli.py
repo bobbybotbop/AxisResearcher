@@ -583,6 +583,14 @@ def single_get_detailed_item_data(item_id, verbose=True):
     try:
         response = _attempt_get_item(rest_item_id)
 
+        # On 401, mint a fresh application token and rebuild headers before retrying.
+        if response.status_code == 401:
+            print("🔄 401 on item fetch — refreshing application token...")
+            new_token = _refresh_application_token_and_retry()
+            if new_token:
+                headers['Authorization'] = f'Bearer {new_token}'
+                response = _attempt_get_item(rest_item_id)
+
         if response.status_code == 200:
             item = response.json()
             if verbose:

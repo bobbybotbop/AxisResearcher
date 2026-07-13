@@ -180,14 +180,31 @@ def create_text_stream(old_title, old_description, model="deepseek/deepseek-v4-f
             pass  # ignore remaining JSON tokens after description closes
 
     # Parse final accumulated JSON for the clean result
+    import re as _re
+    result = None
+
+    # Attempt 1: strip markdown fences then json.loads
     try:
-        # Strip markdown fences if present
         clean = accumulated.strip()
         if clean.startswith("```"):
             clean = clean.split("```")[1]
             if clean.startswith("json"):
                 clean = clean[4:]
         result = json.loads(clean.strip())
-        yield {"type": "result", "data": result}
     except json.JSONDecodeError:
+        pass
+
+    # Attempt 2: find the first {...} block in the response (handles leading explanation text)
+    if result is None:
+        m = _re.search(r'\{[\s\S]*\}', accumulated)
+        if m:
+            try:
+                result = json.loads(m.group(0))
+            except json.JSONDecodeError:
+                pass
+
+    if result is not None:
+        # Overwrite editableTitle with the clean parsed value (corrects any truncation from streaming)
+        yield {"type": "result", "data": result}
+    else:
         yield {"type": "error", "error": f"Failed to parse LLM JSON response: {accumulated[:200]}"}

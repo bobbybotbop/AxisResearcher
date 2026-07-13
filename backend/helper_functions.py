@@ -47,14 +47,16 @@ def remove_html_tags(text):
 
 
 def helper_get_valid_token():
-    """Get a valid access token, refresh if needed"""
-    if not APPLICATION_TOKEN:
+    """Get a valid access token, always read fresh from env (frozen module constant may be stale)."""
+    load_dotenv(os.path.join(_env_dir, '.env'), override=True)
+    token = os.getenv('application_token')
+    if not token:
         print("❌ No application token available")
         print("🔄 Attempting to refresh access token...")
-        new_token = refreshToken()
-        return new_token
-    else:
-        return APPLICATION_TOKEN
+        refreshToken()
+        load_dotenv(os.path.join(_env_dir, '.env'), override=True)
+        token = os.getenv('application_token')
+    return token
 
 
 def handle_http_error(response, context=""):

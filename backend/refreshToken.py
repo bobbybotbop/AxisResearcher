@@ -112,7 +112,7 @@ def mint_application_token():
     scope_str = ' '.join(scopes)
     data = {'grant_type': 'client_credentials', 'scope': scope_str}
     try:
-        response = requests.post(TOKEN_URL, headers=headers, data=data)
+        response = requests.post(TOKEN_URL, headers=headers, data=data, timeout=20)
         if response.status_code == 200:
             token_data = response.json()
             access_token = token_data.get('access_token')
@@ -201,7 +201,7 @@ def exchange_code_for_user_token(authorization_code):
     print(f"  [DEBUG] code length (decoded): {len(code)}")
     print(f"  [DEBUG] client_id: {CLIENT_ID[:10]}..." if CLIENT_ID else "  [DEBUG] client_id: MISSING")
     try:
-        response = requests.post(TOKEN_URL, headers=headers, data=data)
+        response = requests.post(TOKEN_URL, headers=headers, data=data, timeout=20)
         if response.status_code == 200:
             token_data = response.json()
             access_token = token_data.get('access_token')
@@ -246,7 +246,7 @@ def refresh_user_token():
         'scope': ' '.join(DEFAULT_USER_SCOPES)
     }
     try:
-        response = requests.post(TOKEN_URL, headers=headers, data=data)
+        response = requests.post(TOKEN_URL, headers=headers, data=data, timeout=20)
         if response.status_code == 200:
             token_data = response.json()
             access_token = token_data.get('access_token')

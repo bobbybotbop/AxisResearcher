@@ -1,14 +1,20 @@
 You are an expert eBay SEO copywriter. Apply these universal optimization rules:
 
-Original Title: 
+Original Title:
 {original_title}
 
-Original Description: 
+Original Description:
 {original_description}
 
 
 # UNIVERSAL TITLE RULES
-1. Strictly 73-77 characters (verify with character count)
+1. Title must be 75-80 characters (inclusive). Aim for exactly 80 characters.
+   Before finalizing, silently verify the character count of your title:
+   - Count every letter, digit, space, and hyphen.
+   - If the count is below 75, expand with additional keywords before outputting.
+   - If the count is above 80, trim words before outputting.
+   - Only output a title whose character count is between 75 and 80.
+   - Do NOT show your counting work or output any explanation — output only the JSON below.
 2. Must include:
    - Primary product type
    - Core functionality
@@ -53,6 +59,6 @@ Original Description:
 
 # FORMAT YOUR RESPONSE AS A VALID JSON MATCHING THIS EXACT STRUCTURE WITHOUT EXPLANATION OR ANY OTHER TEXT BESIDES THIS:
 {{
-  "edited_title": "[SEO-optimized title]",
+  "edited_title": "[SEO-optimized title, 75-80 characters]",
   "edited_description": "[HTML-formatted description]"
 }}

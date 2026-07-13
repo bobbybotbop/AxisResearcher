@@ -14,10 +14,11 @@ const MessageBarInput = ({
   chatContext,
   onChatContextChange,
   showChatContextSelector = false,
+  hasError = false,
 }) => {
   return (
     <StyledWrapper $fullWidth={Boolean(fullWidth)} $hasContext={showChatContextSelector}>
-      <div className="messageBox">
+      <div className={`messageBox${hasError ? ' messageBoxError' : ''}`}>
         {showChatContextSelector && (
           <>
             <ChatContextSelector
@@ -86,6 +87,14 @@ const StyledWrapper = styled.div`
 
   .messageBox:focus-within:not(:has(.messageInput:disabled)) {
     border-color: var(--text-primary);
+  }
+
+  .messageBoxError {
+    border-color: #ef4444;
+  }
+
+  .messageBoxError:focus-within:not(:has(.messageInput:disabled)) {
+    border-color: #ef4444;
   }
 
   .contextDivider {

@@ -223,8 +223,8 @@ def extract_and_save_images_from_response(result, image_type):
         return extracted_images
         
     except Exception as e:
-        print(f"❌ Error extracting images from response: {e}")
         import traceback
+        print(f"❌ Error extracting images from response: {e}")
         traceback.print_exc()
         return []
 
@@ -253,8 +253,8 @@ def _process_single_image(image_data, image_url, is_base64, mime_type, image_typ
             try:
                 # Clean the base64 data
                 image_data_cleaned = image_data.strip().replace('\n', '').replace('\r', '').replace(' ', '').replace('\t', '')
-                image_bytes = base64.b64decode(image_data_cleaned, validate=True)
-                
+                image_bytes = base64.b64decode(image_data_cleaned, validate=False)
+
                 # Determine mime type if not provided
                 if not mime_type:
                     mime_type = 'image/png'  # Default
@@ -361,8 +361,9 @@ def upload_image_bytes_to_ebay(image_bytes, mime_type, picture_name="Uploaded Im
     if not CLIENT_ID:
         print("⚠️ Warning: CLIENT_ID not found, but trying OAuth-only authentication")
     
-    # Get user token from environment
-    valid_token = USER_TOKEN
+    # Get user token from environment (re-read at call time so refreshes are picked up)
+    load_dotenv(override=True)
+    valid_token = os.getenv('user_token')
     if not valid_token:
         print("❌ Error: Could not get valid user token")
         print("💡 Make sure user_token is set in your .env file")
@@ -450,7 +451,7 @@ def upload_image_bytes_to_ebay(image_bytes, mime_type, picture_name="Uploaded Im
         headers['Content-Type'] = f'multipart/form-data; boundary={boundary}'
         
         response = requests.post(url, data=multipart_body, headers=headers, timeout=60)
-        
+
         if response.status_code != 200:
             print(f"❌ HTTP Error {response.status_code}")
             print(f"Response: {response.text[:500]}")
@@ -647,12 +648,12 @@ def generate_image_from_urls(
         response.raise_for_status()
         
         result = response.json()
-        
+
         print("✅ Received response from OpenRouter API")
-        
+
         # Extract all images from response and save them to files
         extracted_images = extract_and_save_images_from_response(result, image_type)
-        
+
         if not extracted_images:
             print("❌ No images found in API response")
             return None
@@ -1047,15 +1048,11 @@ def categorize_image(image_url, model="bytedance-seed/seed-1.6-flash"):
     Returns:
         str: Category name ("edited_image", "bad_image", "real_world_image", or "professional_image"), or None on failure
     """
-    print(f"[DEBUG] categorize_image called with URL: {image_url[:50]}...")
-    
     # Load API key
     openrouter_api_key = os.getenv('openrouter_api_key')
     if not openrouter_api_key:
         print("ERROR: OpenRouter API key not found. Please set openrouter_api_key in your .env file")
         return None
-    
-    print(f"[DEBUG] OpenRouter API key found: {openrouter_api_key[:10]}...")
     
     # Validate image_url
     if not image_url or not isinstance(image_url, str):
@@ -1114,16 +1111,9 @@ def categorize_image(image_url, model="bytedance-seed/seed-1.6-flash"):
     }
     
     try:
-        print(f"[DEBUG] Making API request to OpenRouter with model: {model}")
-        print(f"[DEBUG] Request URL: {url}")
-        print(f"[DEBUG] Image URL being sent: {image_url[:50]}...")
-        
         response = requests.post(url, headers=headers, data=json.dumps(data), timeout=60)
         response.raise_for_status()
-        
-        print(f"[DEBUG] API response status: {response.status_code}")
         result = response.json()
-        print(f"[DEBUG] API response received successfully")
         
         # Extract category from response
         if 'choices' in result and len(result['choices']) > 0:
@@ -1195,14 +1185,10 @@ def categorize_images(image_urls, model="bytedance-seed/seed-1.6-flash"):
         dict: Dictionary mapping image URLs to their categories, or None on failure
               Format: {"image_url": "category_name", ...}
     """
-    print(f"[DEBUG] categorize_images called with {len(image_urls) if image_urls else 0} image URLs")
-    
     # Validate input
     if not image_urls or not isinstance(image_urls, list) or len(image_urls) == 0:
         print("ERROR: image_urls must be a non-empty list of image URLs")
         return None
-    
-    print(f"[DEBUG] Starting categorization of {len(image_urls)} images...")
     
     # Categorize each image
     categories = {}
