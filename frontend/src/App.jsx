@@ -572,18 +572,14 @@ function App() {
     }
   };
 
-  // Auto-refresh on launch only if nothing indicates a refresh in the last 2h (browser or .env mtime)
+  // Auto-refresh tokens on every launch so eBay API calls never start with an expired token.
+  // Same function as the manual Refresh button — no separate code path.
   const hasAutoRefreshed = useRef(false);
   useEffect(() => {
     let alive = true;
     (async () => {
-      const merged = await fetchTokenInfo();
+      await fetchTokenInfo(); // sync display state first
       if (!alive) return;
-      const freshWithinWindow =
-        merged != null &&
-        Number.isFinite(merged) &&
-        Date.now() - merged <= TOKEN_STALE_MS;
-      if (freshWithinWindow) return;
       if (hasAutoRefreshed.current) return;
       hasAutoRefreshed.current = true;
       handleRefreshTokens();
@@ -821,6 +817,7 @@ function App() {
       );
 
       setListingLinkSubmitted(true);
+      setListingId("");
       setPhotos(data.photos || []);
       const initialCategories = classifyImagesEnabled
         ? data.categories || {}
@@ -2191,6 +2188,7 @@ function App() {
       }, 800);
     }
     setTimeout(() => {
+      setTestListingId("");
       setTestPhotos(MOCK_DATA.photos);
       const initialCategories = classifyImagesEnabled
         ? MOCK_DATA.categories

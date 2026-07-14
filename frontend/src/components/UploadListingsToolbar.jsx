@@ -63,7 +63,7 @@ export default function UploadListingsToolbar({
 
   return (
     <div className="mb-5 mt-8 flex items-center gap-3">
-      {/* Search bar + Refresh + Filter: one connected group, fills available space */}
+      {/* Search bar + Refresh: connected group, fills available space */}
       <div className="flex h-10 min-w-0 flex-1 items-stretch overflow-hidden rounded-lg border border-border-default bg-surface-panel shadow-sm transition-colors focus-within:ring-1 focus-within:ring-border-default/40">
         <div className="flex flex-1 items-center gap-2 px-3">
           <Search size={20} className="shrink-0 text-text-muted" aria-hidden />
@@ -96,32 +96,33 @@ export default function UploadListingsToolbar({
             </button>
           </>
         )}
+      </div>
 
-        <span className="w-px bg-border-default" aria-hidden />
-        <div className="relative" ref={rootRef}>
-          <button
-            type="button"
-            aria-expanded={menuOpen}
-            aria-haspopup="menu"
-            aria-label="Open filters"
-            onClick={() => setMenuOpen((o) => !o)}
-            className="relative flex h-full w-10 items-center justify-center text-text-primary transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-border-default/40"
+      {/* Filter button: separate from search bar so its dropdown isn't clipped by overflow-hidden */}
+      <div className="relative shrink-0" ref={rootRef}>
+        <button
+          type="button"
+          aria-expanded={menuOpen}
+          aria-haspopup="menu"
+          aria-label="Open filters"
+          onClick={() => setMenuOpen((o) => !o)}
+          className="relative flex h-10 w-10 items-center justify-center rounded-lg border border-border-default bg-surface-panel text-text-primary shadow-sm transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default/40"
+        >
+          <Filter size={20} aria-hidden />
+          {filtersActive ? (
+            <span
+              className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-text-primary"
+              aria-hidden
+            />
+          ) : null}
+        </button>
+
+        {menuOpen ? (
+          <div
+            role="menu"
+            aria-label="Listing filters"
+            className="absolute right-0 top-full z-30 mt-2 w-[min(calc(100vw-2rem),17rem)] origin-top-right rounded-xl border border-border-default bg-surface-panel py-3 shadow-[0_8px_30px_rgb(0,0,0,0.2)] ring-1 ring-border-default/40"
           >
-            <Filter size={20} aria-hidden />
-            {filtersActive ? (
-              <span
-                className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-text-primary"
-                aria-hidden
-              />
-            ) : null}
-          </button>
-
-          {menuOpen ? (
-            <div
-              role="menu"
-              aria-label="Listing filters"
-              className="absolute right-0 top-full z-30 mt-2 w-[min(calc(100vw-2rem),17rem)] origin-top-right rounded-xl border border-border-default bg-surface-panel py-3 shadow-[0_8px_30px_rgb(0,0,0,0.2)] ring-1 ring-border-default/40"
-            >
               <div className="px-4 pb-2">
                 <p className="text-[0.65rem] font-medium uppercase tracking-[0.12em] text-text-muted">
                   Visibility
@@ -184,7 +185,6 @@ export default function UploadListingsToolbar({
             </div>
           ) : null}
         </div>
-      </div>
 
       {/* Auto-restock: far right */}
       {onAutoRestockEnabledChange && (

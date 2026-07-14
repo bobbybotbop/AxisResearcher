@@ -23,7 +23,7 @@ from backend.copyScripts.create_image import (
     categorize_images,
     _openrouter_response_dict_to_image_bytes_and_mime,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path
 from backend.helper_functions import remove_html_tags
 import os
 import json
@@ -83,6 +83,7 @@ def generate_text():
     Events:
       { "type": "token",   "field": "title"|"description", "delta": "..." }
       { "type": "result",  "data": { "edited_title": "...", "edited_description": "..." } }
+      { "type": "nudging", "message": "Adjusting title length..." }
       { "type": "error",   "error": "..." }
     """
     data = request.get_json()
@@ -101,8 +102,23 @@ def generate_text():
             return
 
         try:
+            final_result = None
             for event in create_text_stream(title, description, model=text_model):
+                if event.get("type") == "result":
+                    final_result = event.get("data", {})
                 yield json.dumps(event) + "\n"
+
+            # After streaming completes, nudge title length into [75, 80] if needed
+            if final_result and final_result.get("edited_title"):
+                pending_title = final_result["edited_title"]
+                title_len = len(pending_title)
+                if not (TITLE_MIN_LEN <= title_len <= TITLE_MAX_LEN):
+                    yield json.dumps({"type": "nudging", "message": "Adjusting title length..."}) + "\n"
+                    nudged_title, _ = _nudge_title_length(pending_title, text_model)
+                    if nudged_title:
+                        nudged_result = dict(final_result)
+                        nudged_result["edited_title"] = nudged_title
+                        yield json.dumps({"type": "result", "data": nudged_result}) + "\n"
         except Exception as e:
             yield error_event(f"Text generation failed: {e}")
 
@@ -163,6 +179,16 @@ def get_listing_photos(listing_id):
             else:
                 print("Skipping image categorization (classify=false)")
 
+            # Pre-fetch aspects for the listing's category so create-listing can skip the Taxonomy API
+            category_id = listing.get('categoryId', 'N/A')
+            localized_aspects = listing.get('localizedAspects', [])
+            pre_fetched_aspects = None
+            if category_id and category_id != 'N/A':
+                try:
+                    pre_fetched_aspects = compute_aspects_for_category(category_id, localized_aspects)
+                except Exception as _e:
+                    print(f"[API] Warning: aspect pre-fetch failed ({_e}), will retry in create-listing")
+
             # Send final result
             result = {
                 "sku": new_sku,
@@ -175,9 +201,10 @@ def get_listing_photos(listing_id):
                     "price": listing.get('price', {}).get('value', 'N/A'),
                     "currency": listing.get('price', {}).get('currency', 'USD'),
                     "itemCreationDate": listing.get('itemCreationDate', 'N/A'),
-                    "categoryId": listing.get('categoryId', 'N/A'),
+                    "categoryId": category_id,
                     "estimatedSoldQuantity": listing.get('estimatedAvailabilities', [{}])[0].get('estimatedSoldQuantity') if listing.get('estimatedAvailabilities') else None,
-                    "localizedAspects": listing.get('localizedAspects', [])
+                    "localizedAspects": localized_aspects,
+                    "preFetchedAspects": pre_fetched_aspects,
                 },
                 "error": None
             }
@@ -652,27 +679,31 @@ def create_listing():
                 print(f"[API] Warning: No title/description provided, skipping text generation")
 
             if pending_title:
-                title_len = len(pending_title)
-                if not (TITLE_MIN_LEN <= title_len <= TITLE_MAX_LEN):
-                    print(
-                        f"[API] Title length {title_len} outside [{TITLE_MIN_LEN},{TITLE_MAX_LEN}], "
-                        f"auto-nudging..."
-                    )
-                    nudged_title, nudge_log = _nudge_title_length(pending_title, text_model)
-                    if nudged_title:
-                        pending_title = nudged_title
+                if not pre_generated_text:
+                    # Only nudge if text was NOT pre-generated (nudge already ran in /api/generate-text)
+                    title_len = len(pending_title)
+                    if not (TITLE_MIN_LEN <= title_len <= TITLE_MAX_LEN):
                         print(
-                            f"[API] Nudge result: {len(nudged_title)} chars, "
-                            f"{len(nudge_log)} attempt(s), title='{nudged_title}'"
+                            f"[API] Title length {title_len} outside [{TITLE_MIN_LEN},{TITLE_MAX_LEN}], "
+                            f"auto-nudging..."
                         )
-                # If description is empty (e.g. streaming failed), fall back to what's on disk
-                desc_to_save = pending_description
-                if not desc_to_save:
-                    existing = load_listing_data(sku=sku)
-                    desc_to_save = (
-                        existing.get("inventoryItem", {}).get("product", {}).get("description", "")
-                        if existing else ""
-                    )
+                        nudged_title, nudge_log = _nudge_title_length(pending_title, text_model)
+                        if nudged_title:
+                            pending_title = nudged_title
+                            print(
+                                f"[API] Nudge result: {len(nudged_title)} chars, "
+                                f"{len(nudge_log)} attempt(s), title='{nudged_title}'"
+                            )
+                    # If description is empty (e.g. streaming failed), fall back to what's on disk
+                    desc_to_save = pending_description
+                    if not desc_to_save:
+                        existing = load_listing_data(sku=sku)
+                        desc_to_save = (
+                            existing.get("inventoryItem", {}).get("product", {}).get("description", "")
+                            if existing else ""
+                        )
+                else:
+                    desc_to_save = pending_description
                 update_listing_title_description(sku, {
                     "edited_title": pending_title,
                     "edited_description": desc_to_save,
@@ -695,10 +726,9 @@ def create_listing():
             # Step 4: Updating aspects
             yield progress_event('Updating aspects', 'in_progress')
 
-            localized_aspects = listing.get("localizedAspects")
-            if localized_aspects is None:
-                localized_aspects = []
-            update_listing_with_aspects(sku, localized_aspects)
+            localized_aspects = listing.get("localizedAspects") or []
+            pre_fetched_aspects = listing.get("preFetchedAspects")  # pre-computed during /api/photos
+            update_listing_with_aspects(sku, localized_aspects, pre_fetched_aspects=pre_fetched_aspects)
             print(f"[API] Updated listing with aspects")
 
             yield progress_event('Updating aspects', 'completed')
@@ -2635,4 +2665,4 @@ class _QuietTokensRequestHandler(WSGIRequestHandler):
 
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000, request_handler=_QuietTokensRequestHandler)
+    app.run(debug=True, use_reloader=False, port=5000, request_handler=_QuietTokensRequestHandler)

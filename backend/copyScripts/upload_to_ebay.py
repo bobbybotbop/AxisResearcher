@@ -72,9 +72,9 @@ def create_ebay_listing(sku, inventory_item_data, locale="en-US", use_user_token
     Returns:
         dict: Success dict with SKU and status, or None on failure
     """
-    # Get a valid token
+    # Get a valid token (read live from env so refreshed tokens are picked up)
     if use_user_token:
-        valid_token = USER_TOKEN
+        valid_token = os.getenv('user_token')
         if not valid_token:
             print("❌ Error: Could not get valid user token")
             print("💡 Make sure user_token is set in your .env file")
@@ -84,7 +84,7 @@ def create_ebay_listing(sku, inventory_item_data, locale="en-US", use_user_token
         if not valid_token:
             print("❌ Error: Could not get valid access token")
             return None
-    
+
     # Endpoint for creating/replacing a single inventory item
     url = f"{EBAY_INVENTORY_API_BASE}/inventory_item/{sku}"
     
@@ -132,16 +132,20 @@ def create_ebay_listing(sku, inventory_item_data, locale="en-US", use_user_token
             try:
                 error_data = response.json()
                 print(f"Error details: {json.dumps(error_data, indent=2)}")
-            except:
-                print(f"Response text: {response.text}")
-            return None
-            
+                raise RuntimeError(f"eBay inventory item API error {response.status_code}: {json.dumps(error_data)}")
+            except RuntimeError:
+                raise
+            except Exception:
+                raise RuntimeError(f"eBay inventory item API error {response.status_code}: {response.text}")
+
     except requests.exceptions.RequestException as e:
         print(f"❌ Request error: {e}")
-        return None
+        raise RuntimeError(f"eBay inventory item request failed: {e}")
+    except RuntimeError:
+        raise
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
-        return None
+        raise RuntimeError(f"Unexpected error in create_ebay_listing: {e}")
 
 
 def create_offer(sku, offer_data, locale="en-US", use_user_token=True):
@@ -172,7 +176,7 @@ def create_offer(sku, offer_data, locale="en-US", use_user_token=True):
         dict: Response containing offerId and status, or None on failure
     """
     if use_user_token:
-        valid_token = USER_TOKEN
+        valid_token = os.getenv('user_token')
         if not valid_token:
             print("❌ Error: Could not get valid user token")
             return None
@@ -181,7 +185,7 @@ def create_offer(sku, offer_data, locale="en-US", use_user_token=True):
         if not valid_token:
             print("❌ Error: Could not get valid access token")
             return None
-    
+
     url = f"{EBAY_INVENTORY_API_BASE}/offer"
     
     headers = {
@@ -246,16 +250,20 @@ def create_offer(sku, offer_data, locale="en-US", use_user_token=True):
             try:
                 error_data = response.json()
                 print(f"Error details: {json.dumps(error_data, indent=2)}")
-            except:
-                print(f"Response text: {response.text}")
-            return None
-            
+                raise RuntimeError(f"eBay create offer API error {response.status_code}: {json.dumps(error_data)}")
+            except RuntimeError:
+                raise
+            except Exception:
+                raise RuntimeError(f"eBay create offer API error {response.status_code}: {response.text}")
+
     except requests.exceptions.RequestException as e:
         print(f"❌ Request error: {e}")
-        return None
+        raise RuntimeError(f"eBay create offer request failed: {e}")
+    except RuntimeError:
+        raise
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
-        return None
+        raise RuntimeError(f"Unexpected error in create_offer: {e}")
 
 
 def publish_offer(offer_id, locale="en-US", use_user_token=True):
@@ -274,7 +282,7 @@ def publish_offer(offer_id, locale="en-US", use_user_token=True):
         dict: Response containing listingId and status, or None on failure
     """
     if use_user_token:
-        valid_token = USER_TOKEN
+        valid_token = os.getenv('user_token')
         if not valid_token:
             print("❌ Error: Could not get valid user token")
             return None
@@ -283,7 +291,7 @@ def publish_offer(offer_id, locale="en-US", use_user_token=True):
         if not valid_token:
             print("❌ Error: Could not get valid access token")
             return None
-    
+
     url = f"{EBAY_INVENTORY_API_BASE}/offer/{offer_id}/publish"
     
     headers = {
@@ -316,7 +324,7 @@ def publish_offer(offer_id, locale="en-US", use_user_token=True):
             try:
                 error_data = response.json()
                 print(f"Error details: {json.dumps(error_data, indent=2)}")
-                
+
                 # Check for country-related errors and provide helpful guidance
                 errors = error_data.get('errors', [])
                 for error in errors:
@@ -338,16 +346,20 @@ def publish_offer(offer_id, locale="en-US", use_user_token=True):
                         print('       "paymentPolicyId": "YOUR_PAYMENT_POLICY_ID",')
                         print('       "returnPolicyId": "YOUR_RETURN_POLICY_ID"')
                         print('   }')
-            except:
-                print(f"Response text: {response.text}")
-            return None
-            
+                raise RuntimeError(f"eBay publish offer API error {response.status_code}: {json.dumps(error_data)}")
+            except RuntimeError:
+                raise
+            except Exception:
+                raise RuntimeError(f"eBay publish offer API error {response.status_code}: {response.text}")
+
     except requests.exceptions.RequestException as e:
         print(f"❌ Request error: {e}")
-        return None
+        raise RuntimeError(f"eBay publish offer request failed: {e}")
+    except RuntimeError:
+        raise
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
-        return None
+        raise RuntimeError(f"Unexpected error in publish_offer: {e}")
 
 
 def create_inventory_location(merchant_location_key="PlasticLoveShopLocation", location_name="PlasticLoveShopLocation", postal_code="11545", country="US", locale="en-US", use_user_token=True):

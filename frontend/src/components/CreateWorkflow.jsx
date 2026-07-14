@@ -80,11 +80,13 @@ function CreateWorkflow({
   const [descriptionEditMode, setDescriptionEditMode] = useState(false);
   const [chatContext, setChatContext] = useState(DEFAULT_CHAT_CONTEXT);
   const [showOriginal, setShowOriginal] = useState(false);
+  const [showMetadata, setShowMetadata] = useState(false);
 
   useEffect(() => {
     if (!listingLinkSubmitted) {
       setChatContext(DEFAULT_CHAT_CONTEXT);
       setShowOriginal(false);
+      setShowMetadata(false);
     }
   }, [listingLinkSubmitted]);
 
@@ -397,69 +399,59 @@ function CreateWorkflow({
               </div>
             )}
 
-          {listingData && (
+          {(listing || listingData) && (
             <>
-              <div className="mt-4 space-y-4">
-                <div className="border-b border-border-default pb-4">
-                  <strong className="text-primary">SKU:</strong> {listingData.sku}
-                </div>
-                <div className="border-b border-border-default pb-4">
-                  <strong className="text-primary">Price:</strong> $
-                  {listingData.offer?.pricingSummary?.price?.value || "N/A"}
-                </div>
-                <div className="border-b border-border-default pb-4">
-                  <strong className="text-primary">Category ID:</strong>{" "}
-                  {listingData.offer?.categoryId || "N/A"}
-                </div>
-                <div className="border-b border-border-default pb-4">
-                  <strong className="text-primary">
-                    Images (
-                    {listingData.inventoryItem?.product?.imageUrls?.length || 0}):
-                  </strong>
-                  <div className="mt-2 space-y-2">
-                    {listingData.inventoryItem?.product?.imageUrls?.map(
-                      (url, idx) => (
-                        <div
-                          key={idx}
-                          className="rounded-md bg-surface-muted p-2 text-sm text-text-muted break-all"
-                        >
-                          {idx + 1}. {url}
-                        </div>
-                      ),
-                    ) || "No images"}
-                  </div>
-                </div>
-                <div className="border-b border-border-default pb-4">
-                  <strong className="text-primary">Created:</strong>{" "}
-                  {listingData.createdDateTime || "N/A"}
-                </div>
-              </div>
-
-              <div className="mt-8 flex justify-center border-t-2 border-border-default pt-8">
+              {/* Listing details disclosure (hidden by default) */}
+              <div className="mt-4">
                 <button
                   type="button"
-                  className={btnPillLg}
-                  onClick={() => onUploadToEbay(listingData.sku, listingData)}
-                  disabled={
-                    uploadingSkus?.has(listingData?.sku) || !listingData?.sku
-                  }
+                  className="flex items-center gap-1 text-sm text-text-muted hover:text-text-primary"
+                  onClick={() => setShowMetadata((v) => !v)}
                 >
-                  {uploadingSkus?.has(listingData?.sku)
-                    ? "Uploading to eBay..."
-                    : "Upload to eBay"}
+                  <span>{showMetadata ? "▼" : "▶"}</span>
+                  <span>
+                    {showMetadata ? "Hide listing details" : "View listing details"}
+                  </span>
                 </button>
-              </div>
-              {uploadingSkus?.has(listingData?.sku) &&
-                uploadProgress?.isActive &&
-                uploadProgress?.totalSteps?.length > 0 && (
-                  <div className="mt-4">
-                    <ProgressIndicator
-                      steps={uploadProgress.totalSteps}
-                      currentStep={uploadProgress.currentStep}
-                      completedSteps={uploadProgress.completedSteps}
-                    />
+                {showMetadata && (
+                  <div className="mt-3 space-y-4">
+                    <div className="border-b border-border-default pb-4">
+                      <strong className="text-primary">SKU:</strong>{" "}
+                      {listingData?.sku || currentSku || "N/A"}
+                    </div>
+                    <div className="border-b border-border-default pb-4">
+                      <strong className="text-primary">Price:</strong> $
+                      {listingData?.offer?.pricingSummary?.price?.value || listing?.price || "N/A"}
+                    </div>
+                    <div className="border-b border-border-default pb-4">
+                      <strong className="text-primary">Category ID:</strong>{" "}
+                      {listingData?.offer?.categoryId || listing?.categoryId || "N/A"}
+                    </div>
+                    <div className="border-b border-border-default pb-4">
+                      <strong className="text-primary">
+                        Images (
+                        {listingData?.inventoryItem?.product?.imageUrls?.length || 0}):
+                      </strong>
+                      <div className="mt-2 space-y-2">
+                        {listingData?.inventoryItem?.product?.imageUrls?.map(
+                          (url, idx) => (
+                            <div
+                              key={idx}
+                              className="rounded-md bg-surface-muted p-2 text-sm text-text-muted break-all"
+                            >
+                              {idx + 1}. {url}
+                            </div>
+                          ),
+                        ) || <span className="text-sm text-text-muted">Not yet generated</span>}
+                      </div>
+                    </div>
+                    <div className="border-b border-border-default pb-4">
+                      <strong className="text-primary">Created:</strong>{" "}
+                      {listingData?.createdDateTime || listing?.itemCreationDate || "N/A"}
+                    </div>
                   </div>
                 )}
+              </div>
 
               {uploadResult && (
                 <div className="mt-8 rounded-xl bg-linear-to-br from-success to-emerald-600 p-6 text-white">
@@ -638,6 +630,33 @@ function CreateWorkflow({
               </button>
             </div>
           )}
+          {listingData && (
+            <div className="mt-8 flex justify-center border-t-2 border-border-default pt-8">
+              <button
+                type="button"
+                className={btnPillLg}
+                onClick={() => onUploadToEbay(listingData.sku, listingData)}
+                disabled={
+                  uploadingSkus?.has(listingData?.sku) || !listingData?.sku
+                }
+              >
+                {uploadingSkus?.has(listingData?.sku)
+                  ? "Uploading to eBay..."
+                  : "Upload to eBay"}
+              </button>
+            </div>
+          )}
+          {uploadingSkus?.has(listingData?.sku) &&
+            uploadProgress?.isActive &&
+            uploadProgress?.totalSteps?.length > 0 && (
+              <div className="mt-4">
+                <ProgressIndicator
+                  steps={uploadProgress.totalSteps}
+                  currentStep={uploadProgress.currentStep}
+                  completedSteps={uploadProgress.completedSteps}
+                />
+              </div>
+            )}
         </div>
       )}
 
