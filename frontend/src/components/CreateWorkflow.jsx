@@ -46,6 +46,7 @@ function CreateWorkflow({
   isSavingTitle,
   isSavingDescription,
   isGeneratingText = false,
+  textGenStatus = "writing",
   onCancelTextGen = () => {},
   onListingIdChange,
   onSubmit,
@@ -267,7 +268,9 @@ function CreateWorkflow({
               />
               {isGeneratingText && (
                 <p className="animate-pulse text-xs text-text-muted">
-                  AI is writing...
+                  {textGenStatus === "nudging"
+                    ? "Adjusting title length..."
+                    : "AI is writing..."}
                 </p>
               )}
               {editableTitle?.length > 80 && (

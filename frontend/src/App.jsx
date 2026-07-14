@@ -148,7 +148,7 @@ async function fetchWithProgress(url, options, onProgress) {
   return result;
 }
 
-async function fetchWithTextStream(url, options, onToken, onResult) {
+async function fetchWithTextStream(url, options, onToken, onResult, onNudge) {
   const response = await fetch(url, options);
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -169,6 +169,8 @@ async function fetchWithTextStream(url, options, onToken, onResult) {
           onToken(event.field, event.delta);
         } else if (event.type === "result") {
           onResult(event.data);
+        } else if (event.type === "nudging") {
+          onNudge?.();
         } else if (event.type === "error") {
           errorMsg = event.error;
         }
@@ -217,6 +219,7 @@ function App() {
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isCreatingListing, setIsCreatingListing] = useState(false);
   const [isGeneratingText, setIsGeneratingText] = useState(false);
+  const [textGenStatus, setTextGenStatus] = useState("writing");
   const [textGenComplete, setTextGenComplete] = useState(false);
   const textGenControllerRef = useRef(null);
   const [listingData, setListingData] = useState(null);
@@ -889,6 +892,7 @@ function App() {
     textGenControllerRef.current = controller;
 
     setIsGeneratingText(true);
+    setTextGenStatus("writing");
     setTextGenComplete(false);
     setEditableTitle("");
     setEditableDescription("");
@@ -915,9 +919,14 @@ function App() {
             }
           },
           (data) => {
+            // Snap to final clean values; textGenComplete set after stream fully resolves
             setEditableTitle(data.edited_title || "");
             setEditableDescription(data.edited_description || "");
-            setTextGenComplete(true);
+          },
+          () => {
+            // Nudge fired — clear title so the incoming token stream restarts visually
+            setEditableTitle("");
+            setTextGenStatus("nudging");
           },
         );
         succeeded = true;
@@ -933,9 +942,11 @@ function App() {
     }
 
     if (!succeeded && !controller.signal.aborted) {
-      // All retries exhausted — surface whatever partial title was streamed, mark complete
-      // so the UI shows the result (possibly wrong char count) rather than a broken state.
       console.error("Text generation failed after", MAX_ATTEMPTS, "attempts — displaying partial result");
+    }
+
+    // Mark complete only after the full stream finishes (including all nudge passes)
+    if (!controller.signal.aborted) {
       setTextGenComplete(true);
     }
 
@@ -948,6 +959,7 @@ function App() {
       textGenControllerRef.current = null;
     }
     setIsGeneratingText(false);
+    setTextGenStatus("writing");
     setTextGenComplete(false);
   };
 
@@ -3292,6 +3304,7 @@ function App() {
               onAddToListing={handleAddToListing}
               onAddToOriginalPhotos={handleAddToOriginalPhotos}
               isGeneratingText={isGeneratingText}
+              textGenStatus={textGenStatus}
               onCancelTextGen={cancelTextGeneration}
               onEditableTitleChange={setEditableTitle}
               onTrimTitle={handleTrimTitle}

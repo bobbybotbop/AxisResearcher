@@ -198,15 +198,10 @@ Ensure you run `collect` before `process`. Verify seller username matches folder
 
 ## Things to prompt:
 
-- Create two buttons next to the image editor and the upload images button in the Create tab, within the Original Photos section. One button should be a Select button, and the other a Bulk Actions button with a drop‑down that currently only includes Delete. Gray out the Bulk Actions button if nothing is selected. When the Select button is pressed, it enters select mode, allowing users to click images to select them. Remove the always‑visible select button at the top right; selection should only be possible via this mode. Also, fix the Select button’s visual placement—it is currently underneath the images but still clickable—so that it appears correctly and only when in select mode.
+- fix the nudging to not go over 80 characters.
+  it should retry a max of 3 times (keep regenerating until its 70-80)
 
--The input text bar does not clear when A valid link is provided. I want that to be empty so the user can continuously prompt based on their selected item. Please clear it and ensure the functionality works. I believe it was made; confirm with me and make a table explaining what the current code does.
+- when the new listing photos generate, all listing details still get overridden with the default template values ([need to change]) and erases all generate data previously. This is not as intended. Please just add the images to the json file and keep everything else the same. check how the images are added to the json and make sure the entire json file doesn't get overidden.
 
-- Once I click Confirm Categories, the title I generated suddenly has the correct character length.I believe that only once the confirm categories button is pressed, the title is edited properly based on the workflow that has been coded up. Investigate why this is; it could be a race condition or something like that. I want it to find the correct and final title and description before they click Confirm Categories and when the initial auto‑generation happens. Please clean up the code so that the text generates first and then finishes, and NO TEXT AFTER THE IMAGES SHOULD EVER GENERATE, MOVE THE ORDER TO THE BEGINNING AND AUTO START IT. The current flow is not really smooth as the metadata gets generated at the end. Please generate it in the initial auto generation of the title and description. The metadata should also be hidden by default. Similar to the view original title and description, it should be visible only if the user toggles them on, and they should be hidden behind a view button.
+- fix the following issue with the image selection mode: the bulk actions button doesn't show a dropdown where the user can choose to skip the selected images.
 
-- Systematically debug the upload to eBay button error (I can't upload the listing to eBay. check axis_48.json to see the data i had to give to ebay) . Alongside the fact that my server logs are not working, I don't see them. When I look at the console, I just see this message: App.jsx:1934 Error uploading listing: Error: Failed to upload listing to eBay. Check server logs for details. Please try to fix the server logs aswell.
-  at fetchWithProgress (App.jsx:145:11)
-  at async handleUploadToEbay (App.jsx:1871:20)
-  (anonymous) @ App.jsx:1934
-  await in (anonymous)
-  (anonymous) @ CreateWorkflow.jsx:442

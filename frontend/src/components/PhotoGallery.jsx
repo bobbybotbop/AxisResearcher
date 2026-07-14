@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import ImageUploadModal from "./ImageUploadModal";
 import { btnPill, btnPillLg } from "../styles/buttonPill";
 
@@ -16,6 +16,16 @@ function PhotoGallery({
   showClassification = true,
 }) {
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedPhotos, setSelectedPhotos] = useState(new Set());
+  const [bulkDropdownOpen, setBulkDropdownOpen] = useState(false);
+
+  useEffect(() => {
+    if (!bulkDropdownOpen) return;
+    const close = () => setBulkDropdownOpen(false);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [bulkDropdownOpen]);
 
   const handleModalAddImages = useCallback(
     (images, destination) => {
@@ -26,6 +36,7 @@ function PhotoGallery({
     },
     [onAddToOriginalPhotos],
   );
+
   if (!photos || photos.length === 0) {
     return null;
   }
@@ -72,6 +83,28 @@ function PhotoGallery({
     }
   };
 
+  const toggleSelectMode = () => {
+    setSelectMode((prev) => {
+      if (prev) {
+        setSelectedPhotos(new Set());
+        setBulkDropdownOpen(false);
+      }
+      return !prev;
+    });
+  };
+
+  const togglePhotoSelection = (index) => {
+    setSelectedPhotos((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  };
+
   return (
     <div className="mt-8 rounded-2xl border border-border-default bg-surface-panel p-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -91,6 +124,42 @@ function PhotoGallery({
               Upload Images
             </button>
           )}
+          <button
+            type="button"
+            className={`${btnPill} ${selectMode ? "ring-2 ring-inset ring-blue-500" : ""}`}
+            onClick={toggleSelectMode}
+          >
+            {selectMode ? "Done" : "Select"}
+          </button>
+          <div className="relative">
+            <button
+              type="button"
+              className={btnPill}
+              disabled={!selectMode || selectedPhotos.size === 0}
+              onClick={() => setBulkDropdownOpen((prev) => !prev)}
+            >
+              Bulk Actions ▾
+            </button>
+            {bulkDropdownOpen && (
+              <div className="absolute right-0 top-full z-20 mt-1 min-w-30 rounded-lg border border-border-default bg-surface-panel py-1 shadow-lg">
+                <button
+                  type="button"
+                  className="w-full px-4 py-2 text-left text-sm text-text-primary hover:bg-surface-app"
+                  onClick={() => {
+                    selectedPhotos.forEach((idx) => {
+                      const photoUrl = photos[idx];
+                      if (onSkipPhoto) onSkipPhoto(photoUrl);
+                    });
+                    setSelectedPhotos(new Set());
+                    setSelectMode(false);
+                    setBulkDropdownOpen(false);
+                  }}
+                >
+                  Skip
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:gap-5">
@@ -103,9 +172,15 @@ function PhotoGallery({
               className={`group relative aspect-square cursor-pointer overflow-hidden rounded-xl transition-all ${
                 isSkipped ? "opacity-50" : ""
               }`}
-              onClick={() => onPhotoClick && onPhotoClick(index)}
+              onClick={() => {
+                if (selectMode) {
+                  togglePhotoSelection(index);
+                } else {
+                  onPhotoClick && onPhotoClick(index);
+                }
+              }}
             >
-              {onSkipPhoto && (
+              {onSkipPhoto && !selectMode && (
                 <button
                   className="absolute right-1.5 top-1.5 z-10 flex h-8 w-8 items-center justify-center rounded-full text-lg font-bold text-white opacity-0 shadow-md transition-opacity hover:opacity-90 focus-visible:opacity-100 group-hover:opacity-100"
                   style={{
@@ -135,6 +210,15 @@ function PhotoGallery({
               {isSkipped && (
                 <div className="absolute left-1/2 top-1/2 z-[5] -translate-x-1/2 -translate-y-1/2 rounded-md bg-black/70 px-2.5 py-1 font-bold text-white">
                   SKIPPED
+                </div>
+              )}
+              {selectMode && selectedPhotos.has(index) && (
+                <div className="pointer-events-none absolute inset-0 z-10 rounded-xl ring-4 ring-inset ring-blue-500">
+                  <div className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-blue-500 text-white">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                      <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                    </svg>
+                  </div>
                 </div>
               )}
               {showClassification && (

@@ -116,6 +116,9 @@ def generate_text():
                     yield json.dumps({"type": "nudging", "message": "Adjusting title length..."}) + "\n"
                     nudged_title, _ = _nudge_title_length(pending_title, text_model)
                     if nudged_title:
+                        # Stream the nudged title char-by-char so the frontend can animate it
+                        for char in nudged_title:
+                            yield json.dumps({"type": "token", "field": "title", "delta": char}) + "\n"
                         nudged_result = dict(final_result)
                         nudged_result["edited_title"] = nudged_title
                         yield json.dumps({"type": "result", "data": nudged_result}) + "\n"
