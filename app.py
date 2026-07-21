@@ -797,9 +797,8 @@ def update_listing_images_endpoint():
         
         from backend.copyScripts.combine_data import listing_file_exists
         if not listing_file_exists(sku):
-            print(f"[API] Listing file not found for SKU {sku}, creating it...")
-            create_listing_with_preferences(sku=sku)
-        
+            return jsonify({"error": f"Listing file not found for SKU {sku}. Cannot update images.", "listing_data": None}), 404
+
         success = update_listing_images(sku, image_urls)
         if not success:
             return jsonify({"error": "Failed to update listing images", "listing_data": None}), 500
@@ -817,7 +816,7 @@ def update_listing_images_endpoint():
         return jsonify({"error": error_msg, "listing_data": None}), 500
 
 
-TITLE_MIN_LEN = 75
+TITLE_MIN_LEN = 70
 TITLE_MAX_LEN = 80
 TITLE_TARGET_LEN = 80
 TITLE_MAX_ATTEMPTS = 3
@@ -965,7 +964,7 @@ def _nudge_title_length(current_title, text_model):
         if in_range:
             break
 
-    # Pick the best candidate: prefer in-range, otherwise closest to target
+    # Pick the best candidate: prefer in-range, otherwise prefer ≤80 (longest), else shortest overall
     in_range_candidates = [
         c for c in candidates if TITLE_MIN_LEN <= len(c) <= TITLE_MAX_LEN
     ]
@@ -973,7 +972,13 @@ def _nudge_title_length(current_title, text_model):
         # Prefer the LAST in-range candidate (most recent, refined version)
         best = in_range_candidates[-1]
     else:
-        best = min(candidates, key=lambda c: abs(len(c) - TITLE_TARGET_LEN))
+        under_candidates = [c for c in candidates if len(c) <= TITLE_MAX_LEN]
+        if under_candidates:
+            # Longest title ≤ 80 (closest to target without going over)
+            best = max(under_candidates, key=len)
+        else:
+            # Everything is over 80 — pick the shortest (least bad)
+            best = min(candidates, key=len)
 
     print(
         f"[TITLE_NUDGE] final length={len(best)} "
@@ -2550,6 +2555,11 @@ def _test_text_model(prompt, model):
 
 def _test_image_model(prompt, model):
     import base64
+
+    if model.startswith('stability.'):
+        if not os.getenv('bedrock_api_key'):
+            return None, 'Bedrock API key is not set. Add bedrock_api_key in Settings.'
+        return {'content': 'Stability AI Bedrock models require an input image and cannot be tested here. They will work normally during listing generation.'}, None
 
     api_key = os.getenv('openrouter_api_key')
     if not api_key:

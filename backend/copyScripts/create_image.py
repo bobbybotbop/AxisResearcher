@@ -555,12 +555,38 @@ def generate_image_from_urls(
     Returns:
         list[str]: Array of eBay image URLs, or None on failure
     """
+    # Route Stability AI models to Bedrock
+    if model.startswith("stability."):
+        # Build prompt text the same way OpenRouter path does
+        if custom_prompt:
+            prompt_text = custom_prompt.strip()
+        else:
+            script_dir = Path(__file__).parent.parent.parent
+            if image_type == ImageType.PROFESSIONAL:
+                prompt_file_path = script_dir / "prompts" / "generateImageFromProfessional"
+            elif image_type == ImageType.REAL_WORLD:
+                prompt_file_path = script_dir / "prompts" / "generateImageFromWorld.txt"
+            else:
+                prompt_file_path = script_dir / "prompts" / "experimental.txt"
+            try:
+                with open(prompt_file_path, 'r', encoding='utf-8') as f:
+                    prompt_text = f.read().strip()
+            except Exception as e:
+                print(f"❌ Error loading prompt file: {e}")
+                return None
+        if prompt_modifier and isinstance(prompt_modifier, str) and prompt_modifier.strip():
+            prompt_text = prompt_text + "\n\nAdditional instructions: " + prompt_modifier.strip()
+        if not image_urls or not isinstance(image_urls, list) or len(image_urls) == 0:
+            print("❌ image_urls must be a non-empty list of image URLs")
+            return None
+        return _bedrock_stability_generate(image_urls, prompt_text, model)
+
     # Load API key
     openrouter_api_key = os.getenv('openrouter_api_key')
     if not openrouter_api_key:
         print("❌ OpenRouter API key not found. Please set openrouter_api_key in your .env file")
         return None
-    
+
     # Validate image_type
     if not isinstance(image_type, ImageType):
         print(f"❌ Invalid image_type. Must be ImageType.PROFESSIONAL, ImageType.REAL_WORLD, or ImageType.EXPERIMENTAL")
@@ -703,6 +729,82 @@ def generate_image_from_urls(
     except Exception as e:
         print(f"❌ Unexpected error: {e}")
         return None
+
+
+def _bedrock_stability_generate(image_urls, prompt_text, model):
+    """
+    Call a Stability AI model on AWS Bedrock (invoke_model) with image input(s).
+    Returns a list of eBay URLs on success, or None on failure.
+
+    Supports:
+      stability.stable-image-control-structure-v1:0  — structure-guided generation
+      stability.stable-image-search-recolor-v1:0     — search-and-recolor
+
+    The first URL in image_urls is used as the primary `image`; additional URLs
+    are ignored (Stability models accept one image input via this API).
+    """
+    import boto3
+    from backend.ebay_cli import _sync_bedrock_bearer_token, _BEDROCK_REGION
+
+    _sync_bedrock_bearer_token()
+
+    if not image_urls:
+        print("❌ No image URLs provided for Bedrock Stability generation")
+        return None
+
+    # Fetch the first image and base64-encode it
+    try:
+        img_response = requests.get(image_urls[0], timeout=30)
+        img_response.raise_for_status()
+        image_b64 = base64.b64encode(img_response.content).decode("utf-8")
+    except Exception as e:
+        print(f"❌ Failed to fetch source image for Bedrock: {e}")
+        return None
+
+    body = {
+        "prompt": prompt_text,
+        "image": image_b64,
+        "output_format": "png",
+    }
+
+    try:
+        client = boto3.client(service_name="bedrock-runtime", region_name=_BEDROCK_REGION)
+        print(f"🤖 Calling Bedrock Stability model {model}...")
+        response = client.invoke_model(
+            modelId=model,
+            body=json.dumps(body),
+            contentType="application/json",
+            accept="application/json",
+        )
+        result = json.loads(response["body"].read())
+    except Exception as e:
+        print(f"❌ Bedrock invoke_model error: {e}")
+        return None
+
+    # Extract base64 image from response
+    # Stability returns {"images": ["<b64>", ...], "finish_reasons": [...]}
+    images = result.get("images") or []
+    if not images:
+        print(f"❌ No images in Bedrock Stability response: {result}")
+        return None
+
+    ebay_urls = []
+    for idx, img_b64 in enumerate(images):
+        try:
+            image_bytes = base64.b64decode(img_b64)
+        except Exception as e:
+            print(f"⚠️ Failed to decode Bedrock image {idx}: {e}")
+            continue
+
+        picture_name = f"Generated bedrock image {idx + 1}" if len(images) > 1 else "Generated bedrock image"
+        ebay_url = upload_image_bytes_to_ebay(image_bytes, "image/png", picture_name)
+        if ebay_url:
+            ebay_urls.append(ebay_url)
+            print(f"✅ Bedrock image {idx + 1} uploaded to eBay: {ebay_url}")
+        else:
+            print(f"⚠️ Failed to upload Bedrock image {idx + 1} to eBay")
+
+    return ebay_urls if ebay_urls else None
 
 
 def _extension_from_mime(mime_type: str) -> str:

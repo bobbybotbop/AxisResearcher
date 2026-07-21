@@ -1,5 +1,6 @@
 Transform the scene with these changes:
 - Ensure the aspect ratio of the image to be 1:1, aspect ratio="1:1"
+- Preserve the product's original proportions — any scaling must be uniform, no stretching or distortion
 - Center the scene
 - Change camera angle by 45+ degrees (left or right)
 - Background & Surface: White studio-like aesthetic, without a visible horizon line.

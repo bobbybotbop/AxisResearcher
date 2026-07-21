@@ -16,4 +16,5 @@
     -Optimize contrast for clarity
 -Cleanup: Remove text and labels from the product and surrounding area, but preserve all brand logos and branding elements that are part of the product design
 -Product integrity: Maintain the complete physical structure and form of the product - do not add, remove, or modify any parts, features, openings, or design elements of the actual product itself
+-Proportions: Preserve the product's original proportions — any scaling must be uniform, no stretching or distortion
 -Output standard: Professional e-commerce quality with accurate color reproduction

@@ -3,7 +3,7 @@ You are an expert eBay SEO copywriter. The current title is TOO SHORT and is lea
 Current title ({current_length} characters, ~{current_words} words):
 {current_title}
 
-Target: 75-80 characters total (aim for exactly 80 characters, roughly {target_words} words).
+Target: 70-80 characters total (aim for exactly 80 characters, roughly {target_words} words).
 You must ADD approximately {chars_under} characters (about {words_to_add} word(s)).
 
 Length reference (the row below is exactly 80 characters wide — your output should match this width):
@@ -12,12 +12,12 @@ Reusable Garden Hose Holder Wall Mount Storage Organizer Heavy Duty Outdoor Hook
 
 Counting strategy (use this since you cannot count characters directly):
 - English averages ~6 characters per word (including the trailing space).
-- 75-80 characters = roughly 12-13 words.
+- 70-80 characters = roughly 12-13 words.
 - If your draft has fewer than 12 words, it is almost certainly TOO SHORT — add another keyword.
 - If your draft has more than 14 words, it is likely TOO LONG — drop a word.
 
 Rules:
-1. Output must land in 75-80 characters (verify by word count: aim for 13 words).
+1. Output must land in 70-80 characters (verify by word count: aim for 13 words).
 2. Keep every existing keyword in the original title intact.
 3. Add high-value buyer search terms relevant to the product:
    - Synonyms for the core product type

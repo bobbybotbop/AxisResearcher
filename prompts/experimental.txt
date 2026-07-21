@@ -59,6 +59,7 @@ Product Integrity (Critical):
 Maintain the complete physical structure and form of the product
 Do NOT add, remove, or modify any parts, features, openings, or design elements of the actual product itself
 Work only with existing details—avoid making up or inventing new product features
+Proportions (Critical): Preserve the product's original proportions — any scaling must be uniform, no stretching or distortion
 
 Output Standard:
 

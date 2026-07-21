@@ -197,11 +197,3 @@ Ensure you run `collect` before `process`. Verify seller username matches folder
 - Images do not generate square formats (will fix by cropping input to square)
 
 ## Things to prompt:
-
-- fix the nudging to not go over 80 characters.
-  it should retry a max of 3 times (keep regenerating until its 70-80)
-
-- when the new listing photos generate, all listing details still get overridden with the default template values ([need to change]) and erases all generate data previously. This is not as intended. Please just add the images to the json file and keep everything else the same. check how the images are added to the json and make sure the entire json file doesn't get overidden.
-
-- fix the following issue with the image selection mode: the bulk actions button doesn't show a dropdown where the user can choose to skip the selected images.
-

@@ -80,6 +80,18 @@ const IMAGE_MODEL_OPTIONS = [
     label: "Seedream 4.5",
     costPerImage: 0.04,
   },
+  {
+    value: "stability.stable-image-control-structure-v1:0",
+    label: "Stable Image Control Structure",
+    provider: "bedrock",
+    costPerImage: 0.08,
+  },
+  {
+    value: "stability.stable-image-search-recolor-v1:0",
+    label: "Stable Image Search Recolor",
+    provider: "bedrock",
+    costPerImage: 0.08,
+  },
 ];
 
 const CLASSIFIER_MODEL_OPTIONS = [
@@ -1213,14 +1225,27 @@ function App() {
                 `Successfully generated ${aiGeneratedList.length} image(s)`,
               );
 
-              setGeneratedImages(
-                mergeGeneratedImages(photosToProcess, aiGeneratedList, {
-                  allowPartial: false,
-                }),
-              );
+              const mergedImages = mergeGeneratedImages(photosToProcess, aiGeneratedList, {
+                allowPartial: false,
+              });
+              setGeneratedImages(mergedImages);
               setCategories(editableCategories);
               setSelectedImagesForRegen([]);
               setCustomPrompt("");
+
+              // Sync generated images to the listing JSON on disk so Upload to eBay works
+              if (currentSku && mergedImages.length > 0) {
+                fetch("/api/update-listing-images", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ sku: currentSku, image_urls: mergedImages }),
+                })
+                  .then((r) => r.json())
+                  .then((syncData) => {
+                    if (syncData.listing_data) setListingData(syncData.listing_data);
+                  })
+                  .catch((err) => console.error("Failed to sync images to disk:", err));
+              }
 
               setImageGenProgress({
                 isActive: false,
@@ -1232,11 +1257,24 @@ function App() {
             } else {
               // Failed - show errors but return partial results if any
               const aiGeneratedList = statusData.generated_images || [];
-              setGeneratedImages(
-                mergeGeneratedImages(photosToProcess, aiGeneratedList, {
-                  allowPartial: true,
-                }),
-              );
+              const partialImages = mergeGeneratedImages(photosToProcess, aiGeneratedList, {
+                allowPartial: true,
+              });
+              setGeneratedImages(partialImages);
+
+              // Sync partial images to disk too
+              if (currentSku && partialImages.length > 0) {
+                fetch("/api/update-listing-images", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ sku: currentSku, image_urls: partialImages }),
+                })
+                  .then((r) => r.json())
+                  .then((syncData) => {
+                    if (syncData.listing_data) setListingData(syncData.listing_data);
+                  })
+                  .catch((err) => console.error("Failed to sync images to disk:", err));
+              }
 
               const errorMsg =
                 statusData.errors && statusData.errors.length > 0
@@ -1312,11 +1350,26 @@ function App() {
       const updated = [...prev];
       const [moved] = updated.splice(srcIdx, 1);
       updated.splice(destIdx, 0, moved);
+
+      // Sync reordered images to disk
+      if (currentSku && updated.length > 0) {
+        fetch("/api/update-listing-images", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sku: currentSku, image_urls: updated }),
+        })
+          .then((r) => r.json())
+          .then((syncData) => {
+            if (syncData.listing_data) setListingData(syncData.listing_data);
+          })
+          .catch((err) => console.error("Failed to sync images to disk:", err));
+      }
+
       return updated;
     });
     // Clear selection since indices changed
     setSelectedImagesForRegen([]);
-  }, []);
+  }, [currentSku]);
 
   const handleImageSelection = (index) => {
     setSelectedImagesForRegen((prev) => {
@@ -1387,6 +1440,20 @@ function App() {
       setGeneratedImages(newImages);
       setSelectedImagesForRegen([]);
       setCustomPrompt("");
+
+      // Sync updated images to disk
+      if (currentSku && newImages.length > 0) {
+        fetch("/api/update-listing-images", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sku: currentSku, image_urls: newImages }),
+        })
+          .then((r) => r.json())
+          .then((syncData) => {
+            if (syncData.listing_data) setListingData(syncData.listing_data);
+          })
+          .catch((err) => console.error("Failed to sync images to disk:", err));
+      }
     } catch (err) {
       console.error("Error regenerating images:", err);
       setError(err.message || "An error occurred while regenerating images");
@@ -1430,6 +1497,20 @@ function App() {
         if (uploadData.url) newImages[index] = uploadData.url;
       }
       setGeneratedImages(newImages);
+
+      // Sync trimmed images to disk
+      if (currentSku && newImages.length > 0) {
+        fetch("/api/update-listing-images", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sku: currentSku, image_urls: newImages }),
+        })
+          .then((r) => r.json())
+          .then((syncData) => {
+            if (syncData.listing_data) setListingData(syncData.listing_data);
+          })
+          .catch((err) => console.error("Failed to sync images to disk:", err));
+      }
     } catch (err) {
       console.error("Error trimming images:", err);
       setError(err.message || "An error occurred while trimming images");

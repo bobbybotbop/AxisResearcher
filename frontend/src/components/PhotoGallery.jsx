@@ -136,7 +136,7 @@ function PhotoGallery({
               type="button"
               className={btnPill}
               disabled={!selectMode || selectedPhotos.size === 0}
-              onClick={() => setBulkDropdownOpen((prev) => !prev)}
+              onClick={(e) => { e.stopPropagation(); setBulkDropdownOpen((prev) => !prev); }}
             >
               Bulk Actions ▾
             </button>
