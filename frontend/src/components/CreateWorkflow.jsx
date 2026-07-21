@@ -75,6 +75,8 @@ function CreateWorkflow({
   classifyImagesEnabled = true,
   photoSelectionActive = false,
   pendingPhotoPrompt = "",
+  pendingImagePromptModifier = "",
+  onClearImagePromptModifier,
   onConfirmPhotoRegeneration,
   onCancelPhotoRegeneration,
 }) {
@@ -519,6 +521,23 @@ function CreateWorkflow({
             onOpenEditor={onEditorToggle}
             showClassification={classifyImagesEnabled}
           />
+          {pendingImagePromptModifier && !generatedImages?.length && (
+            <div className="mt-3 flex items-center gap-2 rounded-xl border border-border-default bg-surface-panel px-4 py-2.5">
+              <span className="flex-1 text-sm text-text-muted">
+                Will generate with:{" "}
+                <span className="font-medium text-text-primary">
+                  &quot;{pendingImagePromptModifier}&quot;
+                </span>
+              </span>
+              <button
+                type="button"
+                className="rounded-md px-2 py-1 text-xs text-text-muted hover:bg-surface-muted hover:text-text-primary"
+                onClick={onClearImagePromptModifier}
+              >
+                &times;
+              </button>
+            </div>
+          )}
           {isConfirming && imageGenProgress?.isActive && (
             <div className="my-5 rounded-lg border border-border-default bg-surface-muted p-4">
               <h3 className="mb-2.5 text-lg text-text-primary">

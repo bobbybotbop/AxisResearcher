@@ -20,6 +20,7 @@ export function createTestWorkflowState() {
     uploadResult: null,
     currentSku: null,
     skippedPhotos: new Set(),
+    pendingImagePromptModifier: "",
     isEditorOpen: false,
     editableTitle: '',
     isTrimmingTitle: false,

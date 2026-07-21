@@ -363,6 +363,7 @@ function App() {
   const [isRegeneratingMetadata, setIsRegeneratingMetadata] = useState(false);
   const [photoSelectionActive, setPhotoSelectionActive] = useState(false);
   const [pendingPhotoPrompt, setPendingPhotoPrompt] = useState("");
+  const [pendingImagePromptModifier, setPendingImagePromptModifier] = useState("");
   const [customPrompt, setCustomPrompt] = useState("");
   const [selectedImagesForRegen, setSelectedImagesForRegen] = useState([]);
   const [isTrimming, setIsTrimming] = useState(false);
@@ -639,6 +640,7 @@ function App() {
   const setTestCurrentSku = setTestKey("currentSku");
   const setTestSkippedPhotos = setTestKey("skippedPhotos");
   const setTestPromptModifier = setTestKey("promptModifier");
+  const setTestPendingImagePromptModifier = setTestKey("pendingImagePromptModifier");
   const setTestIsEditorOpen = setTestKey("isEditorOpen");
   const setTestEditableTitle = setTestKey("editableTitle");
   const setTestIsTrimmingTitle = setTestKey("isTrimmingTitle");
@@ -675,6 +677,7 @@ function App() {
     currentSku: testCurrentSku,
     skippedPhotos: testSkippedPhotos,
     promptModifier: testPromptModifier,
+    pendingImagePromptModifier: testPendingImagePromptModifier,
     isEditorOpen: testIsEditorOpen,
     editableTitle: testEditableTitle,
     isTrimmingTitle: testIsTrimmingTitle,
@@ -983,8 +986,13 @@ function App() {
   const handleChatSubmit = (prompt, context) => {
     if (context === "title") regenerateTitle(prompt);
     else if (context === "description") regenerateDescription(prompt);
-    else if (context === "photos") enterPhotoSelectionMode(prompt);
-    else if (context === "metadata") regenerateMetadata(prompt);
+    else if (context === "photos") {
+      if (!generatedImages || generatedImages.length === 0) {
+        setPendingImagePromptModifier(prompt);
+      } else {
+        enterPhotoSelectionMode(prompt);
+      }
+    } else if (context === "metadata") regenerateMetadata(prompt);
   };
 
   const regenerateTitle = async (prompt) => {
@@ -1164,6 +1172,7 @@ function App() {
         photos: photosToProcess,
         categories: categoriesToProcess,
         image_model: imageModel,
+        ...(pendingImagePromptModifier && { prompt_modifier: pendingImagePromptModifier }),
       };
       console.log("Sending request to /api/generate-images:", requestBody);
 
@@ -1203,6 +1212,8 @@ function App() {
         completed: 0,
         currentGenerating: [],
       });
+
+      setPendingImagePromptModifier("");
 
       // Poll for progress updates
       const pollInterval = setInterval(async () => {
@@ -2522,8 +2533,11 @@ function App() {
       setTimeout(() => {
         setTestEditableDescription(`<p>[Regenerated description for: ${prompt}]</p>`);
       }, 1500);
+    } else if (context === "photos") {
+      if (!testGeneratedImages || testGeneratedImages.length === 0) {
+        setTestPendingImagePromptModifier(prompt);
+      }
     }
-    // photos and metadata: no-op in test mode
   };
 
   const testHandleTrimSelected = async () => {
@@ -2715,6 +2729,8 @@ function App() {
               onChatSubmit={testHandleChatSubmit}
               photoSelectionActive={false}
               pendingPhotoPrompt=""
+              pendingImagePromptModifier={testPendingImagePromptModifier || ""}
+              onClearImagePromptModifier={() => setTestPendingImagePromptModifier("")}
               onConfirmPhotoRegeneration={() => {}}
               onCancelPhotoRegeneration={() => {}}
               onCategoryChange={(url, cat) =>
@@ -3402,6 +3418,8 @@ function App() {
               classifyImagesEnabled={classifyImagesEnabled}
               photoSelectionActive={photoSelectionActive}
               pendingPhotoPrompt={pendingPhotoPrompt}
+              pendingImagePromptModifier={pendingImagePromptModifier}
+              onClearImagePromptModifier={() => setPendingImagePromptModifier("")}
               onConfirmPhotoRegeneration={handleConfirmPhotoRegeneration}
               onCancelPhotoRegeneration={handleCancelPhotoRegeneration}
             />

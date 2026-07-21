@@ -109,3 +109,21 @@ The project uses two independent token types with distinct lifecycles:
 - Styling uses Tailwind v4 with semantic CSS variable tokens (`bg-surface-app`, `bg-surface-panel`, `text-text-primary`, `border-border-default`, etc.) defined in `frontend/src/styles/App.css` and toggled via `data-theme="light"|"dark"` on the root element — see `frontend/src/styles/STYLING.md` for the full token list and usage rules. Prefer these tokens over raw colors so components don't need their own dark-mode branching.
 - `docs/UI_VOCABULARY.md` is the source of truth for informal-name → component mappings (e.g. "the bottom bar" → `listing-bar-post-link` → `MessageBarInput` in `CreateWorkflow.jsx`). Check it before guessing which component a UI description refers to; it also lists the exact state flags (`listingLinkSubmitted`, `testListingLinkSubmitted`) that drive each layout.
 - Vite dev server runs on port 4000 and proxies `/api/*` to the Flask backend on `http://localhost:5000` (`frontend/vite.config.js`).
+
+### Image prompt workflow (chat bar → Photos context)
+
+The user can type a prompt with the "Photos" chat context selected to modify image generation. Two cases:
+
+**Case 1 — Pre-generation (images not yet generated):**
+- User types prompt → stored in `pendingImagePromptModifier` state
+- A chip appears near the PhotoGallery showing "Will generate with: '...'" with a dismiss button
+- When user clicks Generate (confirm categories), `handleConfirmCategories` includes `prompt_modifier` in the `/api/generate-images` request body
+- Backend appends it to the base prompt via `prompt_modifier` parameter in `generate_image_from_urls`
+- State is cleared after generation starts
+
+**Case 2 — Post-generation (images already exist):**
+- User types prompt → `enterPhotoSelectionMode(prompt)` → all images pre-selected, selection UI shown
+- User can toggle individual images, then clicks "Regenerate Selected"
+- `handleConfirmPhotoRegeneration` → `handleRegenerateImages(prompt)` → `/api/regenerate-images` with `custom_prompt` which **replaces** the entire base prompt (uses `ImageType.EXPERIMENTAL`)
+
+Key distinction: Case 1 uses `prompt_modifier` (appended to base prompt), Case 2 uses `custom_prompt` (replaces base prompt entirely).

@@ -197,3 +197,5 @@ Ensure you run `collect` before `process`. Verify seller username matches folder
 - Images do not generate square formats (will fix by cropping input to square)
 
 ## Things to prompt:
+
+- need to fix selection mode after photos are generated
