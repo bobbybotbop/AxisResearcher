@@ -343,6 +343,7 @@ function App() {
   const quantitiesFetchedRef = useRef(false);
   const [autoRestockEnabled, setAutoRestockEnabled] = useState(false);
   const [autoRestockQuantity, setAutoRestockQuantity] = useState(15);
+  const [minimumImagesPerListing, setMinimumImagesPerListing] = useState(10);
   const [autoRestockConfirm, setAutoRestockConfirm] = useState(null);
   const [isRestocking, setIsRestocking] = useState(false);
   const autoRestockRanRef = useRef(false);
@@ -1178,6 +1179,7 @@ function App() {
         photos: photosToProcess,
         categories: categoriesToProcess,
         image_model: imageModel,
+        classify_enabled: classifyImagesEnabled,
         ...(pendingImagePromptModifier && { prompt_modifier: pendingImagePromptModifier }),
       };
       console.log("Sending request to /api/generate-images:", requestBody);
@@ -1956,6 +1958,17 @@ function App() {
     }
   };
 
+  const handleMinimumImagesChange = (value) => {
+    const parsed = parseInt(value, 10);
+    if (isNaN(parsed) || parsed < 1) return;
+    setMinimumImagesPerListing(parsed);
+    fetch("/api/settings/minimum-images", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ minimum_images_per_listing: parsed }),
+    }).catch(() => {});
+  };
+
   const confirmAutoRestock = async () => {
     if (!autoRestockConfirm) return;
     const { nextEnabled, nextQuantity } = autoRestockConfirm;
@@ -2121,6 +2134,14 @@ function App() {
     if (activeTab === "settings") {
       fetchTokenInfo();
       setTokenMessage(null);
+      fetch("/api/settings/minimum-images")
+        .then((res) => res.json())
+        .then((data) => {
+          if (typeof data.minimum_images_per_listing === "number") {
+            setMinimumImagesPerListing(data.minimum_images_per_listing);
+          }
+        })
+        .catch(() => {});
     }
   }, [activeTab]);
 
@@ -3186,6 +3207,33 @@ function App() {
                       ? "Classify Images: On"
                       : "Classify Images: Off"}
                   </button>
+                </div>
+              </div>
+              <div className="mb-5 rounded-xl border border-border-default bg-surface-muted p-5">
+                <div className="flex flex-col gap-4">
+                  <div>
+                    <h3 className="m-0 text-lg font-semibold text-text-primary">
+                      Image Generation Settings
+                    </h3>
+                    <p className="mt-1 text-sm text-text-muted">
+                      Configure how images are generated for listings.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-text-secondary text-sm">
+                      Minimum images per listing
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={minimumImagesPerListing}
+                      onChange={(e) => handleMinimumImagesChange(e.target.value)}
+                      className="w-24 rounded border border-border-default bg-surface-panel px-2 py-1 text-text-primary text-sm"
+                    />
+                    <span className="text-text-tertiary text-xs">
+                      When classifier is off, angle variants are generated to reach this count.
+                    </span>
+                  </div>
                 </div>
               </div>
               <div className="mb-5 rounded-xl border border-border-default bg-surface-muted p-5">
