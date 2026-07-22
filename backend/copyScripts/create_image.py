@@ -30,6 +30,7 @@ class ImageType(Enum):
     PROFESSIONAL = "PROFESSIONAL"
     REAL_WORLD = "REAL_WORLD"
     EXPERIMENTAL = "EXPERIMENTAL"
+    ANGLE_VARIANT = "ANGLE_VARIANT"
 
 
 def extract_and_save_images_from_response(result, image_type):
@@ -566,6 +567,8 @@ def generate_image_from_urls(
                 prompt_file_path = script_dir / "prompts" / "generateImageFromProfessional"
             elif image_type == ImageType.REAL_WORLD:
                 prompt_file_path = script_dir / "prompts" / "generateImageFromWorld.txt"
+            elif image_type == ImageType.ANGLE_VARIANT:
+                prompt_file_path = script_dir / "prompts" / "generateImageAngleVariant.txt"
             else:
                 prompt_file_path = script_dir / "prompts" / "experimental.txt"
             try:
@@ -574,7 +577,9 @@ def generate_image_from_urls(
             except Exception as e:
                 print(f"❌ Error loading prompt file: {e}")
                 return None
-        if prompt_modifier and isinstance(prompt_modifier, str) and prompt_modifier.strip():
+        if image_type == ImageType.ANGLE_VARIANT and prompt_modifier:
+            prompt_text = prompt_text.replace("{angle}", prompt_modifier.strip())
+        elif prompt_modifier and isinstance(prompt_modifier, str) and prompt_modifier.strip():
             prompt_text = prompt_text + "\n\nAdditional instructions: " + prompt_modifier.strip()
         if not image_urls or not isinstance(image_urls, list) or len(image_urls) == 0:
             print("❌ image_urls must be a non-empty list of image URLs")
@@ -610,6 +615,8 @@ def generate_image_from_urls(
             prompt_file_path = script_dir / "prompts" / "generateImageFromProfessional"
         elif image_type == ImageType.REAL_WORLD:
             prompt_file_path = script_dir / "prompts" / "generateImageFromWorld.txt"
+        elif image_type == ImageType.ANGLE_VARIANT:
+            prompt_file_path = script_dir / "prompts" / "generateImageAngleVariant.txt"
         else:  # ImageType.EXPERIMENTAL
             prompt_file_path = script_dir / "prompts" / "experimental.txt"
         
@@ -627,8 +634,10 @@ def generate_image_from_urls(
             traceback.print_exc()
             return None
     
-    # Append prompt modifier if provided
-    if prompt_modifier and isinstance(prompt_modifier, str) and prompt_modifier.strip():
+    # Append prompt modifier if provided (or substitute angle for ANGLE_VARIANT)
+    if image_type == ImageType.ANGLE_VARIANT and prompt_modifier:
+        prompt_text = prompt_text.replace("{angle}", prompt_modifier.strip())
+    elif prompt_modifier and isinstance(prompt_modifier, str) and prompt_modifier.strip():
         prompt_text = prompt_text + "\n\nAdditional instructions: " + prompt_modifier.strip()
         print(f"📝 Appended prompt modifier: {prompt_modifier.strip()}")
     

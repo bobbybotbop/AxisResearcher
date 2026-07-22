@@ -73,6 +73,17 @@ DEFAULT_TEXT_MODEL = "deepseek/deepseek-v4-flash"
 DEFAULT_IMAGE_MODEL = "sourceful/riverflow-v2-fast"
 DEFAULT_CLASSIFIER_MODEL = "bytedance-seed/seed-1.6-flash"
 
+ANGLE_VARIANTS = [
+    "front view",
+    "left side view",
+    "right side view",
+    "3/4 front-left view",
+    "3/4 front-right view",
+    "elevated front view",
+    "low front view",
+    "rear view",
+]
+
 # --- Streaming progress helpers (NDJSON) ---
 def progress_event(step, status):
     """Send a progress event as an NDJSON line."""
@@ -385,7 +396,8 @@ def generate_images():
         categories = data.get("categories", {})
         prompt_modifier = data.get("prompt_modifier", "")
         image_model = data.get("image_model") or DEFAULT_IMAGE_MODEL
-        
+        classify_enabled = data.get("classify_enabled", True)
+
         print(f"[API] Processing {len(photos)} photos with {len(categories)} categories")
         if prompt_modifier:
             print(f"[API] Prompt modifier: {prompt_modifier}")
@@ -431,13 +443,38 @@ def generate_images():
                 continue
             
             tasks_to_generate.append((idx, photo_url, image_type))
-        
+
+        # Inject angle-variant tasks when classifier is off and count is below minimum
+        if not classify_enabled:
+            try:
+                minimum = get_minimum_images_setting()["minimum_images_per_listing"]
+            except Exception:
+                minimum = 10
+
+            current_count = len(tasks_to_generate)
+            deficit = minimum - current_count
+
+            if deficit > 0 and tasks_to_generate:
+                source_photos = [photo_url for _, photo_url, _ in tasks_to_generate]
+                n_sources = len(source_photos)
+                angle_index = 0
+                variant_index = len(photos)  # offset index beyond original photos
+
+                for i in range(deficit):
+                    source_url = source_photos[i % n_sources]
+                    angle = ANGLE_VARIANTS[angle_index % len(ANGLE_VARIANTS)]
+                    angle_index += 1
+                    tasks_to_generate.append((variant_index, source_url, ImageType.ANGLE_VARIANT, angle))
+                    variant_index += 1
+
+                print(f"[API] Added {deficit} angle-variant task(s) to reach minimum {minimum}")
+
         if not tasks_to_generate:
             return jsonify({
                 "error": "No photos to generate (all skipped or invalid categories)",
                 "task_id": None
             }), 400
-        
+
         # Create task ID for progress tracking
         task_id = str(uuid.uuid4())
         
@@ -459,11 +496,13 @@ def generate_images():
                 with ThreadPoolExecutor(max_workers=5) as executor:
                     # Submit all tasks
                     futures = {}
-                    for idx, photo_url, image_type in tasks_to_generate:
+                    for task in tasks_to_generate:
+                        idx, photo_url, image_type = task[0], task[1], task[2]
+                        angle = task[3] if len(task) > 3 else None
                         future = executor.submit(
                             generate_image_with_delay,
                             photo_url, image_type, idx, delay_ms=500, task_id=task_id,
-                            prompt_modifier=prompt_modifier if prompt_modifier else None,
+                            prompt_modifier=angle if angle else (prompt_modifier if prompt_modifier else None),
                             image_model=image_model,
                         )
                         futures[future] = (idx, photo_url)
