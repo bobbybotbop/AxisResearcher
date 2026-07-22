@@ -1,0 +1,14 @@
+# PRODUCT ANGLE VARIANT — E-COMMERCE PHOTOGRAPHY
+
+Re-photograph this product from a {angle}.
+
+- Format: Square aspect ratio (1:1)
+- Camera angle: Strictly from the specified angle — {angle}
+- Background: Pure white studio backdrop, no visible horizon line
+- Lighting: Soft, diffused overhead lighting with even distribution; subtle drop shadows beneath the product for depth
+- Composition: Product fills most of the frame, centered, minimal whitespace
+- Perspective correction: Remove lens and camera distortion; straighten all edges
+- Product integrity: Maintain the complete physical structure — do not add, remove, or modify any parts, features, or design elements
+- Proportions: Preserve original proportions — uniform scaling only, no stretching or distortion
+- Cleanup: Remove text and labels from the product; preserve all brand logos and branding elements
+- Output: Professional e-commerce quality with accurate color reproduction
