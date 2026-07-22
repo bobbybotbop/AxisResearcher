@@ -474,6 +474,35 @@ def save_auto_restock_settings(enabled=None, quantity=None):
     }
 
 
+def get_minimum_images_setting():
+    """
+    Read minimum_images_per_listing from listingPreferences.json.
+
+    Returns:
+        dict: {"minimum_images_per_listing": int}
+    """
+    config = load_config()
+    return {
+        "minimum_images_per_listing": int(config.get("minimum_images_per_listing", 10)),
+    }
+
+
+def save_minimum_images_setting(minimum):
+    """
+    Persist minimum_images_per_listing to listingPreferences.json.
+
+    Args:
+        minimum (int): New minimum. Must be a positive integer.
+
+    Returns:
+        dict: {"minimum_images_per_listing": int} reflecting the saved state.
+    """
+    config = load_config()
+    config["minimum_images_per_listing"] = int(minimum)
+    save_config(config)
+    return {"minimum_images_per_listing": int(minimum)}
+
+
 def update_local_listing_quantity(sku=None, quantity=None):
     """
     Update the locally cached offer quantity for a listing after a successful
