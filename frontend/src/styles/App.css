@@ -121,6 +121,15 @@
       transform: rotate(360deg);
     }
   }
+
+  @keyframes jiggle {
+    0%, 100% { transform: rotate(-0.5deg); }
+    50% { transform: rotate(0.5deg); }
+  }
+}
+
+@utility animate-jiggle {
+  animation: jiggle 0.3s ease-in-out infinite;
 }
 
 /* Global base - kept where it is, in @layer base so Tailwind utilities can override */

@@ -17,7 +17,7 @@ import TestAiModelSection from "./components/TestAiModelSection";
 import { MOCK_DATA } from "./mockData";
 import { createTestWorkflowState } from "./testWorkflowState";
 import { trimTransparentPadding } from "./utils/trimImage";
-import { isIncomplete } from "./utils/listingStatus";
+import { isIncomplete, isUploaded } from "./utils/listingStatus";
 import { btnPill, btnPillSm } from "./styles/buttonPill";
 
 // Default text model options shown before /api/text-models responds. The
@@ -325,6 +325,8 @@ function App() {
   const [allListings, setAllListings] = useState([]);
   const [uploadListingsSearch, setUploadListingsSearch] = useState("");
   const [uploadListingsShowIncomplete, setUploadListingsShowIncomplete] =
+    useState(false);
+  const [uploadListingsShowUnuploaded, setUploadListingsShowUnuploaded] =
     useState(false);
   const [uploadListingsDateFrom, setUploadListingsDateFrom] = useState("");
   const [uploadListingsDateTo, setUploadListingsDateTo] = useState("");
@@ -641,6 +643,7 @@ function App() {
   const setTestSkippedPhotos = setTestKey("skippedPhotos");
   const setTestPromptModifier = setTestKey("promptModifier");
   const setTestPendingImagePromptModifier = setTestKey("pendingImagePromptModifier");
+  const setTestPendingPhotoPrompt = setTestKey("pendingPhotoPrompt");
   const setTestIsEditorOpen = setTestKey("isEditorOpen");
   const setTestEditableTitle = setTestKey("editableTitle");
   const setTestIsTrimmingTitle = setTestKey("isTrimmingTitle");
@@ -678,6 +681,7 @@ function App() {
     skippedPhotos: testSkippedPhotos,
     promptModifier: testPromptModifier,
     pendingImagePromptModifier: testPendingImagePromptModifier,
+    pendingPhotoPrompt: testPendingPhotoPrompt,
     isEditorOpen: testIsEditorOpen,
     editableTitle: testEditableTitle,
     isTrimmingTitle: testIsTrimmingTitle,
@@ -698,6 +702,7 @@ function App() {
     const q = uploadListingsSearch.trim().toLowerCase();
     const list = allListings.filter((l) => {
       if (!uploadListingsShowIncomplete && isIncomplete(l)) return false;
+      if (!uploadListingsShowUnuploaded && !isUploaded(l) && !isIncomplete(l)) return false;
       if (q && !(l.title || "").toLowerCase().includes(q)) return false;
       if (uploadListingsDateFrom || uploadListingsDateTo) {
         const raw = l.createdDateTime;
@@ -716,10 +721,10 @@ function App() {
       }
       return true;
     });
-    if (uploadListingsShowIncomplete) {
+    if (uploadListingsShowIncomplete || uploadListingsShowUnuploaded) {
       list.sort((a, b) => {
-        const ia = isIncomplete(a) ? 1 : 0;
-        const ib = isIncomplete(b) ? 1 : 0;
+        const ia = isIncomplete(a) ? 2 : isUploaded(a) ? 0 : 1;
+        const ib = isIncomplete(b) ? 2 : isUploaded(b) ? 0 : 1;
         if (ia !== ib) return ia - ib;
         return (order.get(a.sku) ?? 0) - (order.get(b.sku) ?? 0);
       });
@@ -729,6 +734,7 @@ function App() {
     allListings,
     uploadListingsSearch,
     uploadListingsShowIncomplete,
+    uploadListingsShowUnuploaded,
     uploadListingsDateFrom,
     uploadListingsDateTo,
   ]);
@@ -990,7 +996,7 @@ function App() {
       if (!generatedImages || generatedImages.length === 0) {
         setPendingImagePromptModifier(prompt);
       } else {
-        enterPhotoSelectionMode(prompt);
+        setPendingPhotoPrompt(prompt);
       }
     } else if (context === "metadata") regenerateMetadata(prompt);
   };
@@ -1346,11 +1352,26 @@ function App() {
   }, []);
 
   const handleRemoveFromListing = useCallback((index) => {
-    setGeneratedImages((prev) => prev.filter((_, i) => i !== index));
+    setGeneratedImages((prev) => {
+      const updated = prev.filter((_, i) => i !== index);
+      if (currentSku && updated.length > 0) {
+        fetch("/api/update-listing-images", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sku: currentSku, image_urls: updated }),
+        })
+          .then((r) => r.json())
+          .then((syncData) => {
+            if (syncData.listing_data) setListingData(syncData.listing_data);
+          })
+          .catch((err) => console.error("Failed to sync images to disk:", err));
+      }
+      return updated;
+    });
     setSelectedImagesForRegen((prev) =>
       prev.filter((i) => i !== index).map((i) => (i > index ? i - 1 : i)),
     );
-  }, []);
+  }, [currentSku]);
 
   const handleDragEnd = useCallback((result) => {
     if (!result.destination) return;
@@ -1390,6 +1411,16 @@ function App() {
         return [...prev, index];
       }
     });
+  };
+
+  const handleSelectAllImages = () => {
+    if (generatedImages?.length > 0) {
+      setSelectedImagesForRegen(generatedImages.map((_, i) => i));
+    }
+  };
+
+  const handleClearImageSelection = () => {
+    setSelectedImagesForRegen([]);
   };
 
   const handleRegenerateImages = async (promptOverride) => {
@@ -1863,6 +1894,7 @@ function App() {
     if (!Number.isFinite(qty) || qty < 0) return;
 
     const skus = allListings
+      .filter((l) => !isIncomplete(l))
       .filter((l) => String(l.ebayListingId ?? "").trim())
       .filter((l) => listingQuantities[l.sku] !== qty)
       .map((l) => l.sku);
@@ -2536,6 +2568,8 @@ function App() {
     } else if (context === "photos") {
       if (!testGeneratedImages || testGeneratedImages.length === 0) {
         setTestPendingImagePromptModifier(prompt);
+      } else {
+        setTestPendingPhotoPrompt(prompt);
       }
     }
   };
@@ -2728,11 +2762,15 @@ function App() {
               onSubmit={testHandleSubmit}
               onChatSubmit={testHandleChatSubmit}
               photoSelectionActive={false}
-              pendingPhotoPrompt=""
+              pendingPhotoPrompt={testPendingPhotoPrompt || ""}
               pendingImagePromptModifier={testPendingImagePromptModifier || ""}
               onClearImagePromptModifier={() => setTestPendingImagePromptModifier("")}
-              onConfirmPhotoRegeneration={() => {}}
-              onCancelPhotoRegeneration={() => {}}
+              onConfirmPhotoRegeneration={() => {
+                setTestPendingPhotoPrompt("");
+              }}
+              onCancelPhotoRegeneration={() => {
+                setTestPendingPhotoPrompt("");
+              }}
               onCategoryChange={(url, cat) =>
                 setTestEditableCategories((prev) => ({ ...prev, [url]: cat }))
               }
@@ -2752,6 +2790,11 @@ function App() {
                     : [...prev, idx],
                 )
               }
+              onSelectAllImages={() => {
+                const imgs = testWf.generatedImages;
+                if (imgs?.length > 0) setTestSelectedImagesForRegen(imgs.map((_, i) => i));
+              }}
+              onClearImageSelection={() => setTestSelectedImagesForRegen([])}
               onRegenerateImages={testHandleRegenerateImages}
               onTrimSelected={testHandleTrimSelected}
               onAddNewVersions={testHandleAddNewVersions}
@@ -2857,6 +2900,8 @@ function App() {
                 onSearchChange={setUploadListingsSearch}
                 showIncompleteListings={uploadListingsShowIncomplete}
                 onShowIncompleteListingsChange={setUploadListingsShowIncomplete}
+                showUnuploadedListings={uploadListingsShowUnuploaded}
+                onShowUnuploadedListingsChange={setUploadListingsShowUnuploaded}
                 dateFrom={uploadListingsDateFrom}
                 dateTo={uploadListingsDateTo}
                 onDateFromChange={setUploadListingsDateFrom}
@@ -3392,6 +3437,8 @@ function App() {
               onPromptModifierChange={setPromptModifier}
               onConfirmCategories={handleConfirmCategories}
               onImageSelection={handleImageSelection}
+              onSelectAllImages={handleSelectAllImages}
+              onClearImageSelection={handleClearImageSelection}
               onRegenerateImages={handleRegenerateImages}
               onTrimSelected={handleTrimSelected}
               onAddNewVersions={handleAddNewVersions}

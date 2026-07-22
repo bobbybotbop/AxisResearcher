@@ -21,6 +21,7 @@ export function createTestWorkflowState() {
     currentSku: null,
     skippedPhotos: new Set(),
     pendingImagePromptModifier: "",
+    pendingPhotoPrompt: "",
     isEditorOpen: false,
     editableTitle: '',
     isTrimmingTitle: false,

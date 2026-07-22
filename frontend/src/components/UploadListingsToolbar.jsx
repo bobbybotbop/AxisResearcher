@@ -8,6 +8,8 @@ export default function UploadListingsToolbar({
   onSearchChange,
   showIncompleteListings,
   onShowIncompleteListingsChange,
+  showUnuploadedListings,
+  onShowUnuploadedListingsChange,
   dateFrom,
   dateTo,
   onDateFromChange,
@@ -33,6 +35,7 @@ export default function UploadListingsToolbar({
 
   const filtersActive =
     showIncompleteListings ||
+    showUnuploadedListings ||
     Boolean(dateFrom?.trim()) ||
     Boolean(dateTo?.trim());
 
@@ -137,6 +140,17 @@ export default function UploadListingsToolbar({
                     className="h-3.5 w-3.5 rounded border-border-default text-text-primary focus:ring-border-default"
                   />
                   <span className="leading-snug">Show incomplete history</span>
+                </label>
+                <label className="mt-2 flex cursor-pointer items-center gap-3 text-sm text-text-primary">
+                  <input
+                    type="checkbox"
+                    checked={showUnuploadedListings}
+                    onChange={(e) =>
+                      onShowUnuploadedListingsChange(e.target.checked)
+                    }
+                    className="h-3.5 w-3.5 rounded border-border-default text-text-primary focus:ring-border-default"
+                  />
+                  <span className="leading-snug">Show unuploaded listings</span>
                 </label>
               </div>
 

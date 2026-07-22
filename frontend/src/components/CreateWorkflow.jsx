@@ -72,6 +72,10 @@ function CreateWorkflow({
   onNavigateLightbox,
   lightboxOpen,
   lightboxIndex,
+  selectedImagesForRegen = [],
+  onImageSelection,
+  onSelectAllImages,
+  onClearImageSelection,
   classifyImagesEnabled = true,
   photoSelectionActive = false,
   pendingPhotoPrompt = "",
@@ -103,6 +107,18 @@ function CreateWorkflow({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isEditorOpen, onEditorToggle]);
+
+  const imageSelectionActive = chatContext === "photos" && generatedImages?.length > 0;
+
+  useEffect(() => {
+    if (imageSelectionActive) {
+      onSelectAllImages?.();
+    } else {
+      onClearImageSelection?.();
+    }
+  }, [imageSelectionActive]);
+
+  const [expandedPromptIndex, setExpandedPromptIndex] = useState(null);
 
   const sidebarLeft = sidebarCollapsed ? "4.25rem" : "15rem";
   const barWrapperClassName = listingLinkSubmitted
@@ -578,25 +594,42 @@ function CreateWorkflow({
                   ref={provided.innerRef}
                   {...provided.droppableProps}
                 >
-                  {generatedImages.map((imageUrl, index) => (
+                  {generatedImages.map((imageUrl, index) => {
+                    const isSelected = selectedImagesForRegen.includes(index);
+                    return (
                     <Draggable
                       key={`img-${imageUrl}-${index}`}
                       draggableId={`img-${imageUrl}-${index}`}
                       index={index}
                     >
-                      {(provided, snapshot) => {
-                        return (
+                      {(provided, snapshot) => (
+                        <div
+                          ref={provided.innerRef}
+                          {...provided.draggableProps}
+                          {...provided.dragHandleProps}
+                          className="flex flex-col"
+                        >
                           <div
-                            ref={provided.innerRef}
-                            {...provided.draggableProps}
-                            {...provided.dragHandleProps}
                             className={`group relative aspect-square cursor-grab overflow-hidden rounded-xl transition-all active:cursor-grabbing ${
                               snapshot.isDragging ? "opacity-80 shadow-lg" : ""
+                            } ${imageSelectionActive ? "animate-jiggle" : ""} ${
+                              imageSelectionActive && isSelected
+                                ? "ring-3 ring-blue-500 ring-offset-2"
+                                : ""
+                            } ${
+                              imageSelectionActive && !isSelected
+                                ? "opacity-40"
+                                : ""
                             }`}
+                            onClick={() => {
+                              if (imageSelectionActive && onImageSelection) {
+                                onImageSelection(index);
+                              }
+                            }}
                           >
                             <button
                               type="button"
-                              className="absolute right-1.5 top-1.5 z-20 flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-lg font-bold text-white opacity-0 shadow-md transition-opacity hover:bg-red-600 hover:opacity-90 focus-visible:opacity-100 group-hover:opacity-100"
+                              className="absolute right-1.5 top-1.5 z-20 hidden h-8 w-8 items-center justify-center rounded-full bg-red-500 text-lg font-bold text-white shadow-md transition-colors hover:bg-red-600 group-hover:flex"
                               onMouseDown={(e) => e.stopPropagation()}
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -606,6 +639,11 @@ function CreateWorkflow({
                             >
                               &times;
                             </button>
+                            {imageSelectionActive && isSelected && (
+                              <div className="pointer-events-none absolute left-1.5 top-1.5 z-20 flex h-6 w-6 items-center justify-center rounded-full bg-blue-500 text-xs font-bold text-white shadow">
+                                &#10003;
+                              </div>
+                            )}
                             <img
                               src={imageUrl}
                               alt={`New listing photo ${index + 1}`}
@@ -613,25 +651,48 @@ function CreateWorkflow({
                               loading="lazy"
                               draggable={false}
                             />
-                            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
-                              <span className="text-2xl font-bold text-white">
-                                {index + 1}
-                              </span>
-                            </div>
+                            {!imageSelectionActive && (
+                              <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
+                                <span className="text-2xl font-bold text-white">
+                                  {index + 1}
+                                </span>
+                              </div>
+                            )}
                           </div>
-                        );
-                      }}
+                          {imageSelectionActive && isSelected && pendingPhotoPrompt && (
+                            <div className="mt-1">
+                              <button
+                                type="button"
+                                className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-text-muted hover:bg-surface-muted"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExpandedPromptIndex(expandedPromptIndex === index ? null : index);
+                                }}
+                              >
+                                <span>💬</span>
+                                {expandedPromptIndex === index ? (
+                                  <span className="max-w-[150px] truncate text-text-primary">{pendingPhotoPrompt}</span>
+                                ) : (
+                                  <span>...</span>
+                                )}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </Draggable>
-                  ))}
+                    );
+                  })}
                   {provided.placeholder}
                 </div>
               )}
             </Droppable>
           </DragDropContext>
-          {photoSelectionActive && (
+          {imageSelectionActive && pendingPhotoPrompt && selectedImagesForRegen.length > 0 && (
             <div className="mt-3 flex items-center gap-3 rounded-xl border border-border-default bg-surface-panel px-4 py-3">
               <span className="flex-1 text-sm text-text-muted">
-                Regenerate selected with:{" "}
+                Regenerate {selectedImagesForRegen.length} selected with:{" "}
                 <span className="font-medium text-text-primary">
                   &quot;{pendingPhotoPrompt}&quot;
                 </span>

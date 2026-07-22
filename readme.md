@@ -198,4 +198,12 @@ Ensure you run `collect` before `process`. Verify seller username matches folder
 
 ## Things to prompt:
 
-- need to fix selection mode after photos are generated
+
+Create a plan for a new feature called “minimum images per listing.” It should be set in user settings, with a default of 10. The feature generates multiple images based on a single image in the original listing. For example, if the original listing has fewer images than the minimum number set by the user, each image should be used to generate multiple new images and two different views from that single source image. For now, only make this work when the image classifier is not enabled and edit or make a new version of the generate‑image‑from‑world prompt so that a different angle of the same image is created. Brainstorm the best way to create these different angles most consistently using the prompt. Run questions by me if necessary.
+
+Under the history tab, I want another button in the filtering section. Along with “Show incomplete history,” I want, by default, not to show items that are not fully completed. That means items that have valid data but aren’t uploaded to eBay. Instead of the “View on eBay” button, they should have an “Upload to eBay” button. Add a new button called “Show Unuploaded Listings.”
+
+test these out^
+
+next make this work:
+https://developer.ebay.com/api-docs/sell/static/marketing/pl-overview.html

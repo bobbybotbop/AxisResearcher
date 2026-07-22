@@ -8,10 +8,32 @@ and listing details from eBay listings.
 import sys
 import io
 
-# Set UTF-8 encoding for stdout/stderr to handle Unicode characters
+class _SafeStream:
+    """Wraps a stream so any OSError (e.g. Windows invalid handle) is silently swallowed."""
+    def __init__(self, stream):
+        self._stream = stream
+    def write(self, s):
+        try:
+            return self._stream.write(s)
+        except OSError:
+            return 0
+    def flush(self):
+        try:
+            self._stream.flush()
+        except OSError:
+            pass
+    def __getattr__(self, name):
+        return getattr(self._stream, name)
+
 if sys.platform == 'win32':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+    try:
+        _utf8_stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+        _utf8_stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+        sys.stdout = _SafeStream(_utf8_stdout)
+        sys.stderr = _SafeStream(_utf8_stderr)
+    except AttributeError:
+        sys.stdout = _SafeStream(sys.stdout)
+        sys.stderr = _SafeStream(sys.stderr)
 
 from flask import Flask, jsonify, request, Response, stream_with_context
 from flask_cors import CORS
@@ -23,7 +45,7 @@ from backend.copyScripts.create_image import (
     categorize_images,
     _openrouter_response_dict_to_image_bytes_and_mime,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting
 from backend.helper_functions import remove_html_tags
 import os
 import json
@@ -1819,6 +1841,34 @@ def api_save_auto_restock_settings():
         return jsonify(settings), 200
     except (TypeError, ValueError):
         return jsonify({'error': 'quantity must be a non-negative integer'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/settings/minimum-images', methods=['GET'])
+def api_get_minimum_images_setting():
+    """Read the persisted minimum images per listing value."""
+    try:
+        return jsonify(get_minimum_images_setting()), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/settings/minimum-images', methods=['POST'])
+def api_save_minimum_images_setting():
+    """Persist the minimum images per listing value."""
+    body = request.get_json(silent=True) or {}
+    minimum = body.get('minimum_images_per_listing')
+    try:
+        if minimum is None:
+            return jsonify({'error': 'minimum_images_per_listing is required'}), 400
+        minimum = int(minimum)
+        if minimum < 1:
+            return jsonify({'error': 'minimum_images_per_listing must be a positive integer'}), 400
+        result = save_minimum_images_setting(minimum)
+        return jsonify(result), 200
+    except (TypeError, ValueError):
+        return jsonify({'error': 'minimum_images_per_listing must be a positive integer'}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

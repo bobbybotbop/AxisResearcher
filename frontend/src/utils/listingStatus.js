@@ -10,3 +10,8 @@ export function isIncomplete(listing) {
   const desc = String(listing?.description ?? "").trim();
   return desc === LISTING_PLACEHOLDER;
 }
+
+/** Check if a listing is uploaded to eBay (has valid ebayListingId). */
+export function isUploaded(listing) {
+  return Boolean(String(listing?.ebayListingId ?? "").trim());
+}

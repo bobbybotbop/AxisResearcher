@@ -1,0 +1,77 @@
+ * Serving Flask app 'app'
+ * Debug mode: on
+[API] /api/listings endpoint called
+[API] Found 52 listing(s) in C:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\Generated_Listings
+[API] /api/listings endpoint called
+[API] Found 52 listing(s) in C:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\Generated_Listings
+[API] /api/listings endpoint called
+[API] Found 52 listing(s) in C:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\Generated_Listings
+⚠️  update_local_listing_quantity: file not found: C:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\Generated_Listings\AXIS_agn_20.json
+[API] /api/listings endpoint called
+[API] Found 52 listing(s) in C:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\Generated_Listings
+[API] /api/listings endpoint called
+[API] Found 52 listing(s) in C:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\Generated_Listings
+[API] /api/listings endpoint called
+[API] Found 52 listing(s) in C:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\Generated_Listings
+[API] /api/listings endpoint called
+[API] Found 52 listing(s) in C:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\Generated_Listings
+⚠️  update_local_listing_quantity: file not found: C:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\Generated_Listings\AXIS_agn_20.json
+⚠️  update_local_listing_quantity: file not found: C:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\Generated_Listings\AXIS_agn_20.json
+[API] /api/listings endpoint called
+[API] Found 51 listing(s) in C:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\Generated_Listings
+[API] /api/listings endpoint called
+[API] Found 51 listing(s) in C:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\Generated_Listings
+⚠️  update_local_listing_quantity: file not found: C:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\Generated_Listings\AXIS_agn_20.json
+[API] /api/listings endpoint called
+[API] Found 51 listing(s) in C:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\Generated_Listings
+[API] /api/listings endpoint called
+[API] Found 51 listing(s) in C:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\Generated_Listings
+[API] /api/listings endpoint called
+[API] Found 50 listing(s) in C:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\Generated_Listings
+⚠️  update_local_listing_quantity: file not found: C:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\Generated_Listings\AXIS_agn_20.json
+🔍 Fetching complete item data for: v1|285355871491|0
+ℹ️  Initial item fetch failed; attempting variation lookup...
+🔍 Looking up variations for item group: 285355871491
+✅ Found variation ID: 587240077504 (of 11 variation(s))
+🔍 Fetching complete item data for: v1|285355871491|587240077504
+✅ Complete Item Data Retrieved:
+   Title: Digital Caliper Case for Mitutoyo 6 Inch Caliper With Thumb Wheel --CASE ONLY--
+   Price: $14.99 USD
+   Seller: propstreasures
+
+📊 Sales Data:
+    Estimated Sold: 51 units
+Created listing file: C:\Users\bobby\OneDrive\Documents\1webdev\AxisResearcher\Generated_Listings\AXIS_56.json
+   SKU: AXIS_56
+Found 4 photo(s): ['https://i.ebayimg.com/images/g/yNUAAOSwo~tkniVx/s-l1600.jpg', 'https://i.ebayimg.com/images/g/0l8AAOSwrFdkniVw/s-l1600.jpg', 'https://i.ebayimg.com/images/g/Wz8AAOSwbd5kniVw/s-l1600.jpg', 'https://i.ebayimg.com/images/g/bGIAAOSw0DpkniVw/s-l1600.jpg']
+Skipping image categorization (classify=false)
+🔍 Fetching aspects for category 29525...
+
+📋 Aspects for category 29525:
+================================================================================
+Brand: RECOMMENDED
+Type: RECOMMENDED
+Material: RECOMMENDED
+System of Measurement: RECOMMENDED
+Measuring Technology: RECOMMENDED
+Features: RECOMMENDED
+Item Length: RECOMMENDED
+Model: RECOMMENDED
+Country of Origin: OPTIONAL
+Size: OPTIONAL
+Color: OPTIONAL
+Manufacturer Warranty: OPTIONAL
+Item Width: OPTIONAL
+Item Height: OPTIONAL
+Item Diameter: OPTIONAL
+California Prop 65 Warning: OPTIONAL
+Item Weight: OPTIONAL
+MPN: OPTIONAL
+Unit Quantity: OPTIONAL
+Unit Type: OPTIONAL
+================================================================================
+[TITLE_NUDGE] attempt=1 direction=increase in_length=53 chars_delta=27 in_title='Mitutoyo 6 Inch Digital Caliper Case with Thumb Wheel'
+🤖 Calling OpenRouter model: anthropic/claude-haiku-4.5...
+✅ Received response from OpenRouter
+[TITLE_NUDGE] attempt=1 direction=increase in_length=53 out_length=76 delta=+23 in_range=True out_title='Mitutoyo 6 Inch Digital Caliper Case with Thumb Wheel Storage Protective Box'
+[TITLE_NUDGE] final length=76 in_range=True attempts=1 title='Mitutoyo 6 Inch Digital Caliper Case with Thumb Wheel Storage Protective Box'
