@@ -14,6 +14,7 @@ function PhotoGallery({
   onAddToOriginalPhotos,
   onOpenEditor,
   showClassification = true,
+  hideConfirmButton = false,
 }) {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
@@ -252,22 +253,24 @@ function PhotoGallery({
           );
         })}
       </div>
-      <div className="mt-8 flex justify-center">
-        <button
-          type="button"
-          className={btnPillLg}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            if (onConfirm) {
-              onConfirm();
-            }
-          }}
-          disabled={isConfirming}
-        >
-          {isConfirming ? "Generating Images..." : "Confirm Categories"}
-        </button>
-      </div>
+      {!hideConfirmButton && (
+        <div className="mt-8 flex justify-center">
+          <button
+            type="button"
+            className={btnPillLg}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (onConfirm) {
+                onConfirm();
+              }
+            }}
+            disabled={isConfirming}
+          >
+            {isConfirming ? "Generating Images..." : "Confirm Categories"}
+          </button>
+        </div>
+      )}
 
       {onAddToOriginalPhotos && (
         <ImageUploadModal
