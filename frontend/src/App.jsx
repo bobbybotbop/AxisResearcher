@@ -1227,20 +1227,31 @@ function App() {
     setError(null);
 
     try {
-      const photosToProcess = photos.filter(
-        (photoUrl) => !skippedPhotos.has(photoUrl),
-      );
+      const hasBgRemoved =
+        autoBackgroundRemovalEnabled &&
+        Object.keys(bgRemovedPhotos).length > 0;
+
+      const photosToProcess = photos
+        .filter((photoUrl) => !skippedPhotos.has(photoUrl))
+        .map((photoUrl) =>
+          hasBgRemoved ? bgRemovedPhotos[photoUrl] || photoUrl : photoUrl,
+        );
 
       if (photosToProcess.length === 0) {
         throw new Error("All photos are skipped. Include at least one photo.");
       }
 
       const categoriesToProcess = {};
-      photosToProcess.forEach((photoUrl) => {
-        if (editableCategories[photoUrl]) {
-          categoriesToProcess[photoUrl] = editableCategories[photoUrl];
-        }
-      });
+      photos
+        .filter((photoUrl) => !skippedPhotos.has(photoUrl))
+        .forEach((originalUrl) => {
+          const dest = hasBgRemoved
+            ? bgRemovedPhotos[originalUrl] || originalUrl
+            : originalUrl;
+          if (editableCategories[originalUrl]) {
+            categoriesToProcess[dest] = editableCategories[originalUrl];
+          }
+        });
 
       const requestBody = {
         photos: photosToProcess,
