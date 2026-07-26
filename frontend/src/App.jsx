@@ -680,6 +680,8 @@ function App() {
   const setTestCreateListingProgress = setTestKey("createListingProgress");
   const setTestUploadProgress = setTestKey("uploadProgress");
   const setTestUploadingSkus = setTestKey("uploadingSkus");
+  const setTestBgRemovedPhotos = setTestKey("bgRemovedPhotos");
+  const setTestBgRemovalProgress = setTestKey("bgRemovalProgress");
 
   const {
     listingId: testListingId,
@@ -718,6 +720,8 @@ function App() {
     createListingProgress: testCreateListingProgress,
     uploadProgress: testUploadProgress,
     uploadingSkus: testUploadingSkus,
+    bgRemovedPhotos: testBgRemovedPhotos,
+    bgRemovalProgress: testBgRemovalProgress,
   } = testWf;
 
   const filteredUploadListings = useMemo(() => {
@@ -844,6 +848,31 @@ function App() {
     } finally {
       setBgRemovalProgress((prev) => ({ ...prev, isActive: false }));
     }
+  };
+
+  const testTriggerAutoBackgroundRemoval = (photoUrls) => {
+    const totalSteps = photoUrls.map((_, i) => `Image ${i + 1}`);
+    setTestBgRemovalProgress({
+      isActive: true,
+      currentStep: null,
+      completedSteps: [],
+      totalSteps,
+    });
+
+    photoUrls.forEach((url, idx) => {
+      setTimeout(() => {
+        const stepLabel = `Image ${idx + 1}`;
+        setTestBgRemovalProgress((prev) => ({
+          ...prev,
+          completedSteps: [...prev.completedSteps, stepLabel],
+          currentStep: null,
+        }));
+        setTestBgRemovedPhotos((prev) => ({ ...prev, [url]: url }));
+        if (idx === photoUrls.length - 1) {
+          setTestBgRemovalProgress((prev) => ({ ...prev, isActive: false }));
+        }
+      }, (idx + 1) * 800);
+    });
   };
 
   const fetchListingPhotos = async () => {
@@ -2455,6 +2484,9 @@ function App() {
         }
       }
       setTestSkippedPhotos(autoSkip);
+      if (autoBackgroundRemovalEnabled && MOCK_DATA.photos?.length) {
+        testTriggerAutoBackgroundRemoval(MOCK_DATA.photos);
+      }
       setTestFetchProgress({
         isActive: false,
         currentStep: null,
@@ -3000,6 +3032,9 @@ function App() {
               classifyImagesEnabled={classifyImagesEnabled}
               isGeneratingText={false}
               onCancelTextGen={() => {}}
+              bgRemovedPhotos={testBgRemovedPhotos}
+              bgRemovalProgress={testBgRemovalProgress}
+              autoBackgroundRemovalEnabled={autoBackgroundRemovalEnabled}
             />
           )}
 

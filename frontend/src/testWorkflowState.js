@@ -56,5 +56,12 @@ export function createTestWorkflowState() {
       totalSteps: [],
     },
     uploadingSkus: new Set(),
+    bgRemovedPhotos: {},
+    bgRemovalProgress: {
+      isActive: false,
+      currentStep: null,
+      completedSteps: [],
+      totalSteps: [],
+    },
   }
 }
