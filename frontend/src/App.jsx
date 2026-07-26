@@ -318,6 +318,13 @@ function App() {
       return true;
     }
   });
+  const [bgRemovedPhotos, setBgRemovedPhotos] = useState({});
+  const [bgRemovalProgress, setBgRemovalProgress] = useState({
+    isActive: false,
+    currentStep: null,
+    completedSteps: [],
+    totalSteps: [],
+  });
   const [testingResult, setTestingResult] = useState(null);
   const [isTesting, setIsTesting] = useState(false);
   const [testingId, setTestingId] = useState("");
@@ -794,6 +801,42 @@ function App() {
     };
   }, []);
 
+  const triggerAutoBackgroundRemoval = async (photoUrls, sku) => {
+    setBgRemovalProgress({
+      isActive: true,
+      currentStep: null,
+      completedSteps: [],
+      totalSteps: photoUrls.map((_, i) => `Image ${i + 1}`),
+    });
+    try {
+      const data = await fetchWithProgress(
+        "/api/remove-backgrounds-batch",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ photos: photoUrls, sku }),
+        },
+        (event) => {
+          setBgRemovalProgress((prev) => {
+            if (event.status === "completed") {
+              return {
+                ...prev,
+                completedSteps: [...prev.completedSteps, event.step],
+                currentStep: null,
+              };
+            }
+            return { ...prev, currentStep: event.step };
+          });
+        },
+      );
+      setBgRemovedPhotos(data.bgRemovedPhotos || {});
+    } catch (err) {
+      console.error("[BG Removal] Failed:", err);
+    } finally {
+      setBgRemovalProgress((prev) => ({ ...prev, isActive: false }));
+    }
+  };
+
   const fetchListingPhotos = async () => {
     if (!listingId.trim()) {
       setError("Please enter an eBay listing ID or URL");
@@ -812,6 +855,13 @@ function App() {
     setEditableTitle("");
     setEditableDescription("");
     setListingData(null);
+    setBgRemovedPhotos({});
+    setBgRemovalProgress({
+      isActive: false,
+      currentStep: null,
+      completedSteps: [],
+      totalSteps: [],
+    });
 
     // Initialize progress tracking
     const steps = classifyImagesEnabled
@@ -887,6 +937,9 @@ function App() {
         }
       }
       setSkippedPhotos(autoSkip);
+      if (autoBackgroundRemovalEnabled && data.photos?.length && data.sku) {
+        triggerAutoBackgroundRemoval(data.photos, data.sku);
+      }
 
       // All steps complete
       setFetchProgress({
