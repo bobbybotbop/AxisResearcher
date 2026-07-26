@@ -310,6 +310,14 @@ function App() {
       return false;
     }
   });
+  const [autoBackgroundRemovalEnabled, setAutoBackgroundRemovalEnabled] = useState(() => {
+    try {
+      const stored = localStorage.getItem("axisAutoBackgroundRemoval");
+      return stored === null ? true : stored === "true";
+    } catch {
+      return true;
+    }
+  });
   const [testingResult, setTestingResult] = useState(null);
   const [isTesting, setIsTesting] = useState(false);
   const [testingId, setTestingId] = useState("");
@@ -471,6 +479,17 @@ function App() {
       // ignore
     }
   }, [classifyImagesEnabled]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "axisAutoBackgroundRemoval",
+        autoBackgroundRemovalEnabled ? "true" : "false",
+      );
+    } catch {
+      // ignore
+    }
+  }, [autoBackgroundRemovalEnabled]);
 
   // Keep URLs aligned with tab state. Each tab has its own path.
   useEffect(() => {
@@ -3184,6 +3203,30 @@ function App() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <h3 className="m-0 text-lg font-semibold text-text-primary">
+                      Auto Background Removal
+                    </h3>
+                    <p className="mt-1 text-sm text-text-muted">
+                      Automatically removes backgrounds from source photos before AI
+                      generation. Improves output quality on clean product shots.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded-lg border border-border-default bg-surface-panel px-4 py-2 text-sm font-semibold text-text-primary shadow-sm transition-all hover:-translate-y-0.5 hover:bg-surface-hover hover:shadow-md"
+                    onClick={() => setAutoBackgroundRemovalEnabled((prev) => !prev)}
+                    aria-label="Toggle automatic background removal"
+                    aria-pressed={autoBackgroundRemovalEnabled}
+                  >
+                    {autoBackgroundRemovalEnabled
+                      ? "Auto BG Removal: On"
+                      : "Auto BG Removal: Off"}
+                  </button>
+                </div>
+              </div>
+              <div className="mb-5 rounded-xl border border-border-default bg-surface-muted p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="m-0 text-lg font-semibold text-text-primary">
                       Classify Images
                     </h3>
                     <p className="mt-1 text-sm text-text-muted">
@@ -3276,10 +3319,23 @@ function App() {
                       value={imageModel}
                       onChange={(e) => setImageModel(e.target.value)}
                     >
-                      {IMAGE_MODEL_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {modelOptionLabel(option)}
-                        </option>
+                      {Object.entries(
+                        IMAGE_MODEL_OPTIONS.reduce((acc, option) => {
+                          const key = option.provider || "openrouter";
+                          (acc[key] = acc[key] || []).push(option);
+                          return acc;
+                        }, {}),
+                      ).map(([provider, options]) => (
+                        <optgroup
+                          key={provider}
+                          label={PROVIDER_LABELS[provider] || provider}
+                        >
+                          {options.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {modelOptionLabel(option)}
+                            </option>
+                          ))}
+                        </optgroup>
                       ))}
                     </select>
                   </label>
