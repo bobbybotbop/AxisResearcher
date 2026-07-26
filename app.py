@@ -190,13 +190,16 @@ def get_listing_photos(listing_id):
             new_sku = create_listing_with_preferences()
             yield progress_event('Creating initial JSON file', 'completed')
 
-            # Extract photo URLs
-            old_photo_list = [
-                url for url in
-                [listing.get("image", {}).get("imageUrl")] +
-                [img.get("imageUrl") for img in listing.get("additionalImages", []) if isinstance(img, dict)]
-                if url
-            ]
+            # Extract photo URLs — use aggregated variant images if available
+            if listing.get('_all_images'):
+                old_photo_list = listing['_all_images']
+            else:
+                old_photo_list = [
+                    url for url in
+                    [listing.get("image", {}).get("imageUrl")] +
+                    [img.get("imageUrl") for img in listing.get("additionalImages", []) if isinstance(img, dict)]
+                    if url
+                ]
             print(f"Found {len(old_photo_list)} photo(s): {old_photo_list}")
 
             classify = request.args.get("classify", "true").lower() != "false"
@@ -301,39 +304,42 @@ def generate_image_with_delay(
     delay_ms=500,
     task_id=None,
     prompt_modifier=None,
+    extra_instructions=None,
     image_model=None,
 ):
     """
     Generate image with rate limiting delay. Used for parallel execution.
-    
+
     Args:
         photo_url: URL of photo to generate from
         image_type: ImageType enum value
         index: Index of this image (for ordering and delay calculation)
         delay_ms: Delay in milliseconds before starting generation
         task_id: Task ID for progress tracking
-        prompt_modifier: Optional additional text to append to each image's prompt
-    
+        prompt_modifier: For ANGLE_VARIANT: the angle string. For other types: appended to prompt.
+        extra_instructions: User-supplied text always appended, independent of prompt_modifier.
+
     Returns:
         tuple: (index, photo_url, result, error)
     """
     try:
         # Stagger API calls to avoid rate limits
         time.sleep(index * delay_ms / 1000)
-        
+
         # Update progress: starting
         if task_id:
             with image_generation_lock:
                 if task_id in image_generation_tasks:
                     image_generation_tasks[task_id]["status"] = "running"
-        
+
         print(f"[API] Starting generation for image {index + 1} (photo: {photo_url[:50]}...)")
-        
+
         # Generate image
         result = generate_image_from_urls(
             [photo_url],
             image_type,
             prompt_modifier=prompt_modifier,
+            extra_instructions=extra_instructions,
             model=image_model or DEFAULT_IMAGE_MODEL,
         )
         
@@ -502,7 +508,8 @@ def generate_images():
                         future = executor.submit(
                             generate_image_with_delay,
                             photo_url, image_type, idx, delay_ms=500, task_id=task_id,
-                            prompt_modifier=angle if angle else (prompt_modifier if prompt_modifier else None),
+                            prompt_modifier=angle if angle else (prompt_modifier or None),
+                            extra_instructions=prompt_modifier if angle else None,
                             image_model=image_model,
                         )
                         futures[future] = (idx, photo_url)
@@ -877,7 +884,7 @@ def update_listing_images_endpoint():
         return jsonify({"error": error_msg, "listing_data": None}), 500
 
 
-TITLE_MIN_LEN = 70
+TITLE_MIN_LEN = 75
 TITLE_MAX_LEN = 80
 TITLE_TARGET_LEN = 80
 TITLE_MAX_ATTEMPTS = 3
@@ -2085,6 +2092,67 @@ def api_remove_background():
         return jsonify({
             "error": f"An error occurred during background removal: {error_msg}"
         }), 500
+
+
+@app.route('/api/remove-backgrounds-batch', methods=['POST'])
+def remove_backgrounds_batch():
+    """
+    Remove backgrounds from a list of photo URLs in batch, streaming progress.
+
+    Accepts JSON body:
+    {
+        "photos": ["url1", "url2", ...],
+        "sku": "076"
+    }
+
+    Streams NDJSON: one progress event per image, then a result event with
+    { "bgRemovedPhotos": { "<originalUrl>": "/api/bg-removed-image/<file>", ... } }
+    Failed images are silently skipped (omitted from the result map).
+    """
+    data = request.get_json()
+    photos = data.get("photos", [])
+    sku = data.get("sku", "unknown")
+
+    if not photos:
+        return jsonify({"error": "No photos provided"}), 400
+
+    def generate():
+        bg_removed_map = {}
+        total = len(photos)
+        os.makedirs("generated-images", exist_ok=True)
+
+        for idx, url in enumerate(photos):
+            step_label = f"Removing background {idx + 1} of {total}"
+            yield progress_event(step_label, "in_progress")
+            try:
+                img_response = requests.get(url, timeout=15)
+                img_response.raise_for_status()
+                result_bytes = remove_background(img_response.content)
+                filename = f"bg_removed_{sku}_{idx}.png"
+                filepath = os.path.join("generated-images", filename)
+                with open(filepath, 'wb') as f:
+                    f.write(result_bytes)
+                bg_removed_map[url] = f"/api/bg-removed-image/{filename}"
+                yield progress_event(step_label, "completed")
+            except Exception as e:
+                print(f"[API] /api/remove-backgrounds-batch: skipping {url}: {e}")
+
+        yield result_event({"bgRemovedPhotos": bg_removed_map})
+
+    return streaming_response(generate())
+
+
+@app.route('/api/bg-removed-image/<filename>', methods=['GET'])
+def serve_bg_removed_image(filename):
+    """Serve a bg-removed PNG from generated-images/. Validates filename pattern."""
+    import re
+    if not re.match(r'^bg_removed_[\w\-]+_\d+\.png$', filename):
+        return jsonify({"error": "Invalid filename"}), 400
+    filepath = os.path.join("generated-images", filename)
+    if not os.path.exists(filepath):
+        return jsonify({"error": "Image not found"}), 404
+    with open(filepath, 'rb') as f:
+        return Response(f.read(), mimetype='image/png')
 
 
 @app.route('/api/upload-image', methods=['POST'])
