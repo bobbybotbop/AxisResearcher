@@ -229,6 +229,7 @@ function App() {
   const [textGenStatus, setTextGenStatus] = useState("writing");
   const [textGenComplete, setTextGenComplete] = useState(false);
   const textGenControllerRef = useRef(null);
+  const bgRemovalAbortControllerRef = useRef(null);
   const [listingData, setListingData] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
@@ -802,6 +803,9 @@ function App() {
   }, []);
 
   const triggerAutoBackgroundRemoval = async (photoUrls, sku) => {
+    const controller = new AbortController();
+    bgRemovalAbortControllerRef.current = controller;
+
     setBgRemovalProgress({
       isActive: true,
       currentStep: null,
@@ -815,23 +819,28 @@ function App() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ photos: photoUrls, sku }),
+          signal: controller.signal,
         },
         (event) => {
           setBgRemovalProgress((prev) => {
             if (event.status === "completed") {
               return {
                 ...prev,
-                completedSteps: [...prev.completedSteps, event.step],
+                completedSteps: [...prev.completedSteps, event.step ?? prev.currentStep],
                 currentStep: null,
               };
             }
-            return { ...prev, currentStep: event.step };
+            return { ...prev, currentStep: event.step ?? null };
           });
         },
       );
-      setBgRemovedPhotos(data.bgRemovedPhotos || {});
+      if (!controller.signal.aborted) {
+        setBgRemovedPhotos(data.bgRemovedPhotos || {});
+      }
     } catch (err) {
-      console.error("[BG Removal] Failed:", err);
+      if (!controller.signal.aborted) {
+        console.error("[BG Removal] Failed:", err);
+      }
     } finally {
       setBgRemovalProgress((prev) => ({ ...prev, isActive: false }));
     }
@@ -855,6 +864,8 @@ function App() {
     setEditableTitle("");
     setEditableDescription("");
     setListingData(null);
+    bgRemovalAbortControllerRef.current?.abort();
+    bgRemovalAbortControllerRef.current = null;
     setBgRemovedPhotos({});
     setBgRemovalProgress({
       isActive: false,
