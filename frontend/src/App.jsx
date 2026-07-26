@@ -3643,6 +3643,9 @@ function App() {
               onClearImagePromptModifier={() => setPendingImagePromptModifier("")}
               onConfirmPhotoRegeneration={handleConfirmPhotoRegeneration}
               onCancelPhotoRegeneration={handleCancelPhotoRegeneration}
+              autoBackgroundRemovalEnabled={autoBackgroundRemovalEnabled}
+              bgRemovedPhotos={bgRemovedPhotos}
+              bgRemovalProgress={bgRemovalProgress}
             />
           )}
         </div>

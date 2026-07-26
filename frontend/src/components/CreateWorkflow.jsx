@@ -83,6 +83,9 @@ function CreateWorkflow({
   onClearImagePromptModifier,
   onConfirmPhotoRegeneration,
   onCancelPhotoRegeneration,
+  autoBackgroundRemovalEnabled = false,
+  bgRemovedPhotos,
+  bgRemovalProgress,
 }) {
   const [descriptionEditMode, setDescriptionEditMode] = useState(false);
   const [chatContext, setChatContext] = useState(DEFAULT_CHAT_CONTEXT);
@@ -536,6 +539,7 @@ function CreateWorkflow({
             onAddToOriginalPhotos={onAddToOriginalPhotos}
             onOpenEditor={onEditorToggle}
             showClassification={classifyImagesEnabled}
+            hideConfirmButton={autoBackgroundRemovalEnabled}
           />
           {pendingImagePromptModifier && !generatedImages?.length && (
             <div className="mt-3 flex items-center gap-2 rounded-xl border border-border-default bg-surface-panel px-4 py-2.5">
@@ -552,6 +556,58 @@ function CreateWorkflow({
               >
                 &times;
               </button>
+            </div>
+          )}
+          {autoBackgroundRemovalEnabled && (
+            <div className="my-5 rounded-lg border border-border-default bg-surface-muted p-4">
+              <h3 className="mb-2.5 text-lg text-text-primary">
+                Background Removed Photos
+              </h3>
+              {bgRemovalProgress?.isActive && (
+                <div className="mt-2.5">
+                  <p className="text-text-muted">
+                    {bgRemovalProgress.completedSteps.length} of{" "}
+                    {bgRemovalProgress.totalSteps.length} backgrounds removed
+                  </p>
+                  {bgRemovalProgress.totalSteps.length > 0 && (
+                    <div className="relative mt-2.5 h-5 w-full overflow-hidden rounded bg-surface-hover">
+                      <div
+                        className="h-full rounded bg-green-500 transition-[width] duration-300"
+                        style={{
+                          width: `${
+                            (bgRemovalProgress.completedSteps.length /
+                              bgRemovalProgress.totalSteps.length) *
+                            100
+                          }%`,
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+              {Object.keys(bgRemovedPhotos || {}).length > 0 && (
+                <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))]">
+                  {Object.values(bgRemovedPhotos).map((url, idx) => (
+                    <div
+                      key={url}
+                      className="aspect-square overflow-hidden rounded-xl border border-border-default bg-surface-panel"
+                    >
+                      <img
+                        src={url}
+                        alt={`Background removed ${idx + 1}`}
+                        className="h-full w-full object-contain"
+                        loading="lazy"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!bgRemovalProgress?.isActive &&
+                Object.keys(bgRemovedPhotos || {}).length === 0 && (
+                  <p className="mt-2 text-sm text-text-muted">
+                    Waiting for photos to load...
+                  </p>
+                )}
             </div>
           )}
           {isConfirming && imageGenProgress?.isActive && (
@@ -575,6 +631,24 @@ function CreateWorkflow({
                   </div>
                 )}
               </div>
+            </div>
+          )}
+          {autoBackgroundRemovalEnabled && (
+            <div className="mt-8 flex justify-center">
+              <button
+                type="button"
+                className={btnPillLg}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (onConfirmCategories) {
+                    onConfirmCategories();
+                  }
+                }}
+                disabled={isConfirming}
+              >
+                {isConfirming ? "Generating Images..." : "Confirm Categories"}
+              </button>
             </div>
           )}
 
