@@ -114,14 +114,28 @@ export default function CompactListingRow({
                 </div>
                 <div className="min-w-0 flex-1 text-xs text-text-primary">
                   {uploadResult.listingId && (
-                    <a
-                      href={`https://www.ebay.com/itm/${uploadResult.listingId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-semibold text-primary underline hover:no-underline"
-                    >
-                      {uploadResult.listingId}
-                    </a>
+                    <div>
+                      <a
+                        href={`https://www.ebay.com/itm/${uploadResult.listingId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-primary underline hover:no-underline"
+                      >
+                        {uploadResult.listingId}
+                      </a>
+                    </div>
+                  )}
+                  {uploadResult.href && (
+                    <div>
+                      <a
+                        href={uploadResult.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-semibold text-primary underline hover:no-underline"
+                      >
+                        View on eBay →
+                      </a>
+                    </div>
                   )}
                 </div>
               </div>
