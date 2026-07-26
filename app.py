@@ -2095,7 +2095,7 @@ def api_remove_background():
 
 
 @app.route('/api/remove-backgrounds-batch', methods=['POST'])
-def remove_backgrounds_batch():
+def api_remove_backgrounds_batch():
     """
     Remove backgrounds from a list of photo URLs in batch, streaming progress.
 
@@ -2109,9 +2109,14 @@ def remove_backgrounds_batch():
     { "bgRemovedPhotos": { "<originalUrl>": "/api/bg-removed-image/<file>", ... } }
     Failed images are silently skipped (omitted from the result map).
     """
+    import re
     data = request.get_json()
+    if not data:
+        return jsonify({"error": "Invalid or missing JSON body"}), 400
     photos = data.get("photos", [])
     sku = data.get("sku", "unknown")
+    if not re.match(r'^[\w\-]{1,64}$', sku):
+        return jsonify({"error": "Invalid SKU"}), 400
 
     if not photos:
         return jsonify({"error": "No photos provided"}), 400
