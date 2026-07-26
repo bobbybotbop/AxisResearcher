@@ -209,14 +209,9 @@ function mergeGeneratedImages(
   aiGeneratedList,
   { allowPartial } = {},
 ) {
-  const merged = [];
-  let aiIndex = 0;
-  for (const _photoUrl of photosToProcess) {
-    if (aiIndex >= aiGeneratedList.length) continue;
-    const url = aiGeneratedList[aiIndex++];
-    if (url !== undefined && url !== null) merged.push(url);
-  }
-  return merged;
+  return (aiGeneratedList || []).filter(
+    (url) => url !== undefined && url !== null,
+  );
 }
 
 function App() {
