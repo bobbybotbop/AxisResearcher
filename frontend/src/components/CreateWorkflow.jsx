@@ -85,6 +85,7 @@ function CreateWorkflow({
   autoBackgroundRemovalEnabled = false,
   bgRemovedPhotos,
   bgRemovalProgress,
+  onError = () => {},
 }) {
   const [descriptionEditMode, setDescriptionEditMode] = useState(false);
   const [chatContext, setChatContext] = useState(DEFAULT_CHAT_CONTEXT);
@@ -862,6 +863,7 @@ function CreateWorkflow({
                     : true
                 }
                 onRequestClose={onEditorToggle}
+                onError={onError}
               />
             </div>
           </div>

@@ -3103,6 +3103,7 @@ function App() {
               bgRemovedPhotos={testBgRemovedPhotos}
               bgRemovalProgress={testBgRemovalProgress}
               autoBackgroundRemovalEnabled={autoBackgroundRemovalEnabled}
+              onError={(msg) => addToast("error", msg)}
             />
           )}
 
@@ -3807,6 +3808,7 @@ function App() {
               autoBackgroundRemovalEnabled={autoBackgroundRemovalEnabled}
               bgRemovedPhotos={bgRemovedPhotos}
               bgRemovalProgress={bgRemovalProgress}
+              onError={(msg) => addToast("error", msg)}
             />
           )}
         </div>

@@ -28,6 +28,7 @@ export default function ImageCanvas({
   generatedImages = [],
   useRealUpload = true,
   onRequestClose,
+  onError = () => {},
 }) {
   // Canvas settings
   const [canvasWidth, setCanvasWidth] = useState(1080);
@@ -398,7 +399,7 @@ export default function ImageCanvas({
     if (!fc) return;
 
     if (fc.getObjects().length === 0) {
-      alert("No images on the canvas to add.");
+      onError("No images on the canvas to add.");
       return;
     }
 
@@ -448,7 +449,7 @@ export default function ImageCanvas({
       onRequestClose?.();
     } catch (err) {
       console.error("Error adding to listing:", err);
-      alert("Failed to add image to listing: " + err.message);
+      onError("Failed to add image to listing: " + err.message);
     } finally {
       setIsCompiling(false);
     }
