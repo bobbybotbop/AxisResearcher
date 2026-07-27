@@ -42,6 +42,7 @@ ENV_TOKEN_KEYS = ('application_token', 'user_token', 'refresh_token', 'auth_code
 DEFAULT_USER_SCOPES = [
     "https://api.ebay.com/oauth/api_scope",           # Trading API (image upload), legacy compatibility
     "https://api.ebay.com/oauth/api_scope/sell.inventory",  # Inventory API (create listing, offer, publish, location)
+    "https://api.ebay.com/oauth/api_scope/sell.marketing",  # Marketing API (Promoted Listings)
 ]
 
 
