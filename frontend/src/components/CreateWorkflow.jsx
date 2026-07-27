@@ -42,8 +42,7 @@ function CreateWorkflow({
   uploadProgress,
   uploadingSkus,
   isTrimmingTitle,
-  isSavingTitle,
-  isSavingDescription,
+  autoSaveStatus = { title: "idle", description: "idle" },
   isGeneratingText = false,
   textGenStatus = "writing",
   onCancelTextGen = () => {},
@@ -59,9 +58,7 @@ function CreateWorkflow({
   onAddToOriginalPhotos,
   onEditableTitleChange,
   onTrimTitle,
-  onSaveTitle,
   onEditableDescriptionChange,
-  onSaveDescription,
   onUploadToEbay,
   onEditorToggle,
   useRealEbayUpload,
@@ -238,6 +235,12 @@ function CreateWorkflow({
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <strong className="text-primary">Title:</strong>
+                  {autoSaveStatus.title === "saving" && (
+                    <span className="text-xs text-text-muted ml-2">Saving...</span>
+                  )}
+                  {autoSaveStatus.title === "saved" && (
+                    <span className="text-xs text-success ml-2">Saved</span>
+                  )}
                   {isGeneratingText && (
                     <button
                       type="button"
@@ -290,36 +293,30 @@ function CreateWorkflow({
                   it.
                 </div>
               )}
-              {!isGeneratingText && (
+              {!isGeneratingText && editableTitle?.length > 80 && (
                 <div className="flex gap-2">
-                  {editableTitle?.length > 80 && (
-                    <button
-                      type="button"
-                      className={btnPillSm}
-                      onClick={onTrimTitle}
-                      disabled={isTrimmingTitle}
-                    >
-                      {isTrimmingTitle ? "Trimming..." : "AI Trim Title"}
-                    </button>
-                  )}
-                  {listingData &&
-                    editableTitle !==
-                      (listingData.inventoryItem?.product?.title || "") && (
-                      <button
-                        type="button"
-                        className={btnPillSm}
-                        onClick={onSaveTitle}
-                        disabled={isSavingTitle}
-                      >
-                        {isSavingTitle ? "Saving..." : "Save Title"}
-                      </button>
-                    )}
+                  <button
+                    type="button"
+                    className={btnPillSm}
+                    onClick={onTrimTitle}
+                    disabled={isTrimmingTitle}
+                  >
+                    {isTrimmingTitle ? "Trimming..." : "AI Trim Title"}
+                  </button>
                 </div>
               )}
             </div>
             <div className="border-b border-border-default pb-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <strong className="text-primary">Description:</strong>
+                <div className="flex items-center gap-2">
+                  <strong className="text-primary">Description:</strong>
+                  {autoSaveStatus.description === "saving" && (
+                    <span className="text-xs text-text-muted ml-2">Saving...</span>
+                  )}
+                  {autoSaveStatus.description === "saved" && (
+                    <span className="text-xs text-success ml-2">Saved</span>
+                  )}
+                </div>
                 {!isGeneratingText && (
                   <button
                     type="button"
@@ -354,19 +351,6 @@ function CreateWorkflow({
                   }}
                 />
               )}
-              {!isGeneratingText &&
-                listingData &&
-                editableDescription !==
-                  (listingData.inventoryItem?.product?.description || "") && (
-                  <button
-                    type="button"
-                    className={`mt-2 ${btnPillSm}`}
-                    onClick={onSaveDescription}
-                    disabled={isSavingDescription}
-                  >
-                    {isSavingDescription ? "Saving..." : "Save Description"}
-                  </button>
-                )}
             </div>
             {/* Original title/description disclosure */}
             <div>
