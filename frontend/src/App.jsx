@@ -386,9 +386,13 @@ function App() {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editableTitle, setEditableTitle] = useState("");
   const [isTrimmingTitle, setIsTrimmingTitle] = useState(false);
-  const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [editableDescription, setEditableDescription] = useState("");
-  const [isSavingDescription, setIsSavingDescription] = useState(false);
+  const [autoSaveStatus, setAutoSaveStatus] = useState({
+    title: "idle",
+    description: "idle",
+  });
+  const persistedTitleRef = useRef("");
+  const persistedDescriptionRef = useRef("");
   const [isRegeneratingTitle, setIsRegeneratingTitle] = useState(false);
   const [isRegeneratingDescription, setIsRegeneratingDescription] = useState(false);
   const [isRegeneratingMetadata, setIsRegeneratingMetadata] = useState(false);
@@ -826,6 +830,34 @@ function App() {
       setSidebarCollapsed(true);
     }
   }, [activeTab, listingLinkSubmitted, testListingLinkSubmitted]);
+
+  useEffect(() => {
+    const title = listingData?.inventoryItem?.product?.title ?? "";
+    const description = listingData?.inventoryItem?.product?.description ?? "";
+    persistedTitleRef.current = title;
+    persistedDescriptionRef.current = description;
+  }, [listingData]);
+
+  useEffect(() => {
+    if (!currentSku) return;
+    if (!editableTitle) return;
+    if (editableTitle === persistedTitleRef.current) return;
+    const timer = setTimeout(() => {
+      handleSaveTitle(editableTitle);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [editableTitle, currentSku]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const sku = currentSku || listingData?.sku;
+    if (!sku || !listingData) return;
+    if (!editableDescription && editableDescription !== "") return;
+    if (editableDescription === persistedDescriptionRef.current) return;
+    const timer = setTimeout(() => {
+      handleSaveDescription(editableDescription);
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [editableDescription, currentSku, listingData?.sku]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (
@@ -1949,50 +1981,72 @@ function App() {
     }
   };
 
-  const handleSaveTitle = async () => {
-    if (!editableTitle || !currentSku) return;
+  const handleSaveTitle = async (titleToSave) => {
+    const sku = currentSku;
+    if (!titleToSave || !sku) return;
+    setAutoSaveStatus((prev) => ({ ...prev, title: "saving" }));
     try {
       const response = await fetch("/api/update-title", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sku: currentSku, title: editableTitle }),
+        body: JSON.stringify({ sku, title: titleToSave }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Failed to update title");
       if (data.listing_data) {
         setListingData(data.listing_data);
-        setEditableTitle(
-          data.listing_data?.inventoryItem?.product?.title || editableTitle,
-        );
+        const saved =
+          data.listing_data?.inventoryItem?.product?.title || titleToSave;
+        persistedTitleRef.current = saved;
       }
+      setAutoSaveStatus((prev) => ({ ...prev, title: "saved" }));
+      setTimeout(
+        () =>
+          setAutoSaveStatus((prev) =>
+            prev.title === "saved" ? { ...prev, title: "idle" } : prev,
+          ),
+        2000,
+      );
     } catch (err) {
       console.error("Error saving title:", err);
       addToast("error", err.message || "Failed to save title");
+      setAutoSaveStatus((prev) => ({ ...prev, title: "idle" }));
     }
   };
 
-  const handleSaveDescription = async () => {
+  const handleSaveDescription = async (descToSave) => {
     const sku = currentSku || listingData?.sku;
     if (!sku || !listingData) return;
+    setAutoSaveStatus((prev) => ({ ...prev, description: "saving" }));
     try {
       const response = await fetch("/api/update-description", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sku, description: editableDescription }),
+        body: JSON.stringify({ sku, description: descToSave }),
       });
       const data = await response.json();
       if (!response.ok)
         throw new Error(data.error || "Failed to update description");
       if (data.listing_data) {
         setListingData(data.listing_data);
-        setEditableDescription(
-          data.listing_data?.inventoryItem?.product?.description ??
-            editableDescription,
-        );
+        const saved =
+          data.listing_data?.inventoryItem?.product?.description ?? descToSave;
+        persistedDescriptionRef.current = saved;
       }
+      setAutoSaveStatus((prev) => ({ ...prev, description: "saved" }));
+      setTimeout(
+        () =>
+          setAutoSaveStatus((prev) =>
+            prev.description === "saved"
+              ? { ...prev, description: "idle" }
+              : prev,
+          ),
+        2000,
+      );
     } catch (err) {
       console.error("Error saving description:", err);
       addToast("error", err.message || "Failed to save description");
+      setAutoSaveStatus((prev) => ({ ...prev, description: "idle" }));
     }
   };
 
@@ -2974,8 +3028,6 @@ function App() {
               uploadProgress={testUploadProgress}
               uploadingSkus={testUploadingSkus}
               isTrimmingTitle={testIsTrimmingTitle}
-              isSavingTitle={testIsSavingTitle}
-              isSavingDescription={testIsSavingDescription}
               onListingIdChange={setTestListingId}
               onSubmit={testHandleSubmit}
               onChatSubmit={testHandleChatSubmit}
@@ -3054,39 +3106,7 @@ function App() {
               onTrimTitle={() =>
                 setTestEditableTitle((prev) => prev.slice(0, 80))
               }
-              onSaveTitle={() =>
-                setTestListingData((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        inventoryItem: {
-                          ...prev.inventoryItem,
-                          product: {
-                            ...prev.inventoryItem?.product,
-                            title: testEditableTitle,
-                          },
-                        },
-                      }
-                    : prev,
-                )
-              }
               onEditableDescriptionChange={setTestEditableDescription}
-              onSaveDescription={() =>
-                setTestListingData((prev) =>
-                  prev
-                    ? {
-                        ...prev,
-                        inventoryItem: {
-                          ...prev.inventoryItem,
-                          product: {
-                            ...prev.inventoryItem?.product,
-                            description: testEditableDescription,
-                          },
-                        },
-                      }
-                    : prev,
-                )
-              }
               onUploadToEbay={testHandleUploadToEbay}
               onEditorToggle={() => setTestIsEditorOpen((prev) => !prev)}
               useRealEbayUpload={testUseRealEbayUpload}
@@ -3771,8 +3791,7 @@ function App() {
               uploadProgress={uploadProgress}
               uploadingSkus={uploadingSkus}
               isTrimmingTitle={isTrimmingTitle}
-              isSavingTitle={isSavingTitle}
-              isSavingDescription={isSavingDescription}
+              autoSaveStatus={autoSaveStatus}
               onListingIdChange={setListingId}
               onSubmit={handleSubmit}
               onChatSubmit={handleChatSubmit}
@@ -3796,9 +3815,7 @@ function App() {
               onCancelTextGen={cancelTextGeneration}
               onEditableTitleChange={setEditableTitle}
               onTrimTitle={handleTrimTitle}
-              onSaveTitle={handleSaveTitle}
               onEditableDescriptionChange={setEditableDescription}
-              onSaveDescription={handleSaveDescription}
               onUploadToEbay={handleUploadToEbay}
               onEditorToggle={() => setIsEditorOpen((prev) => !prev)}
               onPhotoClick={openLightbox}
