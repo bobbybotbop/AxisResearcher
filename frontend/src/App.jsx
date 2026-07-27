@@ -320,6 +320,8 @@ function App() {
       return true;
     }
   });
+  const [autoPromoteEnabled, setAutoPromoteEnabled] = useState(true);
+  const [promotedListingAdRate, setPromotedListingAdRate] = useState(7.0);
   const [bgRemovedPhotos, setBgRemovedPhotos] = useState({});
   const [bgRemovalProgress, setBgRemovalProgress] = useState({
     isActive: false,
@@ -2133,6 +2135,24 @@ function App() {
     }).catch(() => {});
   };
 
+  const saveAutoPromoteEnabled = (val) => {
+    setAutoPromoteEnabled(val);
+    fetch("/api/settings/promoted-listings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auto_promote_enabled: val }),
+    }).catch(() => {});
+  };
+
+  const savePromotedListingAdRate = (val) => {
+    setPromotedListingAdRate(val);
+    fetch("/api/settings/promoted-listings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ promoted_listing_ad_rate: val }),
+    }).catch(() => {});
+  };
+
   const confirmAutoRestock = async () => {
     if (!autoRestockConfirm) return;
     const { nextEnabled, nextQuantity } = autoRestockConfirm;
@@ -2309,6 +2329,13 @@ function App() {
           if (typeof data.minimum_images_per_listing === "number") {
             setMinimumImagesPerListing(data.minimum_images_per_listing);
           }
+        })
+        .catch(() => {});
+      fetch("/api/settings/promoted-listings")
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.auto_promote_enabled !== undefined) setAutoPromoteEnabled(d.auto_promote_enabled);
+          if (d.promoted_listing_ad_rate !== undefined) setPromotedListingAdRate(d.promoted_listing_ad_rate);
         })
         .catch(() => {});
     }
@@ -3404,6 +3431,46 @@ function App() {
                       ? "Auto BG Removal: On"
                       : "Auto BG Removal: Off"}
                   </button>
+                </div>
+              </div>
+              <div className="mb-5 rounded-xl border border-border-default bg-surface-muted p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="m-0 text-lg font-semibold text-text-primary">
+                      Promoted Listings
+                    </h3>
+                    <p className="mt-1 text-sm text-text-muted">
+                      Auto-enroll new listings in a Promoted Listings campaign. Requires eBay re-authorization with sell.marketing scope.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {autoPromoteEnabled && (
+                      <div className="flex items-center gap-1">
+                        <label className="text-sm text-text-secondary">Ad Rate:</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={100}
+                          step={0.1}
+                          value={promotedListingAdRate}
+                          onChange={(e) => savePromotedListingAdRate(parseFloat(e.target.value))}
+                          className="w-20 rounded border border-border-default bg-surface-panel px-2 py-1 text-text-primary text-sm"
+                        />
+                        <span className="text-sm text-text-secondary">%</span>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      className="cursor-pointer rounded-lg border border-border-default bg-surface-panel px-4 py-2 text-sm font-semibold text-text-primary shadow-sm transition-all hover:-translate-y-0.5 hover:bg-surface-hover hover:shadow-md"
+                      onClick={() => saveAutoPromoteEnabled(!autoPromoteEnabled)}
+                      aria-label="Toggle promoted listings"
+                      aria-pressed={autoPromoteEnabled}
+                    >
+                      {autoPromoteEnabled
+                        ? "Promoted Listings: On"
+                        : "Promoted Listings: Off"}
+                    </button>
+                  </div>
                 </div>
               </div>
               <div className="mb-5 rounded-xl border border-border-default bg-surface-muted p-5">
