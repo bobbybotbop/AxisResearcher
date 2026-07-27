@@ -11,6 +11,7 @@ import {
 import { useLocation, useNavigate } from "react-router-dom";
 import CreateWorkflow from "./components/CreateWorkflow";
 import GeneratedListingCard from "./components/GeneratedListingCard";
+import CompactListingRow from "./components/CompactListingRow";
 import UploadListingsToolbar from "./components/UploadListingsToolbar";
 import ApiKeyManagementSection from "./components/ApiKeyManagementSection";
 import TestAiModelSection from "./components/TestAiModelSection";
@@ -349,6 +350,10 @@ function App() {
   const [loadingListingDetail, setLoadingListingDetail] = useState(false);
   const [historyPage, setHistoryPage] = useState(0);
   const [historyPageSize, setHistoryPageSize] = useState(10);
+  const [historyViewMode, setHistoryViewMode] = useState(() => {
+    const stored = localStorage.getItem("axisHistoryViewMode");
+    return stored === "detailed" ? "detailed" : "compact";
+  });
   const [listingQuantities, setListingQuantities] = useState({});
   const [loadingQuantities, setLoadingQuantities] = useState(false);
   const quantitiesFetchedRef = useRef(false);
@@ -2212,6 +2217,11 @@ function App() {
     }
   };
 
+  const handleHistoryViewModeChange = (mode) => {
+    setHistoryViewMode(mode);
+    localStorage.setItem("axisHistoryViewMode", mode);
+  };
+
   // Fetch listings when upload tab is activated
   const handleTabChange = (tab) => {
     navigate(tabPaths[tab] ?? tabPaths.create);
@@ -3059,6 +3069,8 @@ function App() {
                 onAutoRestockQuantityChange={handleAutoRestockQuantityChange}
                 onManualRestock={() => performRestock(autoRestockQuantity)}
                 isRestocking={isRestocking}
+                viewMode={historyViewMode}
+                onViewModeChange={handleHistoryViewModeChange}
               />
 
               {loadingListings ? (
@@ -3081,18 +3093,31 @@ function App() {
               ) : (
                 <>
                   <div className="flex flex-col gap-4">
-                    {paginatedListings.map((listing) => (
-                      <GeneratedListingCard
-                        key={listing.sku}
-                        listing={listing}
-                        onCardClick={handleListingClick}
-                        onUpload={(l) => handleUploadToEbay(l.sku, l)}
-                        isUploading={uploadingSkus.has(listing.sku)}
-                        uploadResult={uploadResults[listing.sku]}
-                        quantity={listingQuantities[listing.sku]}
-                        loadingQuantity={loadingQuantities}
-                      />
-                    ))}
+                    {paginatedListings.map((listing) =>
+                      historyViewMode === "compact" ? (
+                        <CompactListingRow
+                          key={listing.sku}
+                          listing={listing}
+                          onCardClick={handleListingClick}
+                          onUpload={(l) => handleUploadToEbay(l.sku, l)}
+                          isUploading={uploadingSkus.has(listing.sku)}
+                          uploadResult={uploadResults[listing.sku]}
+                          quantity={listingQuantities[listing.sku]}
+                          loadingQuantity={loadingQuantities}
+                        />
+                      ) : (
+                        <GeneratedListingCard
+                          key={listing.sku}
+                          listing={listing}
+                          onCardClick={handleListingClick}
+                          onUpload={(l) => handleUploadToEbay(l.sku, l)}
+                          isUploading={uploadingSkus.has(listing.sku)}
+                          uploadResult={uploadResults[listing.sku]}
+                          quantity={listingQuantities[listing.sku]}
+                          loadingQuantity={loadingQuantities}
+                        />
+                      )
+                    )}
                   </div>
 
                   {/* Pagination controls */}
