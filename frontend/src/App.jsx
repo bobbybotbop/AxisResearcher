@@ -340,6 +340,8 @@ function App() {
     useState(false);
   const [uploadListingsShowUnuploaded, setUploadListingsShowUnuploaded] =
     useState(false);
+  const [uploadListingsShowManual, setUploadListingsShowManual] =
+    useState(true);
   const [uploadListingsDateFrom, setUploadListingsDateFrom] = useState("");
   const [uploadListingsDateTo, setUploadListingsDateTo] = useState("");
   const [loadingListings, setLoadingListings] = useState(false);
@@ -758,6 +760,7 @@ function App() {
     const list = allListings.filter((l) => {
       if (!uploadListingsShowIncomplete && isIncomplete(l)) return false;
       if (!uploadListingsShowUnuploaded && !isUploaded(l) && !isIncomplete(l)) return false;
+      if (!uploadListingsShowManual && l.isManualListing) return false;
       if (q && !(l.title || "").toLowerCase().includes(q)) return false;
       if (uploadListingsDateFrom || uploadListingsDateTo) {
         const raw = l.createdDateTime;
@@ -790,6 +793,7 @@ function App() {
     uploadListingsSearch,
     uploadListingsShowIncomplete,
     uploadListingsShowUnuploaded,
+    uploadListingsShowManual,
     uploadListingsDateFrom,
     uploadListingsDateTo,
   ]);
@@ -1306,7 +1310,10 @@ function App() {
         );
 
       if (photosToProcess.length === 0) {
-        throw new Error("All photos are skipped. Include at least one photo.");
+        setCategories(editableCategories);
+        setIsConfirming(false);
+        handleCreateListing();
+        return;
       }
 
       const categoriesToProcess = {};
@@ -1798,10 +1805,6 @@ function App() {
   };
 
   const handleCreateListing = async () => {
-    if (generatedImages.length === 0) {
-      setError("No generated images to add to listing");
-      return;
-    }
     if (!listing) {
       setError("Original listing data is required");
       return;
@@ -2556,7 +2559,8 @@ function App() {
         hasBgRemoved ? testBgRemovedPhotos[url] || url : url,
       );
     if (photosToProcess.length === 0) {
-      setTestError("All photos are skipped. Include at least one photo.");
+      setTestCategories(testEditableCategories);
+      testHandleConfirmAndEditText();
       return;
     }
     setTestIsConfirming(true);
@@ -2593,10 +2597,6 @@ function App() {
   };
 
   const testHandleConfirmAndEditText = () => {
-    if (testGeneratedImages.length === 0) {
-      setTestError("No generated images to add to listing");
-      return;
-    }
     setTestIsCreatingListing(true);
     setTestError(null);
     const steps = [
@@ -3101,6 +3101,8 @@ function App() {
                 onShowIncompleteListingsChange={setUploadListingsShowIncomplete}
                 showUnuploadedListings={uploadListingsShowUnuploaded}
                 onShowUnuploadedListingsChange={setUploadListingsShowUnuploaded}
+                showManualListings={uploadListingsShowManual}
+                onShowManualListingsChange={setUploadListingsShowManual}
                 dateFrom={uploadListingsDateFrom}
                 dateTo={uploadListingsDateTo}
                 onDateFromChange={setUploadListingsDateFrom}
@@ -3148,6 +3150,7 @@ function App() {
                           uploadResult={uploadResults[listing.sku]}
                           quantity={listingQuantities[listing.sku]}
                           loadingQuantity={loadingQuantities}
+                          isManual={!!listing.isManualListing}
                         />
                       ) : (
                         <GeneratedListingCard
@@ -3159,6 +3162,7 @@ function App() {
                           uploadResult={uploadResults[listing.sku]}
                           quantity={listingQuantities[listing.sku]}
                           loadingQuantity={loadingQuantities}
+                          isManual={!!listing.isManualListing}
                         />
                       )
                     )}

@@ -101,6 +101,7 @@ export default function GeneratedListingCard({
   uploadResult,
   quantity,
   loadingQuantity,
+  isManual = false,
 }) {
   const urls = Array.isArray(listing.imageUrls) ? listing.imageUrls : [];
   const [imageIndex, setImageIndex] = useState(0);
@@ -130,7 +131,7 @@ export default function GeneratedListingCard({
           onCardClick?.(listing);
         }
       }}
-      className="flex w-full cursor-pointer flex-col overflow-hidden rounded-xl border border-border-default bg-surface-panel shadow-sm transition-shadow hover:shadow-md md:flex-row md:items-stretch"
+      className={`flex w-full cursor-pointer flex-col overflow-hidden rounded-xl bg-surface-panel shadow-sm transition-shadow hover:shadow-md md:flex-row md:items-stretch ${isManual ? "border-2 border-border-default" : "border border-border-default"}`}
     >
       {/* Image column — hero + dots + upload below image */}
       <div className="flex w-full shrink-0 flex-col border-b border-border-default md:w-[30%] md:max-w-md md:border-b-0 md:border-r md:border-border-default">
