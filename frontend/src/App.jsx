@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import CreateWorkflow from "./components/CreateWorkflow";
+import ToastContainer from "./components/ToastContainer";
 import GeneratedListingCard from "./components/GeneratedListingCard";
 import CompactListingRow from "./components/CompactListingRow";
 import UploadListingsToolbar from "./components/UploadListingsToolbar";
@@ -234,6 +235,14 @@ function App() {
   const [listingData, setListingData] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState(null);
+  const [toasts, setToasts] = useState([]);
+  const addToast = (type, message, detail) => {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, type, message, detail }]);
+  };
+  const removeToast = useCallback((id) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -2830,6 +2839,7 @@ function App() {
 
   return (
     <div className="flex min-h-screen bg-surface-app text-text-primary">
+      <ToastContainer toasts={toasts} onRemove={removeToast} />
       <aside
         className={`sticky top-0 flex h-screen shrink-0 flex-col border-r border-border-default bg-surface-panel shadow-sm transition-[width] duration-200 ease-out ${
           sidebarCollapsed ? "w-[4.25rem]" : "w-60"
