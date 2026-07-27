@@ -45,7 +45,7 @@ from backend.copyScripts.create_image import (
     categorize_images,
     _openrouter_response_dict_to_image_bytes_and_mime,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, clear_promoted_listing_campaign_ids
 from backend.helper_functions import remove_html_tags
 import os
 import json
@@ -57,7 +57,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from backend.copyScripts.create_text import create_text, create_text_stream
 from backend.ebay_cli import call_text_llm, get_seller_list, revise_inventory_status_batch
-from backend.copyScripts.imageEditing import remove_background, compile_images
+from backend.copyScripts.imageEditing import remove_background, compile_images, downscale_image_bytes
 from backend.copyScripts.upload_to_ebay import upload_complete_listing
 import requests
 from dotenv import load_dotenv
@@ -1986,6 +1986,34 @@ def api_save_minimum_images_setting():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/settings/promoted-listings', methods=['GET'])
+def api_get_promoted_listing_settings():
+    """Read promoted listing enabled flag and ad rate."""
+    try:
+        return jsonify(get_promoted_listing_settings()), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/settings/promoted-listings', methods=['POST'])
+def api_save_promoted_listing_settings():
+    """Persist promoted listing enabled flag and/or ad rate."""
+    body = request.get_json(silent=True) or {}
+    enabled = body.get('auto_promote_enabled')
+    ad_rate = body.get('promoted_listing_ad_rate')
+    try:
+        if ad_rate is not None:
+            ad_rate = float(ad_rate)
+            if ad_rate < 1 or ad_rate > 100:
+                return jsonify({'error': 'promoted_listing_ad_rate must be between 1 and 100'}), 400
+        result = save_promoted_listing_settings(enabled=enabled, ad_rate=ad_rate)
+        return jsonify(result), 200
+    except (TypeError, ValueError):
+        return jsonify({'error': 'promoted_listing_ad_rate must be a number'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/listings/restock', methods=['POST'])
 def api_restock_listings():
     """
@@ -2167,7 +2195,7 @@ def api_remove_background():
             return jsonify({"error": "No image file provided"}), 400
 
         print(f"[API] /api/remove-background called with file: {file.filename}")
-        image_bytes = file.read()
+        image_bytes = downscale_image_bytes(file.read())
         result_bytes = remove_background(image_bytes)
         print("[API] Background removal completed successfully")
 
@@ -2225,7 +2253,8 @@ def api_remove_backgrounds_batch():
             try:
                 img_response = requests.get(url, timeout=15)
                 img_response.raise_for_status()
-                result_bytes = remove_background(img_response.content)
+                scaled_bytes = downscale_image_bytes(img_response.content)
+                result_bytes = remove_background(scaled_bytes)
                 filename = f"bg_removed_{sku}_{idx}.png"
                 filepath = os.path.join("generated-images", filename)
                 with open(filepath, 'wb') as f:
