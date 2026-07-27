@@ -45,16 +45,18 @@ from backend.copyScripts.create_image import (
     categorize_images,
     _openrouter_response_dict_to_image_bytes_and_mime,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json
 from backend.helper_functions import remove_html_tags
 import os
 import json
+import glob
 import time
+from datetime import datetime, timezone
 import uuid
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from backend.copyScripts.create_text import create_text, create_text_stream
-from backend.ebay_cli import call_text_llm
+from backend.ebay_cli import call_text_llm, get_seller_list, revise_inventory_status_batch
 from backend.copyScripts.imageEditing import remove_background, compile_images
 from backend.copyScripts.upload_to_ebay import upload_complete_listing
 import requests
@@ -1575,6 +1577,58 @@ def list_all_listings():
             "error": f"An error occurred while listing files: {error_msg}",
             "listings": []
         }), 500
+
+@app.route('/api/import-listings', methods=['POST'])
+def api_import_listings():
+    """
+    Sync active eBay listings created outside this tool into Generated_Listings/MANUAL_*.json.
+    Uses ModTimeFrom from listingPreferences.json for incremental fetches after the first run.
+    """
+    last_refreshed = get_manual_import_last_refreshed()
+    try:
+        items = get_seller_list(mod_time_from=last_refreshed)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+    # Build set of eBay item IDs already claimed by non-MANUAL listings
+    known_ids = set()
+    for fpath in glob.glob('Generated_Listings/*.json'):
+        if os.path.basename(fpath).startswith('MANUAL_'):
+            continue
+        try:
+            with open(fpath, 'r', encoding='utf-8') as f:
+                d = json.load(f)
+            eid = str(d.get('ebayListingId') or '').strip()
+            if eid:
+                known_ids.add(eid)
+        except Exception:
+            continue
+
+    existing_manual_skus = {
+        os.path.basename(fp).replace('.json', '')
+        for fp in glob.glob('Generated_Listings/MANUAL_*.json')
+    }
+
+    imported = updated = skipped = 0
+    for item in items:
+        if item['item_id'] in known_ids:
+            skipped += 1
+            continue
+        sku = f'MANUAL_{item["item_id"]}'
+        is_new = sku not in existing_manual_skus
+        written = write_manual_listing_json(item)
+        if written:
+            if is_new:
+                imported += 1
+            else:
+                updated += 1
+        else:
+            skipped += 1
+
+    save_manual_import_last_refreshed(
+        datetime.now(timezone.utc).isoformat()
+    )
+    return jsonify({'imported': imported, 'updated': updated, 'skipped': skipped})
 
 @app.route('/api/listings/<sku>', methods=['GET'])
 def get_listing_detail(sku):
