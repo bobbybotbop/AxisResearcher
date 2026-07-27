@@ -2508,9 +2508,15 @@ function App() {
   };
 
   const testHandleConfirmCategories = () => {
-    const photosToProcess = testPhotos.filter(
-      (url) => !testSkippedPhotos.has(url),
-    );
+    const hasBgRemoved =
+      autoBackgroundRemovalEnabled &&
+      Object.keys(testBgRemovedPhotos).length > 0;
+
+    const photosToProcess = testPhotos
+      .filter((url) => !testSkippedPhotos.has(url))
+      .map((url) =>
+        hasBgRemoved ? testBgRemovedPhotos[url] || url : url,
+      );
     if (photosToProcess.length === 0) {
       setTestError("All photos are skipped. Include at least one photo.");
       return;
