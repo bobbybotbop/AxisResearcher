@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Search, Filter } from "@mynaui/icons-react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, LayoutList, LayoutGrid } from "lucide-react";
 import { btnPillSm } from "../styles/buttonPill";
 
 export default function UploadListingsToolbar({
@@ -22,6 +22,8 @@ export default function UploadListingsToolbar({
   onAutoRestockQuantityChange,
   onManualRestock,
   isRestocking,
+  viewMode,
+  onViewModeChange,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const rootRef = useRef(null);
@@ -199,6 +201,31 @@ export default function UploadListingsToolbar({
             </div>
           ) : null}
         </div>
+
+      {/* View mode toggle */}
+      <button
+        type="button"
+        aria-label={
+          viewMode === "compact" ? "Switch to detailed view" : "Switch to compact view"
+        }
+        title={
+          viewMode === "compact" ? "Switch to detailed view" : "Switch to compact view"
+        }
+        onClick={() =>
+          onViewModeChange(viewMode === "compact" ? "detailed" : "compact")
+        }
+        className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border-default shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-border-default/40 ${
+          viewMode === "compact"
+            ? "bg-surface-muted text-text-primary hover:bg-surface-hover"
+            : "bg-surface-panel text-text-primary hover:bg-surface-hover"
+        }`}
+      >
+        {viewMode === "compact" ? (
+          <LayoutList size={20} aria-hidden />
+        ) : (
+          <LayoutGrid size={20} aria-hidden />
+        )}
+      </button>
 
       {/* Auto-restock: far right */}
       {onAutoRestockEnabledChange && (
