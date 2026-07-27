@@ -294,16 +294,14 @@ function CreateWorkflow({
                 </div>
               )}
               {!isGeneratingText && editableTitle?.length > 80 && (
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    className={btnPillSm}
-                    onClick={onTrimTitle}
-                    disabled={isTrimmingTitle}
-                  >
-                    {isTrimmingTitle ? "Trimming..." : "AI Trim Title"}
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  className={btnPillSm}
+                  onClick={onTrimTitle}
+                  disabled={isTrimmingTitle}
+                >
+                  {isTrimmingTitle ? "Trimming..." : "AI Trim Title"}
+                </button>
               )}
             </div>
             <div className="border-b border-border-default pb-4">
