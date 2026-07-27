@@ -19,6 +19,7 @@ import time
 from datetime import datetime
 import sys
 import xml.etree.ElementTree as ET
+from xml.sax.saxutils import escape
 
 from backend.helper_functions import remove_html_tags, helper_get_valid_token, handle_http_error, refreshToken
 
@@ -1674,8 +1675,8 @@ def revise_inventory_status_batch(items):
         batch = items[i : i + 4]
         status_xml = "".join(
             f"<InventoryStatus>"
-            f"<ItemID>{it['item_id']}</ItemID>"
-            f"<Quantity>{it['quantity']}</Quantity>"
+            f"<ItemID>{escape(str(it['item_id']))}</ItemID>"
+            f"<Quantity>{int(it['quantity'])}</Quantity>"
             f"</InventoryStatus>"
             for it in batch
         )
@@ -1696,9 +1697,22 @@ def revise_inventory_status_batch(items):
             continue
         root = ET.fromstring(r.text)
         ack = root.findtext(f"{ns}Ack", "")
-        ok = ack in ("Success", "Warning")
+        if ack == "Failure":
+            # Whole batch failed — no per-item detail possible
+            for it in batch:
+                results.append({"item_id": it["item_id"], "ok": False})
+            continue
+        # Parse per-item results from response InventoryStatus elements
+        responded_ids = set()
+        for status_el in root.findall(f"{ns}InventoryStatus"):
+            item_id = status_el.findtext(f"{ns}ItemID", "")
+            has_errors = len(status_el.findall(f"{ns}Errors")) > 0
+            results.append({"item_id": item_id, "ok": not has_errors})
+            responded_ids.add(item_id)
+        # Any item not in the response gets ok=True (eBay omits successful items on Warning)
         for it in batch:
-            results.append({"item_id": it["item_id"], "ok": ok})
+            if it["item_id"] not in responded_ids:
+                results.append({"item_id": it["item_id"], "ok": True})
     return results
 
 
