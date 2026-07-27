@@ -419,6 +419,7 @@ function App() {
   // Token refresh panel state
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [tokenMessage, setTokenMessage] = useState(null);
+  const [isRefreshingListings, setIsRefreshingListings] = useState(false);
   const [tokenInfo, setTokenInfo] = useState({
     user_token_set: false,
     application_token_set: false,
@@ -618,6 +619,26 @@ function App() {
     }
   };
 
+  async function importListingsFromEbay() {
+    try {
+      await fetch('/api/import-listings', { method: 'POST' });
+    } catch (e) {
+      // non-fatal: silently swallow
+    }
+  }
+
+  async function handleRefreshListings() {
+    setIsRefreshingListings(true);
+    try {
+      await fetch('/api/import-listings', { method: 'POST' });
+      await fetchAllListings();
+    } catch (e) {
+      // non-fatal
+    } finally {
+      setIsRefreshingListings(false);
+    }
+  }
+
   // Auto-refresh tokens on every launch so eBay API calls never start with an expired token.
   // Same function as the manual Refresh button — no separate code path.
   const hasAutoRefreshed = useRef(false);
@@ -629,6 +650,7 @@ function App() {
       if (hasAutoRefreshed.current) return;
       hasAutoRefreshed.current = true;
       handleRefreshTokens();
+      importListingsFromEbay();
     })();
     return () => {
       alive = false;
@@ -3067,8 +3089,8 @@ function App() {
                 dateTo={uploadListingsDateTo}
                 onDateFromChange={setUploadListingsDateFrom}
                 onDateToChange={setUploadListingsDateTo}
-                onRefresh={() => fetchQuantitiesForPage(paginatedListings)}
-                isRefreshing={loadingQuantities}
+                onRefresh={handleRefreshListings}
+                isRefreshing={isRefreshingListings || loadingQuantities}
                 autoRestockEnabled={autoRestockEnabled}
                 autoRestockQuantity={autoRestockQuantity}
                 onAutoRestockEnabledChange={handleAutoRestockEnabledChange}
