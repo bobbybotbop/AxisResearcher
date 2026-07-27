@@ -13,7 +13,7 @@ function Toast({ toast, onRemove }) {
   return (
     <div
       className={`flex items-start gap-3 rounded-lg px-4 py-3 shadow-lg ${
-        isSuccess ? "bg-success text-white" : "bg-red-600 text-white"
+        isSuccess ? "bg-success text-white" : "bg-danger text-white"
       }`}
       style={{ minWidth: "280px", maxWidth: "480px" }}
     >
@@ -27,11 +27,12 @@ function Toast({ toast, onRemove }) {
         )}
       </div>
       <button
+        type="button"
         onClick={() => onRemove(toast.id)}
         className="ml-1 shrink-0 text-sm opacity-60 hover:opacity-100"
         aria-label="Dismiss"
       >
-        ✕
+        ×
       </button>
     </div>
   );
@@ -42,6 +43,10 @@ export default function ToastContainer({ toasts, onRemove }) {
   return ReactDOM.createPortal(
     <div
       className="flex flex-col gap-2"
+      role="region"
+      aria-label="Notifications"
+      aria-live="assertive"
+      aria-atomic="false"
       style={{
         position: "fixed",
         top: "1rem",
