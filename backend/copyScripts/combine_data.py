@@ -523,7 +523,7 @@ def save_promoted_listing_settings(enabled=None, ad_rate=None):
 
     Args:
         enabled (bool, optional): New enabled state. Unchanged if None.
-        ad_rate (float, optional): New ad rate percent (0.1-100). Unchanged if None.
+        ad_rate (float, optional): New ad rate percent (1-100). Unchanged if None.
 
     Returns:
         dict: {"auto_promote_enabled": bool, "promoted_listing_ad_rate": float}
@@ -565,14 +565,6 @@ def save_promoted_listing_campaign_ids(campaign_id, ad_group_id):
     config = load_config()
     config["promoted_listing_campaign_id"] = campaign_id
     config["promoted_listing_ad_group_id"] = ad_group_id
-    save_config(config)
-
-
-def clear_promoted_listing_campaign_ids():
-    """Reset campaign and ad-group IDs in listingPreferences.json (used on stale campaign recovery)."""
-    config = load_config()
-    config["promoted_listing_campaign_id"] = ""
-    config["promoted_listing_ad_group_id"] = ""
     save_config(config)
 
 

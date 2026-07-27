@@ -2154,6 +2154,7 @@ function App() {
   };
 
   const savePromotedListingAdRate = (val) => {
+    if (isNaN(val) || val < 1) return;
     setPromotedListingAdRate(val);
     fetch("/api/settings/promoted-listings", {
       method: "POST",
