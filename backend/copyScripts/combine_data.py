@@ -1088,6 +1088,65 @@ def update_listing_with_aspects(sku, localizedAspects=None, pre_fetched_aspects=
         return False
 
 
+def get_manual_import_last_refreshed():
+    """Returns the last manual import timestamp as ISO string, or None if never run."""
+    config = load_config()
+    return config.get("manual_listings_last_refreshed")
+
+
+def save_manual_import_last_refreshed(dt_str):
+    """Persists the manual import timestamp to listingPreferences.json."""
+    config = load_config()
+    config["manual_listings_last_refreshed"] = dt_str
+    save_config(config)
+
+
+def write_manual_listing_json(item):
+    """
+    Write (or update) Generated_Listings/MANUAL_<itemId>.json from a get_seller_list() item.
+    item keys: item_id, title, quantity, price, image_urls, condition, start_time, description.
+    Only overwrites an existing file when quantity has changed (to avoid churn).
+    Returns True if the file was written, False if unchanged and skipped.
+    """
+    sku = f"MANUAL_{item['item_id']}"
+    path = os.path.join("Generated_Listings", f"{sku}.json")
+    os.makedirs("Generated_Listings", exist_ok=True)
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+            if existing.get("offer", {}).get("quantity") == item["quantity"]:
+                return False
+        except (json.JSONDecodeError, KeyError):
+            pass  # corrupt - overwrite
+    data = {
+        "sku": sku,
+        "ebayListingId": item["item_id"],
+        "createdDateTime": item["start_time"],
+        "isManualListing": True,
+        "inventoryItem": {
+            "product": {
+                "title": item["title"],
+                "imageUrls": item["image_urls"],
+                "description": item["description"],
+            },
+            "condition": item["condition"],
+            "availability": {
+                "shipToLocationAvailability": {"quantity": item["quantity"]}
+            },
+        },
+        "offer": {
+            "pricingSummary": {
+                "price": {"value": item["price"], "currency": "USD"}
+            },
+            "quantity": item["quantity"],
+        },
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+    return True
+
+
 if __name__ == "__main__":
     # Run: python backend/copyScripts/combine_data.py backfill-ebay-listing-id
     import sys
