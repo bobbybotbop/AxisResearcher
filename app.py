@@ -1585,6 +1585,8 @@ def api_import_listings():
     Uses ModTimeFrom from listingPreferences.json for incremental fetches after the first run.
     """
     last_refreshed = get_manual_import_last_refreshed()
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    generated_listings_dir = os.path.join(base_dir, 'Generated_Listings')
     try:
         items = get_seller_list(mod_time_from=last_refreshed)
     except Exception as e:
@@ -1592,7 +1594,7 @@ def api_import_listings():
 
     # Build set of eBay item IDs already claimed by non-MANUAL listings
     known_ids = set()
-    for fpath in glob.glob('Generated_Listings/*.json'):
+    for fpath in glob.glob(os.path.join(generated_listings_dir, '*.json')):
         if os.path.basename(fpath).startswith('MANUAL_'):
             continue
         try:
@@ -1606,7 +1608,7 @@ def api_import_listings():
 
     existing_manual_skus = {
         os.path.basename(fp).replace('.json', '')
-        for fp in glob.glob('Generated_Listings/MANUAL_*.json')
+        for fp in glob.glob(os.path.join(generated_listings_dir, 'MANUAL_*.json'))
     }
 
     imported = updated = skipped = 0
