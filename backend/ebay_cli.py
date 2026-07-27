@@ -18,6 +18,7 @@ import json
 import time
 from datetime import datetime
 import sys
+import xml.etree.ElementTree as ET
 
 from backend.helper_functions import remove_html_tags, helper_get_valid_token, handle_http_error, refreshToken
 
@@ -519,6 +520,113 @@ def find_variation_id(listing_id):
         return None
 
 
+def get_item_group_data(listing_id):
+    """
+    Fetch the full item group data for a multi-variation listing, returning
+    the first variant's item data with ALL images aggregated into '_all_images'.
+
+    Combines:
+    - Parent listing images from Trading API (not exposed by Browse API)
+    - commonImages from Browse API getItemsByItemGroup
+    - Each variant's image + additionalImages
+
+    Returns:
+        dict | None: First variant's item data with '_all_images' key added,
+                     or None on failure.
+    """
+    listing_id = _extract_listing_id(listing_id)
+
+    valid_token = helper_get_valid_token()
+    if not valid_token:
+        print("❌ Error: Could not get valid access token (get_item_group_data)")
+        return None
+
+    url = "https://api.ebay.com/buy/browse/v1/item/get_items_by_item_group"
+    params = {'item_group_id': listing_id}
+
+    def _do_request(token):
+        return requests.get(
+            url,
+            headers=browse_api_headers(token),
+            params=params,
+            timeout=30,
+        )
+
+    try:
+        print(f"🔍 Fetching item group data for: {listing_id}")
+        response = _do_request(valid_token)
+
+        if response.status_code == 401:
+            print("🔄 Token expired, refreshing...")
+            new_token = _refresh_application_token_and_retry()
+            if not new_token:
+                print("❌ Could not refresh token (get_item_group_data)")
+                return None
+            response = _do_request(new_token)
+
+        if response.status_code != 200:
+            handle_http_error(response, "get_item_group_data")
+            return None
+
+        data = response.json()
+        items = data.get('items', []) or []
+        if not items:
+            print("⚠️  No variation items returned for item group")
+            return None
+
+        # Collect all images, deduplicating by the unique image hash in the URL path
+        seen_hashes = set()
+        all_images = []
+
+        def _image_hash(img_url):
+            """Extract the unique image identifier (e.g. 'L80AAOSw0aJoJ0b9') from an eBay image URL."""
+            try:
+                parts = img_url.split('/g/')
+                if len(parts) > 1:
+                    return parts[1].split('/')[0]
+            except Exception:
+                pass
+            return img_url
+
+        def _add_url(img_url):
+            if not img_url:
+                return
+            h = _image_hash(img_url)
+            if h not in seen_hashes:
+                seen_hashes.add(h)
+                all_images.append(img_url)
+
+        # 1. Parent listing images from primaryItemGroup (shared gallery not assigned to any variant)
+        pig = items[0].get('primaryItemGroup', {})
+        _add_url(pig.get('itemGroupImage', {}).get('imageUrl'))
+        for img in pig.get('itemGroupAdditionalImages', []):
+            if isinstance(img, dict):
+                _add_url(img.get('imageUrl'))
+
+        # 2. commonImages from Browse API (another source of shared images)
+        for img in data.get('commonImages', []):
+            if isinstance(img, dict):
+                _add_url(img.get('imageUrl'))
+
+        # 3. Each variant's images
+        for item in items:
+            _add_url(item.get('image', {}).get('imageUrl'))
+            for img in item.get('additionalImages', []):
+                if isinstance(img, dict):
+                    _add_url(img.get('imageUrl'))
+
+        print(f"✅ Collected {len(all_images)} unique images from {len(items)} variant(s) + parent")
+
+        # Return the first variant's data (for metadata) with all images attached
+        first_item = items[0]
+        first_item['_all_images'] = all_images
+        return first_item
+
+    except Exception as e:
+        print(f"❌ Error fetching item group data: {e}")
+        return None
+
+
 def single_get_detailed_item_data(item_id, verbose=True):
     """
     Get complete detailed data for a specific item from eBay API.
@@ -593,27 +701,28 @@ def single_get_detailed_item_data(item_id, verbose=True):
 
         if response.status_code == 200:
             item = response.json()
+            # If this is a variant listing, fetch ALL images from the item group
+            if item.get('primaryItemGroup'):
+                print("ℹ️  Variant listing detected; fetching all images from item group...")
+                group_item = get_item_group_data(listing_id)
+                if group_item:
+                    if verbose:
+                        _print_item_summary(group_item)
+                    return group_item
             if verbose:
                 _print_item_summary(item)
             return item
 
-        # Initial call failed: fall back to variation lookup for multi-SKU listings.
-        print("ℹ️  Initial item fetch failed; attempting variation lookup...")
-        variation_id = find_variation_id(listing_id)
-        if not variation_id:
-            handle_http_error(response, "single_get_detailed_item_data")
-            return None
-
-        rest_item_id = f"v1|{listing_id}|{variation_id}"
-        retry_response = _attempt_get_item(rest_item_id)
-
-        if retry_response.status_code == 200:
-            item = retry_response.json()
+        # Initial call failed: fall back to item group lookup for multi-variation listings.
+        # This fetches ALL images from every variant + commonImages in one call.
+        print("ℹ️  Initial item fetch failed; attempting item group lookup...")
+        group_item = get_item_group_data(listing_id)
+        if group_item:
             if verbose:
-                _print_item_summary(item)
-            return item
+                _print_item_summary(group_item)
+            return group_item
 
-        handle_http_error(retry_response, "single_get_detailed_item_data (variation retry)")
+        handle_http_error(response, "single_get_detailed_item_data")
         return None
 
     except Exception as e:
@@ -1456,6 +1565,82 @@ def add_item(item_data):
         error_msg = f"Exception occurred: {str(e)}"
         print(f"❌ {error_msg}")
         return {"success": False, "error": error_msg}
+
+
+def get_seller_list(mod_time_from=None):
+    """
+    Fetch all active fixed-price listings for the authenticated seller via GetSellerList.
+    mod_time_from: ISO datetime string (e.g. "2026-07-01T00:00:00+00:00"). When provided,
+                   only listings modified since that time are returned.
+    Returns list of dicts: {item_id, title, quantity, price, image_urls, condition,
+                            start_time, description}.
+    """
+    token = helper_get_valid_token()
+    ns = '{urn:ebay:apis:eBLBaseComponents}'
+    headers = {
+        "X-EBAY-API-SITEID": "0",
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+        "X-EBAY-API-CALL-NAME": "GetSellerList",
+        "X-EBAY-API-DEV-NAME": CLIENT_ID,
+        "X-EBAY-API-APP-NAME": API_KEY,
+        "X-EBAY-API-CERT-NAME": CLIENT_SECRET,
+        "Content-Type": "text/xml",
+    }
+    items = []
+    page = 1
+    while True:
+        mod_xml = f'<ModTimeFrom>{mod_time_from}</ModTimeFrom>' if mod_time_from else ''
+        xml_body = f"""<?xml version="1.0" encoding="utf-8"?>
+<GetSellerListRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>
+  <GranularityLevel>Fine</GranularityLevel>
+  {mod_xml}
+  <Pagination>
+    <EntriesPerPage>200</EntriesPerPage>
+    <PageNumber>{page}</PageNumber>
+  </Pagination>
+</GetSellerListRequest>"""
+        r = requests.post(
+            "https://api.ebay.com/ws/api.dll",
+            data=xml_body.encode("utf-8"),
+            headers=headers,
+            timeout=30,
+        )
+        root = ET.fromstring(r.text)
+        ack = root.findtext(f"{ns}Ack", "")
+        if ack not in ("Success", "Warning"):
+            errors = root.findall(f"{ns}Errors")
+            msg = "; ".join(
+                e.findtext(f"{ns}ShortMessage", "") for e in errors
+            )
+            raise RuntimeError(f"GetSellerList failed (Ack={ack}): {msg}")
+        item_array = root.find(f"{ns}ItemArray")
+        if item_array is None:
+            break
+        for item_el in item_array.findall(f"{ns}Item"):
+            pictures = [
+                p.text
+                for p in item_el.findall(f"{ns}PictureDetails/{ns}PictureURL")
+                if p.text
+            ]
+            price_el = item_el.find(f"{ns}BuyItNowPrice")
+            if price_el is None:
+                price_el = item_el.find(f"{ns}SellingStatus/{ns}CurrentPrice")
+            items.append({
+                "item_id": item_el.findtext(f"{ns}ItemID", ""),
+                "title": item_el.findtext(f"{ns}Title", ""),
+                "quantity": int(item_el.findtext(f"{ns}Quantity", "0") or 0),
+                "price": price_el.text if price_el is not None else "0.00",
+                "image_urls": pictures,
+                "condition": item_el.findtext(f"{ns}ConditionDisplayName", ""),
+                "start_time": item_el.findtext(f"{ns}ListingDetails/{ns}StartTime", ""),
+                "description": item_el.findtext(f"{ns}Description", ""),
+            })
+        has_more = root.findtext(f"{ns}HasMoreItems", "false").lower()
+        if has_more != "true":
+            break
+        page += 1
+    return items
 
 
 def create_ebay_listing(sku, inventory_item_data, locale="en_US", use_user_token=True):
