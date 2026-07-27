@@ -1647,6 +1647,61 @@ def get_seller_list(mod_time_from=None):
     return items
 
 
+def revise_inventory_status_batch(items):
+    """
+    Update quantity for eBay listings using ReviseInventoryStatus (Trading API).
+    Use this for MANUAL_ listings that don't exist in the Sell Inventory API.
+    items: list of {'item_id': str, 'quantity': int} — eBay item IDs (not SKUs).
+    eBay allows a maximum of 4 InventoryStatus elements per request.
+    Returns list of {'item_id': str, 'ok': bool}.
+    """
+    load_dotenv(override=True)
+    token = os.getenv('user_token', '').strip()
+    if not token:
+        raise RuntimeError("ReviseInventoryStatus: no user_token available")
+    ns = "{urn:ebay:apis:eBLBaseComponents}"
+    headers = {
+        "X-EBAY-API-SITEID": "0",
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+        "X-EBAY-API-CALL-NAME": "ReviseInventoryStatus",
+        "X-EBAY-API-DEV-NAME": CLIENT_ID,
+        "X-EBAY-API-APP-NAME": API_KEY,
+        "X-EBAY-API-CERT-NAME": CLIENT_SECRET,
+        "Content-Type": "text/xml",
+    }
+    results = []
+    for i in range(0, len(items), 4):
+        batch = items[i : i + 4]
+        status_xml = "".join(
+            f"<InventoryStatus>"
+            f"<ItemID>{it['item_id']}</ItemID>"
+            f"<Quantity>{it['quantity']}</Quantity>"
+            f"</InventoryStatus>"
+            for it in batch
+        )
+        xml_body = f"""<?xml version="1.0" encoding="utf-8"?>
+<ReviseInventoryStatusRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>
+  {status_xml}
+</ReviseInventoryStatusRequest>"""
+        r = requests.post(
+            "https://api.ebay.com/ws/api.dll",
+            data=xml_body.encode("utf-8"),
+            headers=headers,
+            timeout=30,
+        )
+        if r.status_code != 200:
+            for it in batch:
+                results.append({"item_id": it["item_id"], "ok": False})
+            continue
+        root = ET.fromstring(r.text)
+        ack = root.findtext(f"{ns}Ack", "")
+        ok = ack in ("Success", "Warning")
+        for it in batch:
+            results.append({"item_id": it["item_id"], "ok": ok})
+    return results
+
+
 def create_ebay_listing(sku, inventory_item_data, locale="en_US", use_user_token=True):
     """
     Create or replace an inventory item using the eBay Inventory API.
