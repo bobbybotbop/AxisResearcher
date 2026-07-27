@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 import requests
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import sys
 import xml.etree.ElementTree as ET
 from xml.sax.saxutils import escape
@@ -1591,12 +1591,19 @@ def get_seller_list(mod_time_from=None):
     }
     items = []
     page = 1
+    # eBay requires a time-range filter. EndTimeFrom=now + EndTimeTo=now+120days captures all
+    # currently active GTC listings. ModTimeFrom additionally narrows to recently-modified items
+    # on incremental runs.
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    future_str = (datetime.now(timezone.utc) + timedelta(days=120)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     mod_xml = f'<ModTimeFrom>{mod_time_from}</ModTimeFrom>' if mod_time_from else ''
     while True:
         xml_body = f"""<?xml version="1.0" encoding="utf-8"?>
 <GetSellerListRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>
   <GranularityLevel>Fine</GranularityLevel>
+  <EndTimeFrom>{now_str}</EndTimeFrom>
+  <EndTimeTo>{future_str}</EndTimeTo>
   {mod_xml}
   <Pagination>
     <EntriesPerPage>200</EntriesPerPage>
@@ -1628,9 +1635,10 @@ def get_seller_list(mod_time_from=None):
                 for p in item_el.findall(f"{ns}PictureDetails/{ns}PictureURL")
                 if p.text
             ]
-            price_el = item_el.find(f"{ns}BuyItNowPrice")
+            # BuyItNowPrice is 0.0 on fixed-price listings; use CurrentPrice as the real price.
+            price_el = item_el.find(f"{ns}SellingStatus/{ns}CurrentPrice")
             if price_el is None:
-                price_el = item_el.find(f"{ns}SellingStatus/{ns}CurrentPrice")
+                price_el = item_el.find(f"{ns}BuyItNowPrice")
             items.append({
                 "item_id": item_el.findtext(f"{ns}ItemID", ""),
                 "title": item_el.findtext(f"{ns}Title", ""),
