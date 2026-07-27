@@ -1109,8 +1109,9 @@ def write_manual_listing_json(item):
     Returns True if the file was written, False if unchanged and skipped.
     """
     sku = f"MANUAL_{item['item_id']}"
-    path = os.path.join("Generated_Listings", f"{sku}.json")
-    os.makedirs("Generated_Listings", exist_ok=True)
+    output_dir = _get_generated_listings_dir()
+    os.makedirs(output_dir, exist_ok=True)
+    path = os.path.join(output_dir, f"{sku}.json")
     if os.path.exists(path):
         try:
             with open(path, "r", encoding="utf-8") as f:
