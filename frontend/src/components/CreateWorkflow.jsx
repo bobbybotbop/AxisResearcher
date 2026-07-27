@@ -29,7 +29,6 @@ function CreateWorkflow({
   skippedPhotos,
   generatedImages,
   loading,
-  error = null,
   isConfirming,
   isCreatingListing,
   listingData,
@@ -185,19 +184,9 @@ function CreateWorkflow({
             showChatContextSelector={listingLinkSubmitted}
             chatContext={chatContext}
             onChatContextChange={setChatContext}
-            hasError={!listingLinkSubmitted && Boolean(error)}
           />
         </form>
-        {!listingLinkSubmitted && error && (
-          <p className="mt-3 text-center text-sm text-red-500">{error}</p>
-        )}
       </motion.div>
-
-      {listingLinkSubmitted && error && (
-        <div className="mb-8 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
-          <p>{error}</p>
-        </div>
-      )}
 
       {loading && (
         <div className="flex flex-col items-center justify-center gap-4 py-12">

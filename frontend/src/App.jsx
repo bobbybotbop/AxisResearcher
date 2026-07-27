@@ -223,7 +223,6 @@ function App() {
   const [listing, setListing] = useState(null);
   const [loading, setLoading] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
-  const [error, setError] = useState(null);
   const [generatedImages, setGeneratedImages] = useState([]);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isCreatingListing, setIsCreatingListing] = useState(false);
@@ -920,12 +919,11 @@ function App() {
 
   const fetchListingPhotos = async () => {
     if (!listingId.trim()) {
-      setError("Please enter an eBay listing ID or URL");
+      addToast("error", "Please enter an eBay listing ID or URL");
       return;
     }
 
     setLoading(true);
-    setError(null);
     setPhotos([]);
     setCategories({});
     setListing(null);
@@ -1032,7 +1030,7 @@ function App() {
         totalSteps: steps,
       });
     } catch (err) {
-      setError(err.message || "An error occurred while fetching the listing");
+      addToast("error", err.message || "An error occurred while fetching the listing");
       setListingLinkSubmitted(false);
       setPhotos([]);
       setCategories({});
@@ -1168,13 +1166,13 @@ function App() {
       });
       const data = await res.json();
       if (!res.ok || data.error) {
-        setError(data.error || "Failed to regenerate title");
+        addToast("error", data.error || "Failed to regenerate title");
         return;
       }
       setEditableTitle(data.title);
       if (data.listing_data) setListingData(data.listing_data);
     } catch (err) {
-      setError(err.message || "Failed to regenerate title");
+      addToast("error", err.message || "Failed to regenerate title");
     } finally {
       setIsRegeneratingTitle(false);
     }
@@ -1195,13 +1193,13 @@ function App() {
       });
       const data = await res.json();
       if (!res.ok || data.error) {
-        setError(data.error || "Failed to regenerate description");
+        addToast("error", data.error || "Failed to regenerate description");
         return;
       }
       setEditableDescription(data.description);
       if (data.listing_data) setListingData(data.listing_data);
     } catch (err) {
-      setError(err.message || "Failed to regenerate description");
+      addToast("error", err.message || "Failed to regenerate description");
     } finally {
       setIsRegeneratingDescription(false);
     }
@@ -1241,12 +1239,12 @@ function App() {
       });
       const data = await res.json();
       if (!res.ok || data.error) {
-        setError(data.error || "Failed to regenerate metadata");
+        addToast("error", data.error || "Failed to regenerate metadata");
         return;
       }
       if (data.listing_data) setListingData(data.listing_data);
     } catch (err) {
-      setError(err.message || "Failed to regenerate metadata");
+      addToast("error", err.message || "Failed to regenerate metadata");
     } finally {
       setIsRegeneratingMetadata(false);
     }
@@ -1307,7 +1305,6 @@ function App() {
     console.log("Skipped photos:", skippedPhotos);
 
     setIsConfirming(true);
-    setError(null);
 
     try {
       const hasBgRemoved =
@@ -1463,7 +1460,7 @@ function App() {
                 statusData.errors && statusData.errors.length > 0
                   ? `Image generation completed with errors: ${statusData.errors.join("; ")}`
                   : "Image generation failed";
-              setError(errorMsg);
+              addToast("error", errorMsg);
 
               setImageGenProgress({
                 isActive: false,
@@ -1485,7 +1482,7 @@ function App() {
         } catch (pollErr) {
           console.error("Error polling status:", pollErr);
           clearInterval(pollInterval);
-          setError("Error checking generation status");
+          addToast("error", "Error checking generation status");
           setIsConfirming(false);
           setImageGenProgress({
             isActive: false,
@@ -1501,7 +1498,7 @@ function App() {
       // Note: In a real app, you'd use useEffect cleanup, but for now we rely on completion/error handling
     } catch (err) {
       console.error("Error generating images:", err);
-      setError(err.message || "An error occurred while generating images");
+      addToast("error", err.message || "An error occurred while generating images");
       setIsConfirming(false);
       setImageGenProgress({
         isActive: false,
@@ -1607,7 +1604,7 @@ function App() {
   const handleRegenerateImages = async (promptOverride) => {
     const promptToUse = (promptOverride ?? customPrompt)?.trim();
     if (!promptToUse) {
-      setError("Please enter a prompt to guide the regeneration");
+      addToast("error", "Please enter a prompt to guide the regeneration");
       return;
     }
     const indices =
@@ -1617,7 +1614,6 @@ function App() {
     if (indices.length === 0) return;
 
     setIsRegenerating(true);
-    setError(null);
 
     try {
       const imagesToRegen = selectedImagesForRegen.map(
@@ -1679,7 +1675,7 @@ function App() {
       }
     } catch (err) {
       console.error("Error regenerating images:", err);
-      setError(err.message || "An error occurred while regenerating images");
+      addToast("error", err.message || "An error occurred while regenerating images");
     } finally {
       setIsRegenerating(false);
     }
@@ -1693,7 +1689,6 @@ function App() {
     if (indices.length === 0) return;
 
     setIsTrimming(true);
-    setError(null);
 
     try {
       const newImages = [...generatedImages];
@@ -1736,7 +1731,7 @@ function App() {
       }
     } catch (err) {
       console.error("Error trimming images:", err);
-      setError(err.message || "An error occurred while trimming images");
+      addToast("error", err.message || "An error occurred while trimming images");
     } finally {
       setIsTrimming(false);
     }
@@ -1744,11 +1739,11 @@ function App() {
 
   const handleAddNewVersions = async () => {
     if (!customPrompt?.trim()) {
-      setError("Please enter a prompt to guide the new version");
+      addToast("error", "Please enter a prompt to guide the new version");
       return;
     }
     if (!currentSku) {
-      setError("SKU is required. Please fetch photos first.");
+      addToast("error", "SKU is required. Please fetch photos first.");
       return;
     }
 
@@ -1760,12 +1755,11 @@ function App() {
       .map((i) => generatedImages[i])
       .filter(Boolean);
     if (imagesToRegen.length === 0) {
-      setError("No valid images to regenerate");
+      addToast("error", "No valid images to regenerate");
       return;
     }
 
     setIsAddingNewVersions(true);
-    setError(null);
 
     try {
       const response = await fetch("/api/regenerate-images", {
@@ -1809,7 +1803,7 @@ function App() {
       await handleUploadToEbay(currentSku, syncData.listing_data);
     } catch (err) {
       console.error("Error in add new version:", err);
-      setError(err.message || "An error occurred while adding new version");
+      addToast("error", err.message || "An error occurred while adding new version");
     } finally {
       setIsAddingNewVersions(false);
     }
@@ -1817,16 +1811,15 @@ function App() {
 
   const handleCreateListing = async () => {
     if (!listing) {
-      setError("Original listing data is required");
+      addToast("error", "Original listing data is required");
       return;
     }
     if (!currentSku) {
-      setError("SKU is required. Please fetch photos first.");
+      addToast("error", "SKU is required. Please fetch photos first.");
       return;
     }
 
     setIsCreatingListing(true);
-    setError(null);
 
     // Initialize progress tracking
     const steps = [
@@ -1909,7 +1902,7 @@ function App() {
       }
     } catch (err) {
       console.error("Error creating listing:", err);
-      setError(err.message || "An error occurred while creating listing");
+      addToast("error", err.message || "An error occurred while creating listing");
       setCreateListingProgress({
         isActive: false,
         currentStep: null,
@@ -1924,7 +1917,6 @@ function App() {
   const handleTrimTitle = async () => {
     if (!editableTitle || !currentSku) return;
     setIsTrimmingTitle(true);
-    setError(null);
     try {
       const response = await fetch("/api/trim-title", {
         method: "POST",
@@ -1951,7 +1943,7 @@ function App() {
       }
     } catch (err) {
       console.error("Error trimming title:", err);
-      setError(err.message || "Failed to trim title");
+      addToast("error", err.message || "Failed to trim title");
     } finally {
       setIsTrimmingTitle(false);
     }
@@ -1959,8 +1951,6 @@ function App() {
 
   const handleSaveTitle = async () => {
     if (!editableTitle || !currentSku) return;
-    setIsSavingTitle(true);
-    setError(null);
     try {
       const response = await fetch("/api/update-title", {
         method: "POST",
@@ -1977,17 +1967,13 @@ function App() {
       }
     } catch (err) {
       console.error("Error saving title:", err);
-      setError(err.message || "Failed to save title");
-    } finally {
-      setIsSavingTitle(false);
+      addToast("error", err.message || "Failed to save title");
     }
   };
 
   const handleSaveDescription = async () => {
     const sku = currentSku || listingData?.sku;
     if (!sku || !listingData) return;
-    setIsSavingDescription(true);
-    setError(null);
     try {
       const response = await fetch("/api/update-description", {
         method: "POST",
@@ -2006,15 +1992,12 @@ function App() {
       }
     } catch (err) {
       console.error("Error saving description:", err);
-      setError(err.message || "Failed to save description");
-    } finally {
-      setIsSavingDescription(false);
+      addToast("error", err.message || "Failed to save description");
     }
   };
 
   const fetchAllListings = async () => {
     setLoadingListings(true);
-    setError(null);
 
     try {
       const response = await fetch("/api/listings");
@@ -2037,7 +2020,7 @@ function App() {
       }
     } catch (err) {
       console.error("Error fetching listings:", err);
-      setError(err.message || "An error occurred while fetching listings");
+      addToast("error", err.message || "An error occurred while fetching listings");
     } finally {
       setLoadingListings(false);
     }
@@ -2097,11 +2080,11 @@ function App() {
         });
       }
       if (data.failed?.length) {
-        setError(`Failed to restock ${data.failed.length} listing(s)`);
+        addToast("error", `Failed to restock ${data.failed.length} listing(s)`);
       }
     } catch (err) {
       console.error("Error restocking listings:", err);
-      setError(err.message || "Failed to restock listings");
+      addToast("error", err.message || "Failed to restock listings");
     } finally {
       setIsRestocking(false);
     }
@@ -2187,12 +2170,11 @@ function App() {
 
   const handleUploadToEbay = async (sku, listingData = null) => {
     if (!sku) {
-      setError("No SKU provided");
+      addToast("error", "No SKU provided");
       return;
     }
 
     setUploadingSkus((prev) => new Set(prev).add(sku));
-    setError(null);
 
     // Initialize progress tracking - steps match what the backend actually reports
     const steps = ["Preparing listing data", "Uploading to eBay"];
@@ -2272,7 +2254,7 @@ function App() {
       console.log("Upload successful:", data.upload_result);
     } catch (err) {
       console.error("Error uploading listing:", err);
-      setError(err.message || "An error occurred while uploading listing");
+      addToast("error", err.message || "An error occurred while uploading listing");
       setUploadProgress({
         isActive: false,
         currentStep: null,
@@ -2437,7 +2419,6 @@ function App() {
 
   const handleTestingFunction = async () => {
     setIsTesting(true);
-    setError(null);
     setTestingResult(null);
 
     try {
@@ -2468,9 +2449,7 @@ function App() {
       console.log("Testing function completed:", data.result);
     } catch (err) {
       console.error("Error running testing function:", err);
-      setError(
-        err.message || "An error occurred while running testing function",
-      );
+      addToast("error", err.message || "An error occurred while running testing function");
     } finally {
       setIsTesting(false);
     }
@@ -2479,7 +2458,6 @@ function App() {
   const handleListingClick = async (listing) => {
     setSelectedListing(listing);
     setLoadingListingDetail(true);
-    setError(null);
 
     try {
       const response = await fetch(`/api/listings/${listing.sku}`);
@@ -2496,9 +2474,7 @@ function App() {
       setListingDetailData(data.listing_data);
     } catch (err) {
       console.error("Error fetching listing details:", err);
-      setError(
-        err.message || "An error occurred while fetching listing details",
-      );
+      addToast("error", err.message || "An error occurred while fetching listing details");
     } finally {
       setLoadingListingDetail(false);
     }
@@ -3770,7 +3746,6 @@ function App() {
               selectedImagesForRegen={selectedImagesForRegen}
               customPrompt={customPrompt}
               loading={loading || isRegeneratingTitle || isRegeneratingDescription || isRegeneratingMetadata}
-              error={error}
               isConfirming={isConfirming}
               isRegenerating={isRegenerating}
               isTrimming={isTrimming}
@@ -3789,7 +3764,7 @@ function App() {
               isTrimmingTitle={isTrimmingTitle}
               isSavingTitle={isSavingTitle}
               isSavingDescription={isSavingDescription}
-              onListingIdChange={(v) => { setListingId(v); if (!listingLinkSubmitted) setError(null); }}
+              onListingIdChange={setListingId}
               onSubmit={handleSubmit}
               onChatSubmit={handleChatSubmit}
               onCategoryChange={handleCategoryChange}
