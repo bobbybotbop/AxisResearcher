@@ -2010,73 +2010,99 @@ def api_restock_listings():
     if not skus:
         return jsonify({'updated': [], 'failed': [], 'quantity': quantity}), 200
 
-    token = os.getenv('user_token', '').strip()
-    if not token:
-        return jsonify({'updated': [], 'failed': skus, 'quantity': quantity, 'error': 'No user token available'}), 200
-
-    headers = {
-        'Authorization': f'Bearer {token}',
-        'Content-Type': 'application/json',
-    }
-
-    # Fetch offer IDs for each SKU so we can update offer-level quantity too
-    sku_offer_ids = {}
-    for sku in skus:
-        try:
-            r = requests.get(
-                f'https://api.ebay.com/sell/inventory/v1/offer?sku={sku}',
-                headers=headers,
-                timeout=10,
-            )
-            if r.status_code == 200:
-                offers = r.json().get('offers', [])
-                if offers:
-                    sku_offer_ids[sku] = offers[0].get('offerId')
-        except Exception:
-            pass
+    # Split into MANUAL_ (Trading API) and automated (Sell Inventory API) groups
+    manual_skus = [s for s in skus if s.startswith('MANUAL_')]
+    automated_skus = [s for s in skus if not s.startswith('MANUAL_')]
 
     updated = []
     failed = []
-    batch_size = 25
-    for i in range(0, len(skus), batch_size):
-        batch = skus[i:i + batch_size]
-        requests_list = []
-        for sku in batch:
-            entry = {
-                'sku': sku,
-                'shipToLocationAvailability': {'quantity': quantity},
-            }
-            offer_id = sku_offer_ids.get(sku)
-            if offer_id:
-                entry['offers'] = [
-                    {'offerId': offer_id, 'availableQuantity': quantity}
-                ]
-            requests_list.append(entry)
 
-        payload = {'requests': requests_list}
+    # --- MANUAL_ SKUs: route through ReviseInventoryStatus (Trading API) ---
+    if manual_skus:
+        manual_api_items = [
+            {'item_id': sku[len('MANUAL_'):], 'quantity': quantity}
+            for sku in manual_skus
+        ]
         try:
-            r = requests.post(
-                'https://api.ebay.com/sell/inventory/v1/bulk_update_price_quantity',
-                headers=headers,
-                json=payload,
-                timeout=30,
-            )
-            if r.status_code not in (200, 207):
-                failed.extend(batch)
-                continue
-            data = r.json() or {}
-            responses = data.get('responses', [])
-            status_by_sku = {resp.get('sku'): resp.get('statusCode') for resp in responses}
-            for sku in batch:
-                if status_by_sku.get(sku) == 200:
+            manual_results = revise_inventory_status_batch(manual_api_items)
+            for result_item in manual_results:
+                sku = f"MANUAL_{result_item['item_id']}"
+                if result_item['ok']:
                     updated.append(sku)
+                    update_local_listing_quantity(sku=sku, quantity=quantity)
                 else:
                     failed.append(sku)
         except Exception:
-            failed.extend(batch)
+            failed.extend(manual_skus)
 
-    for sku in updated:
-        update_local_listing_quantity(sku=sku, quantity=quantity)
+    # --- Automated SKUs: route through Sell Inventory API ---
+    if automated_skus:
+        token = os.getenv('user_token', '').strip()
+        if not token:
+            failed.extend(automated_skus)
+        else:
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json',
+            }
+
+            # Fetch offer IDs for each SKU so we can update offer-level quantity too
+            sku_offer_ids = {}
+            for sku in automated_skus:
+                try:
+                    r = requests.get(
+                        f'https://api.ebay.com/sell/inventory/v1/offer?sku={sku}',
+                        headers=headers,
+                        timeout=10,
+                    )
+                    if r.status_code == 200:
+                        offers = r.json().get('offers', [])
+                        if offers:
+                            sku_offer_ids[sku] = offers[0].get('offerId')
+                except Exception:
+                    pass
+
+            batch_size = 25
+            for i in range(0, len(automated_skus), batch_size):
+                batch = automated_skus[i:i + batch_size]
+                requests_list = []
+                for sku in batch:
+                    entry = {
+                        'sku': sku,
+                        'shipToLocationAvailability': {'quantity': quantity},
+                    }
+                    offer_id = sku_offer_ids.get(sku)
+                    if offer_id:
+                        entry['offers'] = [
+                            {'offerId': offer_id, 'availableQuantity': quantity}
+                        ]
+                    requests_list.append(entry)
+
+                payload = {'requests': requests_list}
+                try:
+                    r = requests.post(
+                        'https://api.ebay.com/sell/inventory/v1/bulk_update_price_quantity',
+                        headers=headers,
+                        json=payload,
+                        timeout=30,
+                    )
+                    if r.status_code not in (200, 207):
+                        failed.extend(batch)
+                        continue
+                    data = r.json() or {}
+                    responses = data.get('responses', [])
+                    status_by_sku = {resp.get('sku'): resp.get('statusCode') for resp in responses}
+                    for sku in batch:
+                        if status_by_sku.get(sku) == 200:
+                            updated.append(sku)
+                        else:
+                            failed.append(sku)
+                except Exception:
+                    failed.extend(batch)
+
+            for sku in updated:
+                if not sku.startswith('MANUAL_'):
+                    update_local_listing_quantity(sku=sku, quantity=quantity)
 
     return jsonify({'updated': updated, 'failed': failed, 'quantity': quantity}), 200
 
