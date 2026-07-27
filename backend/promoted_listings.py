@@ -152,9 +152,6 @@ def _enroll_sku(user_token, campaign_id, ad_group_id, sku):
                 )
         print(f"[promote] Enrolled SKU {sku} in campaign {campaign_id}")
         return
-    if resp.status_code == 200:
-        print(f"[promote] Enrolled SKU {sku} in campaign {campaign_id}")
-        return
     raise PromotionError(
         f"bulkCreateAds failed {resp.status_code}: {resp.text[:300]}"
     )
