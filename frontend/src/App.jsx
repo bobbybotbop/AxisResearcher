@@ -2249,6 +2249,14 @@ function App() {
         setUploadResult(data.upload_result);
       }
 
+      addToast(
+        "success",
+        "Upload successful",
+        data.upload_result.listingId
+          ? `Listing ID: ${data.upload_result.listingId}`
+          : "Listing is now live on eBay",
+      );
+
       fetchAllListings();
 
       console.log("Upload successful:", data.upload_result);
