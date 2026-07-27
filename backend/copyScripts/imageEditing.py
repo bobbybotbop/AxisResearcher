@@ -12,6 +12,36 @@ from rembg import remove
 from PIL import Image
 
 
+def downscale_image_bytes(image_bytes: bytes, max_dimension: int = 1024) -> bytes:
+    """
+    Downscale image bytes so the longest side is at most max_dimension pixels.
+    Preserves aspect ratio. Returns the original bytes unchanged if already
+    within bounds or if the input cannot be decoded.
+    """
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+    except Exception:
+        return image_bytes
+
+    w, h = img.size
+    if max(w, h) <= max_dimension:
+        return image_bytes
+
+    fmt = img.format or ("PNG" if img.mode == "RGBA" else "JPEG")
+
+    scale = max_dimension / max(w, h)
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+
+    img = img.resize((new_w, new_h), Image.LANCZOS)
+
+    buf = io.BytesIO()
+    if fmt == "JPEG" and img.mode == "RGBA":
+        img = img.convert("RGB")
+    img.save(buf, format=fmt, quality=90)
+    return buf.getvalue()
+
+
 def remove_background(image_bytes: bytes) -> bytes:
     """
     Remove the background from an image.
