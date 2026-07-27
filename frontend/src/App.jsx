@@ -631,6 +631,7 @@ function App() {
     setIsRefreshingListings(true);
     try {
       await fetch('/api/import-listings', { method: 'POST' });
+      quantitiesFetchedRef.current = false;   // force quantity re-fetch
       await fetchAllListings();
     } catch (e) {
       // non-fatal
@@ -1495,8 +1496,23 @@ function App() {
   };
 
   const handleAddToListing = useCallback((ebayUrl) => {
-    setGeneratedImages((prev) => [...prev, ebayUrl]);
-  }, []);
+    setGeneratedImages((prev) => {
+      const updated = [...prev, ebayUrl];
+      if (currentSku && updated.length > 0) {
+        fetch("/api/update-listing-images", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sku: currentSku, image_urls: updated }),
+        })
+          .then((r) => r.json())
+          .then((syncData) => {
+            if (syncData.listing_data) setListingData(syncData.listing_data);
+          })
+          .catch((err) => console.error("Failed to sync images to disk:", err));
+      }
+      return updated;
+    });
+  }, [currentSku]);
 
   const handleRemoveFromListing = useCallback((index) => {
     setGeneratedImages((prev) => {
