@@ -503,6 +503,79 @@ def save_minimum_images_setting(minimum):
     return {"minimum_images_per_listing": int(minimum)}
 
 
+def get_promoted_listing_settings():
+    """
+    Read promoted listing settings from listingPreferences.json.
+
+    Returns:
+        dict: {"auto_promote_enabled": bool, "promoted_listing_ad_rate": float}
+    """
+    config = load_config()
+    return {
+        "auto_promote_enabled": bool(config.get("auto_promote_enabled", True)),
+        "promoted_listing_ad_rate": float(config.get("promoted_listing_ad_rate", 7.0)),
+    }
+
+
+def save_promoted_listing_settings(enabled=None, ad_rate=None):
+    """
+    Persist promoted listing settings to listingPreferences.json.
+
+    Args:
+        enabled (bool, optional): New enabled state. Unchanged if None.
+        ad_rate (float, optional): New ad rate percent (0.1-100). Unchanged if None.
+
+    Returns:
+        dict: {"auto_promote_enabled": bool, "promoted_listing_ad_rate": float}
+    """
+    config = load_config()
+    if enabled is not None:
+        config["auto_promote_enabled"] = bool(enabled)
+    if ad_rate is not None:
+        config["promoted_listing_ad_rate"] = float(ad_rate)
+    save_config(config)
+    return {
+        "auto_promote_enabled": bool(config.get("auto_promote_enabled", True)),
+        "promoted_listing_ad_rate": float(config.get("promoted_listing_ad_rate", 7.0)),
+    }
+
+
+def get_promoted_listing_campaign_ids():
+    """
+    Read promoted listing campaign/ad-group IDs from listingPreferences.json.
+
+    Returns:
+        dict: {"campaign_id": str, "ad_group_id": str}
+    """
+    config = load_config()
+    return {
+        "campaign_id": config.get("promoted_listing_campaign_id", ""),
+        "ad_group_id": config.get("promoted_listing_ad_group_id", ""),
+    }
+
+
+def save_promoted_listing_campaign_ids(campaign_id, ad_group_id):
+    """
+    Persist promoted listing campaign and ad-group IDs to listingPreferences.json.
+
+    Args:
+        campaign_id (str): eBay campaign ID.
+        ad_group_id (str): eBay ad group ID.
+    """
+    config = load_config()
+    config["promoted_listing_campaign_id"] = campaign_id
+    config["promoted_listing_ad_group_id"] = ad_group_id
+    save_config(config)
+
+
+def clear_promoted_listing_campaign_ids():
+    """Reset campaign and ad-group IDs in listingPreferences.json (used on stale campaign recovery)."""
+    config = load_config()
+    config["promoted_listing_campaign_id"] = ""
+    config["promoted_listing_ad_group_id"] = ""
+    save_config(config)
+
+
 def update_local_listing_quantity(sku=None, quantity=None):
     """
     Update the locally cached offer quantity for a listing after a successful
