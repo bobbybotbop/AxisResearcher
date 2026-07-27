@@ -1547,6 +1547,7 @@ def list_all_listings():
                         'fileSku': filename.replace('.json', ''),  # SKU derived from filename
                         'ebayListingId': str(listing_data.get('ebayListingId') or '').strip(),
                         'models': listing_data.get('models') or None,
+                        'isManualListing': bool(listing_data.get('isManualListing', False)),
                     })
                 except Exception as e:
                     print(f"[API] Error reading {filename}: {e}")
@@ -1883,6 +1884,16 @@ def api_listings_quantities():
 
     result = {}
     for sku in skus:
+        if sku.startswith('MANUAL_'):
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            fpath = os.path.join(base_dir, 'Generated_Listings', f'{sku}.json')
+            try:
+                with open(fpath, 'r', encoding='utf-8') as f:
+                    d = json.load(f)
+                result[sku] = int(d.get('offer', {}).get('quantity', 0))
+            except Exception:
+                result[sku] = None
+            continue
         try:
             # Try offer endpoint first (reflects live listing quantity)
             url = f'https://api.ebay.com/sell/inventory/v1/offer?sku={sku}'
