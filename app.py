@@ -59,6 +59,7 @@ from backend.copyScripts.create_text import create_text, create_text_stream
 from backend.ebay_cli import call_text_llm, get_seller_list, revise_inventory_status_batch
 from backend.copyScripts.imageEditing import remove_background, compile_images, downscale_image_bytes
 from backend.copyScripts.upload_to_ebay import upload_complete_listing
+from backend.promoted_listings import promote_listing, PromotionError
 import requests
 from dotenv import load_dotenv
 
@@ -1779,6 +1780,30 @@ def upload_listing():
                 print("[API] Warning: publish succeeded but listingId missing; ebayListingId not saved to JSON")
 
             yield progress_event('Uploading to eBay', 'completed')
+
+            # Promoted listing enrollment (non-fatal)
+            promote_settings = get_promoted_listing_settings()
+            if promote_settings.get("auto_promote_enabled"):
+                yield progress_event('Enrolling in Promoted Listings', 'in_progress')
+                try:
+                    ids = get_promoted_listing_campaign_ids()
+                    user_token = os.getenv("user_token", "")
+                    new_campaign_id, new_ad_group_id = promote_listing(
+                        sku=actual_sku,
+                        user_token=user_token,
+                        campaign_id=ids["campaign_id"],
+                        ad_group_id=ids["ad_group_id"],
+                        ad_rate=promote_settings["promoted_listing_ad_rate"],
+                    )
+                    if new_campaign_id != ids["campaign_id"] or new_ad_group_id != ids["ad_group_id"]:
+                        save_promoted_listing_campaign_ids(new_campaign_id, new_ad_group_id)
+                    yield progress_event('Enrolling in Promoted Listings', 'completed')
+                except PromotionError as pe:
+                    print(f"[API] Promoted listing enrollment failed: {pe}")
+                    yield progress_event(f'Promoted listing enrollment failed: {pe}', 'warning')
+                except Exception as pe:
+                    print(f"[API] Unexpected error during promotion: {pe}")
+                    yield progress_event(f'Promoted listing enrollment failed (unexpected): {pe}', 'warning')
 
             yield result_event({
                 "upload_result": upload_result,
