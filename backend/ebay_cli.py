@@ -1391,7 +1391,6 @@ def add_item(item_data):
     Returns:
         dict: Response containing item ID and fees if successful, or error information
     """
-    import xml.etree.ElementTree as ET
     from datetime import datetime, timedelta
     
     # Get a valid token for Trading API
@@ -1575,7 +1574,10 @@ def get_seller_list(mod_time_from=None):
     Returns list of dicts: {item_id, title, quantity, price, image_urls, condition,
                             start_time, description}.
     """
-    token = helper_get_valid_token()
+    load_dotenv(override=True)
+    token = os.getenv('user_token', '').strip()
+    if not token:
+        raise RuntimeError("GetSellerList: no user_token available - run 'python -m backend.ebay_cli refresh'")
     ns = '{urn:ebay:apis:eBLBaseComponents}'
     headers = {
         "X-EBAY-API-SITEID": "0",
@@ -1588,8 +1590,8 @@ def get_seller_list(mod_time_from=None):
     }
     items = []
     page = 1
+    mod_xml = f'<ModTimeFrom>{mod_time_from}</ModTimeFrom>' if mod_time_from else ''
     while True:
-        mod_xml = f'<ModTimeFrom>{mod_time_from}</ModTimeFrom>' if mod_time_from else ''
         xml_body = f"""<?xml version="1.0" encoding="utf-8"?>
 <GetSellerListRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>
@@ -1606,6 +1608,8 @@ def get_seller_list(mod_time_from=None):
             headers=headers,
             timeout=30,
         )
+        if r.status_code != 200:
+            raise RuntimeError(f"GetSellerList HTTP {r.status_code}: {r.text[:200]}")
         root = ET.fromstring(r.text)
         ack = root.findtext(f"{ns}Ack", "")
         if ack not in ("Success", "Warning"):
