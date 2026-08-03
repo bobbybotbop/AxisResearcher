@@ -544,6 +544,7 @@ def generate_image_from_urls(
     prompt_modifier=None,
     extra_instructions=None,
     model="sourceful/riverflow-v2-fast",
+    prompt_filename=None,
 ):
     """
     Generate an image using OpenRouter's Gemini 2.5 Flash Image API from input image URLs.
@@ -569,11 +570,11 @@ def generate_image_from_urls(
         else:
             script_dir = Path(__file__).parent.parent.parent
             if "control-structure" in model:
-                prompt_file_path = script_dir / "prompts" / "generateImageStabilityControl.txt"
+                prompt_file_path = script_dir / "prompts" / "image" / "generateImageStabilityControl.txt"
             elif "search-recolor" in model:
-                prompt_file_path = script_dir / "prompts" / "generateImageStabilityRecolor.txt"
+                prompt_file_path = script_dir / "prompts" / "image" / "generateImageStabilityRecolor.txt"
             else:
-                prompt_file_path = script_dir / "prompts" / "generateImageStabilityControl.txt"
+                prompt_file_path = script_dir / "prompts" / "image" / "generateImageStabilityControl.txt"
             try:
                 with open(prompt_file_path, 'r', encoding='utf-8') as f:
                     prompt_text = f.read().strip()
@@ -614,14 +615,14 @@ def generate_image_from_urls(
         # Resolve path relative to project root (same directory as this script's parent)
         script_dir = Path(__file__).parent.parent.parent
 
-        if image_type == ImageType.PROFESSIONAL:
-            prompt_file_path = script_dir / "prompts" / "generateImageFromProfessional"
-        elif image_type == ImageType.REAL_WORLD:
-            prompt_file_path = script_dir / "prompts" / "generateImageFromWorld.txt"
-        elif image_type == ImageType.ANGLE_VARIANT:
-            prompt_file_path = script_dir / "prompts" / "generateImageAngleVariant.txt"
-        else:  # ImageType.EXPERIMENTAL
-            prompt_file_path = script_dir / "prompts" / "experimental.txt"
+        _DEFAULT_IMAGE_PROMPTS = {
+            ImageType.PROFESSIONAL: "generateImageFromProfessional.txt",
+            ImageType.REAL_WORLD: "generateImageFromWorld.txt",
+            ImageType.ANGLE_VARIANT: "generateImageAngleVariant.txt",
+            ImageType.EXPERIMENTAL: "experimental.txt",
+        }
+        filename = prompt_filename or _DEFAULT_IMAGE_PROMPTS.get(image_type, "generateImageFromWorld.txt")
+        prompt_file_path = script_dir / "prompts" / "image" / filename
         
         try:
             with open(prompt_file_path, 'r', encoding='utf-8') as f:
