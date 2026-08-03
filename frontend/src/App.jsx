@@ -2517,6 +2517,43 @@ function App() {
     if (activeTab === "settings") fetchPromptOptions();
   }, [activeTab, fetchPromptOptions]);
 
+  const openPromptModal = useCallback((type, slot = null) => {
+    setPromptModalType(type);
+    setPromptModalSlot(slot);
+    setPromptModalName("");
+    setPromptModalContent("");
+    setPromptModalError("");
+    setPromptModalSaving(false);
+    setPromptModalOpen(true);
+  }, []);
+
+  const handleSavePrompt = useCallback(async () => {
+    const name = promptModalName.trim();
+    const content = promptModalContent.trim();
+    if (!name) { setPromptModalError("Name is required."); return; }
+    if (!content) { setPromptModalError("Content is required."); return; }
+    setPromptModalSaving(true);
+    setPromptModalError("");
+    try {
+      const res = await fetch(`/api/prompts/${promptModalType}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, content }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setPromptModalError(data.error || "Failed to save."); setPromptModalSaving(false); return; }
+      await fetchPromptOptions();
+      const filename = data.name;
+      if (promptModalType === "title") setTitlePrompt(filename);
+      else if (promptModalType === "description") setDescriptionPrompt(filename);
+      else if (promptModalSlot === "real_world") setImagePromptRealWorld(filename);
+      else if (promptModalSlot === "professional") setImagePromptProfessional(filename);
+      else if (promptModalSlot === "angle_variant") setImagePromptAngleVariant(filename);
+      else if (promptModalSlot === "experimental") setImagePromptExperimental(filename);
+      setPromptModalOpen(false);
+    } catch { setPromptModalError("Network error."); setPromptModalSaving(false); }
+  }, [promptModalType, promptModalSlot, promptModalName, promptModalContent, fetchPromptOptions]);
+
   // If the persisted text model isn't in the available list (e.g. user
   // removed the Bedrock key), fall back to the first available option.
   useEffect(() => {
@@ -3773,6 +3810,89 @@ function App() {
                   imageModelOptions={IMAGE_MODEL_OPTIONS}
                 />
               </div>
+              <div className="mb-5 rounded-xl border border-border-default bg-surface-muted p-5">
+                <div className="mb-4">
+                  <h3 className="m-0 text-lg font-semibold text-text-primary">
+                    Prompt Selection
+                  </h3>
+                  <p className="mt-1 text-sm text-text-muted">
+                    Choose which prompt file is used for each generation type. Use + Add Prompt to create new ones.
+                  </p>
+                </div>
+
+                <div className="mb-4">
+                  <p className="mb-2 text-sm font-semibold text-text-primary">Title</p>
+                  <div className="flex items-center gap-2">
+                    <select
+                      className="flex-1 rounded-lg border border-border-default bg-surface-panel px-3 py-2 text-sm font-medium text-text-primary focus:border-primary focus:outline-none"
+                      value={titlePrompt}
+                      onChange={(e) => setTitlePrompt(e.target.value)}
+                    >
+                      {titlePromptOptions.map((f) => (
+                        <option key={f} value={f}>{f}</option>
+                      ))}
+                    </select>
+                    <button
+                      className="shrink-0 rounded-lg border border-border-default bg-surface-panel px-3 py-2 text-sm font-medium text-text-primary hover:bg-surface-muted"
+                      onClick={() => openPromptModal("title")}
+                    >
+                      + Add Prompt
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mb-4">
+                  <p className="mb-2 text-sm font-semibold text-text-primary">Description</p>
+                  <div className="flex items-center gap-2">
+                    <select
+                      className="flex-1 rounded-lg border border-border-default bg-surface-panel px-3 py-2 text-sm font-medium text-text-primary focus:border-primary focus:outline-none"
+                      value={descriptionPrompt}
+                      onChange={(e) => setDescriptionPrompt(e.target.value)}
+                    >
+                      {descriptionPromptOptions.map((f) => (
+                        <option key={f} value={f}>{f}</option>
+                      ))}
+                    </select>
+                    <button
+                      className="shrink-0 rounded-lg border border-border-default bg-surface-panel px-3 py-2 text-sm font-medium text-text-primary hover:bg-surface-muted"
+                      onClick={() => openPromptModal("description")}
+                    >
+                      + Add Prompt
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <p className="mb-2 text-sm font-semibold text-text-primary">Image</p>
+                  <div className="grid gap-3">
+                    {[
+                      { label: "Real World", slot: "real_world", value: imagePromptRealWorld, setter: setImagePromptRealWorld },
+                      { label: "Professional", slot: "professional", value: imagePromptProfessional, setter: setImagePromptProfessional },
+                      { label: "Angle Variant", slot: "angle_variant", value: imagePromptAngleVariant, setter: setImagePromptAngleVariant },
+                      { label: "Experimental", slot: "experimental", value: imagePromptExperimental, setter: setImagePromptExperimental },
+                    ].map(({ label, slot, value, setter }) => (
+                      <div key={slot} className="flex items-center gap-2">
+                        <span className="w-28 shrink-0 text-sm text-text-muted">{label}</span>
+                        <select
+                          className="flex-1 rounded-lg border border-border-default bg-surface-panel px-3 py-2 text-sm font-medium text-text-primary focus:border-primary focus:outline-none"
+                          value={value}
+                          onChange={(e) => setter(e.target.value)}
+                        >
+                          {imagePromptOptions.map((f) => (
+                            <option key={f} value={f}>{f}</option>
+                          ))}
+                        </select>
+                        <button
+                          className="shrink-0 rounded-lg border border-border-default bg-surface-panel px-3 py-2 text-sm font-medium text-text-primary hover:bg-surface-muted"
+                          onClick={() => openPromptModal("image", slot)}
+                        >
+                          + Add Prompt
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
               <ApiKeyManagementSection
                 active={activeTab === "settings"}
                 onKeysSaved={fetchTextModels}
@@ -3971,6 +4091,55 @@ function App() {
               bgRemovalProgress={bgRemovalProgress}
               onError={(msg) => addToast("error", msg)}
             />
+          )}
+          {promptModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+              <div className="w-full max-w-lg rounded-xl border border-border-default bg-surface-panel p-6 shadow-xl">
+                <h3 className="mb-4 text-lg font-semibold text-text-primary">
+                  Add {promptModalType.charAt(0).toUpperCase() + promptModalType.slice(1)} Prompt
+                </h3>
+                <div className="mb-3">
+                  <label className="mb-1 block text-sm font-semibold text-text-primary">Name</label>
+                  <div className="flex items-center gap-1">
+                    <input
+                      className="flex-1 rounded-lg border border-border-default bg-surface-app px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none"
+                      placeholder="myPrompt"
+                      value={promptModalName}
+                      onChange={(e) => setPromptModalName(e.target.value)}
+                    />
+                    <span className="text-sm text-text-muted">.txt</span>
+                  </div>
+                  {promptModalError && (
+                    <p className="mt-1 text-xs text-red-500">{promptModalError}</p>
+                  )}
+                </div>
+                <div className="mb-4">
+                  <label className="mb-1 block text-sm font-semibold text-text-primary">Content</label>
+                  <textarea
+                    className="h-48 w-full rounded-lg border border-border-default bg-surface-app px-3 py-2 text-sm text-text-primary focus:border-primary focus:outline-none"
+                    placeholder="Enter your prompt..."
+                    value={promptModalContent}
+                    onChange={(e) => setPromptModalContent(e.target.value)}
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    className="rounded-lg border border-border-default bg-surface-panel px-4 py-2 text-sm font-medium text-text-primary hover:bg-surface-muted"
+                    onClick={() => setPromptModalOpen(false)}
+                    disabled={promptModalSaving}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50"
+                    onClick={handleSavePrompt}
+                    disabled={promptModalSaving}
+                  >
+                    {promptModalSaving ? "Saving..." : "Save"}
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </main>
