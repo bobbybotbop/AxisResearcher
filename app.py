@@ -176,6 +176,8 @@ def generate_text():
         title = data.get("title", "")
         description = data.get("description", "")
         text_model = data.get("text_model") or DEFAULT_TEXT_MODEL
+        title_prompt = data.get("title_prompt") or None
+        description_prompt = data.get("description_prompt") or None
 
         if not title:
             yield error_event("title is required")
@@ -183,7 +185,11 @@ def generate_text():
 
         try:
             final_result = None
-            for event in create_text_stream(title, description, model=text_model):
+            for event in create_text_stream(
+                title, description, model=text_model,
+                title_prompt=title_prompt,
+                description_prompt=description_prompt,
+            ):
                 if event.get("type") == "result":
                     final_result = event.get("data", {})
                 yield json.dumps(event) + "\n"
@@ -451,6 +457,9 @@ def generate_images():
         categories = data.get("categories", {})
         prompt_modifier = data.get("prompt_modifier", "")
         image_model = data.get("image_model") or DEFAULT_IMAGE_MODEL
+        image_prompt_real_world = data.get("image_prompt_real_world") or None
+        image_prompt_professional = data.get("image_prompt_professional") or None
+        image_prompt_angle_variant = data.get("image_prompt_angle_variant") or None
         classify_enabled = data.get("classify_enabled", True)
 
         print(f"[API] Processing {len(photos)} photos with {len(categories)} categories")
@@ -480,6 +489,12 @@ def generate_images():
             'professional_image': ImageType.PROFESSIONAL
         }
         
+        image_prompt_map = {
+            ImageType.REAL_WORLD: image_prompt_real_world,
+            ImageType.PROFESSIONAL: image_prompt_professional,
+            ImageType.ANGLE_VARIANT: image_prompt_angle_variant,
+        }
+
         # Prepare tasks for parallel execution
         tasks_to_generate = []
         for idx, photo_url in enumerate(photos):
@@ -560,6 +575,7 @@ def generate_images():
                             prompt_modifier=angle if angle else (prompt_modifier or None),
                             extra_instructions=prompt_modifier if angle else None,
                             image_model=image_model,
+                            prompt_filename=image_prompt_map.get(image_type),
                         )
                         futures[future] = (idx, photo_url)
                     
@@ -646,6 +662,7 @@ def regenerate_images():
         image_urls = data.get("image_urls", [])
         prompt = data.get("prompt", "")
         image_model = data.get("image_model") or DEFAULT_IMAGE_MODEL
+        image_prompt_experimental = data.get("image_prompt_experimental") or None
         
         if not image_urls or not isinstance(image_urls, list):
             return jsonify({
@@ -674,6 +691,7 @@ def regenerate_images():
                     ImageType.EXPERIMENTAL,
                     custom_prompt=prompt.strip(),
                     model=image_model,
+                    prompt_filename=image_prompt_experimental,
                 )
                 
                 if result and isinstance(result, list):
@@ -735,6 +753,8 @@ def create_listing():
             listing = data.get("listing", {})
             sku = data.get("sku")
             text_model = data.get("text_model") or DEFAULT_TEXT_MODEL
+            title_prompt = data.get("title_prompt") or None
+            description_prompt = data.get("description_prompt") or None
             pre_generated_text = data.get("pre_generated_text")  # {"edited_title": ..., "edited_description": ...}
             image_model = data.get("image_model") or DEFAULT_IMAGE_MODEL
             classifier_model_body = data.get("classifier_model")
@@ -787,7 +807,11 @@ def create_listing():
                 print(f"[API] Used pre-generated text (skipped LLM)")
             elif old_title and old_description:
                 print(f"[API] Generating optimized text...")
-                optimized_content = create_text(old_title, old_description, model=text_model)
+                optimized_content = create_text(
+                    old_title, old_description, model=text_model,
+                    title_prompt=title_prompt,
+                    description_prompt=description_prompt,
+                )
                 if optimized_content:
                     pending_title = optimized_content.get("edited_title", old_title)
                     pending_description = optimized_content.get("edited_description", old_description)
