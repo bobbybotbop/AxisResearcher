@@ -16,7 +16,7 @@ import CompactListingRow from "./components/CompactListingRow";
 import UploadListingsToolbar from "./components/UploadListingsToolbar";
 import ApiKeyManagementSection from "./components/ApiKeyManagementSection";
 import TestAiModelSection from "./components/TestAiModelSection";
-import { MOCK_DATA } from "./mockData";
+import { MOCK_DATA, MOCK_GENERATED_TITLE, MOCK_GENERATED_DESCRIPTION } from "./mockData";
 import { createTestWorkflowState } from "./testWorkflowState";
 import { trimTransparentPadding } from "./utils/trimImage";
 import { isIncomplete, isUploaded } from "./utils/listingStatus";
@@ -230,6 +230,7 @@ function App() {
   const [textGenStatus, setTextGenStatus] = useState("writing");
   const [textGenComplete, setTextGenComplete] = useState(false);
   const textGenControllerRef = useRef(null);
+  const testTextGenTimerRef = useRef(null);
   const bgRemovalAbortControllerRef = useRef(null);
   const [listingData, setListingData] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -313,6 +314,40 @@ function App() {
       return "bytedance-seed/seed-1.6-flash";
     }
   });
+  const [titlePrompt, setTitlePrompt] = useState(() => {
+    try { return localStorage.getItem("axisPrompt_title") || "generateTitlePrompt.txt"; }
+    catch { return "generateTitlePrompt.txt"; }
+  });
+  const [descriptionPrompt, setDescriptionPrompt] = useState(() => {
+    try { return localStorage.getItem("axisPrompt_description") || "generateDescriptionPrompt.txt"; }
+    catch { return "generateDescriptionPrompt.txt"; }
+  });
+  const [imagePromptRealWorld, setImagePromptRealWorld] = useState(() => {
+    try { return localStorage.getItem("axisPrompt_image_real_world") || "generateImageFromWorld.txt"; }
+    catch { return "generateImageFromWorld.txt"; }
+  });
+  const [imagePromptProfessional, setImagePromptProfessional] = useState(() => {
+    try { return localStorage.getItem("axisPrompt_image_professional") || "generateImageFromProfessional.txt"; }
+    catch { return "generateImageFromProfessional.txt"; }
+  });
+  const [imagePromptAngleVariant, setImagePromptAngleVariant] = useState(() => {
+    try { return localStorage.getItem("axisPrompt_image_angle_variant") || "generateImageAngleVariant.txt"; }
+    catch { return "generateImageAngleVariant.txt"; }
+  });
+  const [imagePromptExperimental, setImagePromptExperimental] = useState(() => {
+    try { return localStorage.getItem("axisPrompt_image_experimental") || "experimental.txt"; }
+    catch { return "experimental.txt"; }
+  });
+  const [titlePromptOptions, setTitlePromptOptions] = useState([]);
+  const [descriptionPromptOptions, setDescriptionPromptOptions] = useState([]);
+  const [imagePromptOptions, setImagePromptOptions] = useState([]);
+  const [promptModalOpen, setPromptModalOpen] = useState(false);
+  const [promptModalType, setPromptModalType] = useState("title");
+  const [promptModalSlot, setPromptModalSlot] = useState(null);
+  const [promptModalName, setPromptModalName] = useState("");
+  const [promptModalContent, setPromptModalContent] = useState("");
+  const [promptModalError, setPromptModalError] = useState("");
+  const [promptModalSaving, setPromptModalSaving] = useState(false);
   const [classifyImagesEnabled, setClassifyImagesEnabled] = useState(() => {
     try {
       return localStorage.getItem("axisClassifyImagesEnabled") === "true";
@@ -498,6 +533,13 @@ function App() {
       // ignore
     }
   }, [classifierModel]);
+
+  useEffect(() => { try { localStorage.setItem("axisPrompt_title", titlePrompt); } catch {} }, [titlePrompt]);
+  useEffect(() => { try { localStorage.setItem("axisPrompt_description", descriptionPrompt); } catch {} }, [descriptionPrompt]);
+  useEffect(() => { try { localStorage.setItem("axisPrompt_image_real_world", imagePromptRealWorld); } catch {} }, [imagePromptRealWorld]);
+  useEffect(() => { try { localStorage.setItem("axisPrompt_image_professional", imagePromptProfessional); } catch {} }, [imagePromptProfessional]);
+  useEffect(() => { try { localStorage.setItem("axisPrompt_image_angle_variant", imagePromptAngleVariant); } catch {} }, [imagePromptAngleVariant]);
+  useEffect(() => { try { localStorage.setItem("axisPrompt_image_experimental", imagePromptExperimental); } catch {} }, [imagePromptExperimental]);
 
   useEffect(() => {
     try {
@@ -714,9 +756,10 @@ function App() {
   const setTestIsEditorOpen = setTestKey("isEditorOpen");
   const setTestEditableTitle = setTestKey("editableTitle");
   const setTestIsTrimmingTitle = setTestKey("isTrimmingTitle");
-  const setTestIsSavingTitle = setTestKey("isSavingTitle");
+  const setTestIsGeneratingText = setTestKey("isGeneratingText");
+  const setTestTextGenStatus = setTestKey("textGenStatus");
+  const setTestTextGenComplete = setTestKey("textGenComplete");
   const setTestEditableDescription = setTestKey("editableDescription");
-  const setTestIsSavingDescription = setTestKey("isSavingDescription");
   const setTestLightboxOpen = setTestKey("lightboxOpen");
   const setTestLightboxIndex = setTestKey("lightboxIndex");
   const setTestFetchProgress = setTestKey("fetchProgress");
@@ -754,9 +797,10 @@ function App() {
     isEditorOpen: testIsEditorOpen,
     editableTitle: testEditableTitle,
     isTrimmingTitle: testIsTrimmingTitle,
-    isSavingTitle: testIsSavingTitle,
+    isGeneratingText: testIsGeneratingText,
+    textGenStatus: testTextGenStatus,
+    textGenComplete: testTextGenComplete,
     editableDescription: testEditableDescription,
-    isSavingDescription: testIsSavingDescription,
     lightboxOpen: testLightboxOpen,
     lightboxIndex: testLightboxIndex,
     fetchProgress: testFetchProgress,
@@ -851,7 +895,7 @@ function App() {
   useEffect(() => {
     const sku = currentSku || listingData?.sku;
     if (!sku || !listingData) return;
-    if (!editableDescription && editableDescription !== "") return;
+    if (editableDescription == null) return;
     if (editableDescription === persistedDescriptionRef.current) return;
     const timer = setTimeout(() => {
       handleSaveDescription(editableDescription);
@@ -873,6 +917,14 @@ function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [generatedImages, textGenComplete, isGeneratingText, isCreatingListing]);
+
+  useEffect(() => {
+    const { generatedImages: imgs, textGenComplete: tgc, isGeneratingText: igt, isCreatingListing: icl, listingData: ld, currentSku: sku, listing: lst } = testWf;
+    if (imgs?.length > 0 && tgc && !igt && !icl && !ld && sku && lst) {
+      testHandleCreateListing();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [testWf.generatedImages, testWf.textGenComplete, testWf.isGeneratingText, testWf.isCreatingListing]);
 
   useEffect(() => {
     return () => {
@@ -2430,6 +2482,30 @@ function App() {
     if (activeTab === "settings") fetchTextModels();
   }, [activeTab, fetchTextModels]);
 
+  const fetchPromptOptions = useCallback(async () => {
+    try {
+      const [titleRes, descRes, imgRes] = await Promise.all([
+        fetch("/api/prompts/title"),
+        fetch("/api/prompts/description"),
+        fetch("/api/prompts/image"),
+      ]);
+      const [titleData, descData, imgData] = await Promise.all([
+        titleRes.json(), descRes.json(), imgRes.json(),
+      ]);
+      if (Array.isArray(titleData?.prompts)) setTitlePromptOptions(titleData.prompts);
+      if (Array.isArray(descData?.prompts)) setDescriptionPromptOptions(descData.prompts);
+      if (Array.isArray(imgData?.prompts)) setImagePromptOptions(imgData.prompts);
+    } catch {
+      // leave existing options unchanged on fetch failure
+    }
+  }, []);
+
+  useEffect(() => { fetchPromptOptions(); }, [fetchPromptOptions]);
+
+  useEffect(() => {
+    if (activeTab === "settings") fetchPromptOptions();
+  }, [activeTab, fetchPromptOptions]);
+
   // If the persisted text model isn't in the available list (e.g. user
   // removed the Bedrock key), fall back to the first available option.
   useEffect(() => {
@@ -2547,6 +2623,105 @@ function App() {
     setListingDetailData(null);
   };
 
+  // Streams mock title+description character by character, mirroring startTextGeneration
+  const startTestTextGeneration = (title, description) => {
+    if (testTextGenTimerRef.current) {
+      clearInterval(testTextGenTimerRef.current);
+      testTextGenTimerRef.current = null;
+    }
+    setTestIsGeneratingText(true);
+    setTestTextGenStatus("writing");
+    setTestTextGenComplete(false);
+    setTestEditableTitle("");
+    setTestEditableDescription("");
+
+    const fullTitle = MOCK_GENERATED_TITLE;
+    const fullDesc = MOCK_GENERATED_DESCRIPTION;
+    const combined = [
+      ...fullTitle.split("").map((ch) => ({ field: "title", ch })),
+      ...fullDesc.split("").map((ch) => ({ field: "desc", ch })),
+    ];
+    let idx = 0;
+    // Stream ~8 characters per tick at 16ms to finish in ~500ms
+    testTextGenTimerRef.current = setInterval(() => {
+      const batch = combined.slice(idx, idx + 8);
+      idx += 8;
+      const titleChars = batch.filter((c) => c.field === "title").map((c) => c.ch).join("");
+      const descChars = batch.filter((c) => c.field === "desc").map((c) => c.ch).join("");
+      if (titleChars) setTestEditableTitle((prev) => prev + titleChars);
+      if (descChars) setTestEditableDescription((prev) => prev + descChars);
+      if (idx >= combined.length) {
+        clearInterval(testTextGenTimerRef.current);
+        testTextGenTimerRef.current = null;
+        setTestEditableTitle(fullTitle);
+        setTestEditableDescription(fullDesc);
+        setTestIsGeneratingText(false);
+        setTestTextGenComplete(true);
+      }
+    }, 16);
+  };
+
+  const cancelTestTextGeneration = () => {
+    if (testTextGenTimerRef.current) {
+      clearInterval(testTextGenTimerRef.current);
+      testTextGenTimerRef.current = null;
+    }
+    setTestIsGeneratingText(false);
+    setTestTextGenStatus("writing");
+    setTestTextGenComplete(false);
+  };
+
+  // Mirrors handleCreateListing — runs after images + text are both done
+  const testHandleCreateListing = () => {
+    setTestIsCreatingListing(true);
+    setTestError(null);
+    const steps = [
+      "Updating images",
+      "Generating optimized text",
+      "Updating metadata",
+      "Updating aspects",
+    ];
+    setTestCreateListingProgress({
+      isActive: true,
+      currentStep: steps[0],
+      completedSteps: [],
+      totalSteps: steps,
+    });
+    let stepIdx = 0;
+    const interval = setInterval(() => {
+      stepIdx += 1;
+      setTestCreateListingProgress((prev) => ({
+        ...prev,
+        completedSteps: steps.slice(0, stepIdx),
+        currentStep: steps[stepIdx] || null,
+      }));
+      if (stepIdx >= steps.length) {
+        clearInterval(interval);
+        const listingData = {
+          ...MOCK_DATA.listingData,
+          inventoryItem: {
+            ...MOCK_DATA.listingData.inventoryItem,
+            product: {
+              ...MOCK_DATA.listingData.inventoryItem.product,
+              title: MOCK_GENERATED_TITLE,
+              description: MOCK_GENERATED_DESCRIPTION,
+              imageUrls: testWf.generatedImages,
+            },
+          },
+        };
+        setTestListingData(listingData);
+        setTestUploadResult(null);
+        setTestCreateListingProgress({
+          isActive: false,
+          currentStep: null,
+          completedSteps: steps,
+          totalSteps: steps,
+        });
+        setTestIsCreatingListing(false);
+      }
+    }, 400);
+  };
+
   // Test workflow mock handlers (no API calls)
   const testHandleSubmit = (e) => {
     e.preventDefault();
@@ -2602,6 +2777,7 @@ function App() {
       setTestListing(MOCK_DATA.listing);
       setTestCurrentSku(MOCK_DATA.sku);
       setTestGeneratedImages([]);
+      startTestTextGeneration(MOCK_DATA.listing.title, MOCK_DATA.listing.description);
       const autoSkip = new Set();
       if (classifyImagesEnabled) {
         for (const [url, cat] of Object.entries(MOCK_DATA.categories)) {
@@ -2635,7 +2811,7 @@ function App() {
       );
     if (photosToProcess.length === 0) {
       setTestCategories(testEditableCategories);
-      testHandleConfirmAndEditText();
+      setTestGeneratedImages([]);
       return;
     }
     setTestIsConfirming(true);
@@ -2669,58 +2845,6 @@ function App() {
         setTestIsConfirming(false);
       }
     }, 500);
-  };
-
-  const testHandleConfirmAndEditText = () => {
-    setTestIsCreatingListing(true);
-    setTestError(null);
-    const steps = [
-      "Updating images",
-      "Generating optimized text",
-      "Updating metadata",
-      "Updating aspects",
-    ];
-    setTestCreateListingProgress({
-      isActive: true,
-      currentStep: steps[0],
-      completedSteps: [],
-      totalSteps: steps,
-    });
-    let stepIdx = 0;
-    const interval = setInterval(() => {
-      stepIdx += 1;
-      setTestCreateListingProgress((prev) => ({
-        ...prev,
-        completedSteps: steps.slice(0, stepIdx),
-        currentStep: steps[stepIdx] || null,
-      }));
-      if (stepIdx >= steps.length) {
-        clearInterval(interval);
-        const listingData = {
-          ...MOCK_DATA.listingData,
-          inventoryItem: {
-            ...MOCK_DATA.listingData.inventoryItem,
-            product: {
-              ...MOCK_DATA.listingData.inventoryItem.product,
-              imageUrls: testGeneratedImages,
-            },
-          },
-        };
-        setTestListingData(listingData);
-        setTestEditableTitle(listingData.inventoryItem?.product?.title || "");
-        setTestEditableDescription(
-          listingData.inventoryItem?.product?.description || "",
-        );
-        setTestUploadResult(null);
-        setTestCreateListingProgress({
-          isActive: false,
-          currentStep: null,
-          completedSteps: steps,
-          totalSteps: steps,
-        });
-        setTestIsCreatingListing(false);
-      }
-    }, 400);
   };
 
   const testHandleUploadToEbay = (sku, listingData) => {
@@ -3101,7 +3225,6 @@ function App() {
                   return next;
                 });
               }}
-              onConfirmAndEditText={testHandleConfirmAndEditText}
               onEditableTitleChange={setTestEditableTitle}
               onTrimTitle={() =>
                 setTestEditableTitle((prev) => prev.slice(0, 80))
@@ -3126,8 +3249,10 @@ function App() {
               lightboxOpen={testLightboxOpen}
               lightboxIndex={testLightboxIndex}
               classifyImagesEnabled={classifyImagesEnabled}
-              isGeneratingText={false}
-              onCancelTextGen={() => {}}
+              isGeneratingText={testIsGeneratingText}
+              textGenStatus={testTextGenStatus}
+              onCancelTextGen={cancelTestTextGeneration}
+              autoSaveStatus={{ title: "idle", description: "idle" }}
               bgRemovedPhotos={testBgRemovedPhotos}
               bgRemovalProgress={testBgRemovalProgress}
               autoBackgroundRemovalEnabled={autoBackgroundRemovalEnabled}
