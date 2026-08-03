@@ -1162,7 +1162,7 @@ function App() {
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title, description, text_model: textModel }),
+            body: JSON.stringify({ title, description, text_model: textModel, title_prompt: titlePrompt, description_prompt: descriptionPrompt }),
             signal: controller.signal,
           },
           (field, delta) => {
@@ -1426,6 +1426,9 @@ function App() {
         image_model: imageModel,
         classify_enabled: classifyImagesEnabled,
         ...(pendingImagePromptModifier && { prompt_modifier: pendingImagePromptModifier }),
+        image_prompt_real_world: imagePromptRealWorld,
+        image_prompt_professional: imagePromptProfessional,
+        image_prompt_angle_variant: imagePromptAngleVariant,
       };
       console.log("Sending request to /api/generate-images:", requestBody);
 
@@ -1715,6 +1718,7 @@ function App() {
           image_urls: imagesToRegen,
           prompt: promptToUse,
           image_model: imageModel,
+          image_prompt_experimental: imagePromptExperimental,
         }),
       });
 
@@ -1853,6 +1857,7 @@ function App() {
           image_urls: imagesToRegen,
           prompt: customPrompt.trim(),
           image_model: imageModel,
+          image_prompt_experimental: imagePromptExperimental,
         }),
       });
 
@@ -1942,6 +1947,12 @@ function App() {
             pre_generated_text: (editableTitle || editableDescription)
               ? { edited_title: editableTitle, edited_description: editableDescription }
               : undefined,
+            title_prompt: titlePrompt,
+            description_prompt: descriptionPrompt,
+            image_prompt_real_world: imagePromptRealWorld,
+            image_prompt_professional: imagePromptProfessional,
+            image_prompt_angle_variant: imagePromptAngleVariant,
+            image_prompt_experimental: imagePromptExperimental,
           }),
         },
         (event) => {
