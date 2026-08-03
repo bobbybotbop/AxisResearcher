@@ -112,6 +112,18 @@ export const MOCK_LISTING_DATA = {
   },
 }
 
+// AI-generated text (simulated LLM output for streaming)
+export const MOCK_GENERATED_TITLE = 'Professional Test Product Mock Listing Workflow Testing Development Quality Assurance';
+export const MOCK_GENERATED_DESCRIPTION = `<p>Professional-grade test product designed for workflow automation and quality assurance validation across all supported platforms.</p>
+<ul>
+  <li>Validates end-to-end listing creation pipeline</li>
+  <li>Tests HTML formatting, bullet rendering, and rich text preservation</li>
+  <li>Compatible with desktop and mobile storefronts</li>
+  <li>Supports import/export pipeline verification</li>
+  <li>Includes placeholder content for staging environments</li>
+</ul>
+<p>This listing demonstrates the full text generation workflow including streaming tokens, title length optimization, and description formatting.</p>`;
+
 // Upload result shape
 export const MOCK_UPLOAD_RESULT = {
   listingId: '110123456789',
@@ -125,9 +137,10 @@ export const MOCK_DATA = {
   categories: MOCK_CATEGORIES,
   listing: MOCK_LISTING,
   generatedImages: MOCK_GENERATED_IMAGES,
+  generatedTitle: MOCK_GENERATED_TITLE,
+  generatedDescription: MOCK_GENERATED_DESCRIPTION,
   listingData: MOCK_LISTING_DATA,
   uploadResult: MOCK_UPLOAD_RESULT,
   sku: 'AXIS_TEST_001',
 }
 
-export { MOCK_PHOTOS, MOCK_CATEGORIES }
