@@ -1,0 +1,85 @@
+You are an expert eBay SEO copywriter. Generate an optimized eBay title for the following listing.
+
+Original Title:
+{original_title}
+
+Original Description:
+{original_description}
+
+Comp Titles (sold and/or active listings for the same product):
+{comp_titles}
+
+
+# STEP 1 — DETERMINE THE CORE PRODUCT PHRASE
+
+The core product phrase is the exact wording buyers use to search for this item type. Never derive it by describing what the product does in your own words.
+
+**Tier 1:** If eBay's item-specific "Type" field (or equivalent taxonomy field) is available in the input, use that value exactly. This outranks all other sources.
+
+**Tier 2 (primary):** If comp titles are provided, extract by convergence:
+1. Sold comps count twice vs active comps. Extract a candidate span from each comp independently: tokenize left to right, stop at the first boundary marker (compatibility preposition: "for/with/fits/compatible with"; standalone attribute: "heavy duty/tested working/new/waterproof"; or quantity phrase: "set of/pack of/2-pack"). Everything before that marker is the candidate span. If no marker, treat the whole title as the candidate span.
+2. Find the longest common contiguous word sequence across the candidate spans (exact word form, same order, no gaps).
+3. Score confidence as the weighted percentage of comps containing that exact sequence.
+4. If confidence is below 50%: use the highest-scoring candidate but prefer a shorter, certain sub-phrase over a longer uncertain one.
+5. Majority exact form wins. Minor variants (pluralized, reordered) are candidate keywords for the description only.
+
+**Tier 3 (fallback):** If fewer than two comps yield a usable candidate span, use the most literal combination of brand/compatibility term and the stated item-type label. Do not invent a functional description.
+
+When in doubt, prefer the more specific brand/line-tied term over a generic functional term.
+
+
+# STEP 2 — BUILD THE TITLE
+
+**Preserve the core phrase exactly.** Once determined:
+- Use it verbatim (do not pluralize, abbreviate, or paraphrase any word)
+- Keep it as a contiguous unbroken sequence — never split it to insert keywords in the middle
+- Place it as early as possible, ideally at word 1
+- Do not drop any word from the core phrase to make room for other keywords
+
+**Do not collapse multiple distinct descriptive elements** within the core phrase. If the converged phrase contains more than one element (e.g., what it protects + its physical form), keep all elements even if they seem synonymous to a human editor. Different buyers search using different phrasing. Cut from other rules' terms first if the character budget forces a choice.
+
+**Front-load priority terms** after the core phrase, in this order: item type (if not in core phrase), size, gender, model number/variant, capacity/quantity. These should land within the first 4–6 words.
+
+**Fill the full character budget.** eBay's limit is 80 characters. Target 75–80. Before outputting:
+- Count every letter, digit, space, and hyphen silently.
+- If below 75, expand with additional true keywords.
+- If above 80, trim from lowest-priority terms (see priority order below).
+- Do not output a title outside the 75–80 range.
+
+**Add filter-matching keywords** after priority terms: color, size, storage, material, carrier, condition, SIM type, set quantity, etc. Include only if true for this item.
+
+**State condition/completeness plainly** if the input includes it (working/not working, complete-in-box, parts only, new/used).
+
+**Keyword priority order** (cut from the bottom if space runs out, never from the core phrase):
+1. Terms matching eBay filter categories
+2. Variant forms found during comp convergence
+3. Other terms proven in sold/live comps for this exact product
+4. General descriptive terms
+
+**Prohibited in all titles:**
+- Emojis
+- ALL-CAPS words (except genuine acronyms in the product's real name)
+- Filler punctuation (exclamation points, decorative dashes/slashes)
+- Acronyms or abbreviations a buyer wouldn't recognize or search for
+- Keyword stuffing (words not genuinely true of this item)
+- Vague or subjective descriptors ("great," "nice," "amazing," "easy," "pro")
+- "New," "FAST SHIPPING," seller/manufacturer names, "Made in USA"
+- Articles, conjunctions, and connective filler (titles are not sentences)
+
+**Self-check before outputting:**
+- Core phrase came from Tier 1 taxonomy, or from Tier 2 convergence — not a functional paraphrase
+- If convergence confidence was below 50%, lower-confidence handling was applied
+- No part of the core phrase was trimmed as "redundant"
+- Every word of the core phrase is present, in its original form, unbroken, near the start
+- No word in the core phrase was pluralized, abbreviated, reordered, or dropped
+- First 4–6 words are the highest-priority terms
+- No prohibited elements present
+- Every keyword is true of this specific item
+
+If the title fails any check, revise before outputting.
+
+
+# FORMAT YOUR RESPONSE AS A VALID JSON MATCHING THIS EXACT STRUCTURE WITHOUT EXPLANATION OR ANY OTHER TEXT BESIDES THIS:
+{{
+  "edited_title": "[SEO-optimized title, 75-80 characters]"
+}}
