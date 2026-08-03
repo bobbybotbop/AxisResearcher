@@ -87,6 +87,50 @@ ANGLE_VARIANTS = [
     "rear view",
 ]
 
+PROMPT_TYPES = {"title", "description", "image"}
+
+@app.route('/api/prompts/<prompt_type>', methods=['GET'])
+def list_prompts(prompt_type):
+    if prompt_type not in PROMPT_TYPES:
+        return jsonify({"error": f"Invalid prompt type: {prompt_type}"}), 400
+    folder = os.path.join("prompts", prompt_type)
+    try:
+        files = sorted(
+            f for f in os.listdir(folder)
+            if os.path.isfile(os.path.join(folder, f)) and f.endswith(".txt")
+        )
+        return jsonify({"prompts": files}), 200
+    except FileNotFoundError:
+        return jsonify({"prompts": []}), 200
+
+
+@app.route('/api/prompts/<prompt_type>', methods=['POST'])
+def create_prompt(prompt_type):
+    if prompt_type not in PROMPT_TYPES:
+        return jsonify({"error": f"Invalid prompt type: {prompt_type}"}), 400
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body must be JSON"}), 400
+    name = data.get("name", "").strip()
+    content = data.get("content", "").strip()
+    if not name:
+        return jsonify({"error": "name is required"}), 400
+    if not content:
+        return jsonify({"error": "content is required"}), 400
+    if not name.endswith(".txt"):
+        name = name + ".txt"
+    if any(c in name for c in ("/", "\\", "..")):
+        return jsonify({"error": "Invalid filename"}), 400
+    folder = os.path.join("prompts", prompt_type)
+    os.makedirs(folder, exist_ok=True)
+    file_path = os.path.join(folder, name)
+    if os.path.exists(file_path):
+        return jsonify({"error": f"Prompt '{name}' already exists"}), 400
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return jsonify({"name": name}), 201
+
+
 # --- Streaming progress helpers (NDJSON) ---
 def progress_event(step, status):
     """Send a progress event as an NDJSON line."""
