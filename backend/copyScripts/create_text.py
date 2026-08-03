@@ -1,69 +1,99 @@
 """
 Create Text Module
 
-This module contains functions for creating optimized eBay listing text.
+Title and description are generated via parallel LLM calls.
 """
 
 import json
+import queue
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
-def create_text(old_title, old_description, model="deepseek/deepseek-v4-flash"):
+def _load_prompt(path, original_title, original_description, comp_titles=""):
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read().format(
+            original_title=original_title,
+            original_description=original_description,
+            comp_titles=comp_titles,
+        )
+
+
+def create_text(
+    old_title,
+    old_description,
+    model="deepseek/deepseek-v4-flash",
+    title_prompt=None,
+    description_prompt=None,
+    comp_titles="",
+):
     """
-    Generate optimized listing content using LLM from original title and description.
-    
+    Generate optimized listing content using two parallel LLM calls.
+
     Args:
-        old_title (str): Original listing title
-        old_description (str): Original listing description (should be HTML-cleaned)
-    
+        title_prompt: filename inside prompts/title/. Defaults to generateTitlePrompt.txt.
+        description_prompt: filename inside prompts/description/. Defaults to generateDescriptionPrompt.txt.
+        comp_titles: optional string of comparable listing titles passed into the prompt.
+
     Returns:
-        dict: Optimized listing content with edited_title and edited_description, or None on failure
+        dict: {"edited_title": "...", "edited_description": "..."} or None on failure
     """
-    # Import here to avoid circular import issues
     from backend.ebay_cli import call_text_llm
-    
-    # Load prompt template from file
-    prompt_template_path = "prompts/generateTextPrompt.txt"
+
+    title_file = title_prompt or "generateTitlePrompt.txt"
+    desc_file = description_prompt or "generateDescriptionPrompt.txt"
+
     try:
-        with open(prompt_template_path, 'r', encoding='utf-8') as f:
-            prompt_template = f.read()
-    except FileNotFoundError:
-        print(f"❌ Prompt template file not found: {prompt_template_path}")
-        return None
+        title_prompt_text = _load_prompt(
+            f"prompts/title/{title_file}", old_title, old_description, comp_titles
+        )
+        desc_prompt_text = _load_prompt(
+            f"prompts/description/{desc_file}", old_title, old_description, comp_titles
+        )
     except Exception as e:
-        print(f"❌ Error loading prompt template: {e}")
+        print(f"❌ Error loading prompt templates: {e}")
         return None
-    
-    # Format the prompt with listing data
-    prompt = prompt_template.format(
-        original_title=old_title,
-        original_description=old_description
-    )
-    
-    # Call the configured text LLM (OpenRouter or Bedrock based on model id)
-    llm_response = call_text_llm(prompt, model=model)
-    
-    if llm_response:
-        try:
-            # Parse JSON response
-            optimized_content = json.loads(llm_response)
-            
-            print("\n🎯 Optimized eBay Listing:")
-            print("=" * 50)
-            print(f"📝 Optimized Title ({len(optimized_content.get('edited_title', ''))} chars):")
-            print(f"   {optimized_content.get('edited_title', 'N/A')}")
-            print(f"\n📄 Optimized Description:")
-            print(f"   {optimized_content.get('edited_description', 'N/A')}")
-            print("=" * 50)
-            
-            return optimized_content
-            
-        except json.JSONDecodeError as e:
-            print(f"❌ Error parsing LLM response as JSON: {e}")
-            print(f"Raw response: {llm_response}")
-            return None
-    else:
-        print("❌ Failed to get response from text LLM")
+
+    results = {}
+
+    def call_title():
+        response = call_text_llm(title_prompt_text, model=model)
+        if response:
+            try:
+                return "title", json.loads(response)
+            except json.JSONDecodeError as e:
+                print(f"❌ Error parsing title LLM response: {e}")
+        return "title", None
+
+    def call_description():
+        response = call_text_llm(desc_prompt_text, model=model)
+        if response:
+            try:
+                return "description", json.loads(response)
+            except json.JSONDecodeError as e:
+                print(f"❌ Error parsing description LLM response: {e}")
+        return "description", None
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(call_title), executor.submit(call_description)]
+        for future in as_completed(futures):
+            key, data = future.result()
+            if data:
+                results.update(data)
+
+    if "edited_title" not in results or "edited_description" not in results:
+        print("❌ Failed to get complete response from text LLM")
         return None
+
+    print("\n🎯 Optimized eBay Listing:")
+    print("=" * 50)
+    print(f"📝 Optimized Title ({len(results['edited_title'])} chars):")
+    print(f"   {results['edited_title']}")
+    print(f"\n📄 Optimized Description:")
+    print(f"   {results['edited_description']}")
+    print("=" * 50)
+
+    return results
 
 
 def _find_closing_quote(s):
@@ -71,7 +101,7 @@ def _find_closing_quote(s):
     i = 0
     while i < len(s):
         if s[i] == '\\':
-            i += 2  # skip escaped char
+            i += 2
             continue
         if s[i] == '"':
             return i
@@ -79,111 +109,59 @@ def _find_closing_quote(s):
     return -1
 
 
-def create_text_stream(old_title, old_description, model="deepseek/deepseek-v4-flash"):
+def _stream_field(prompt, field, model, out_queue):
     """
-    Stream optimized title/description tokens as they arrive from the LLM.
+    Run a streaming LLM call for a single-field JSON response and push events onto out_queue.
 
-    Yields dicts:
-      {"type": "token", "field": "title",       "delta": "<chars>"}
-      {"type": "token", "field": "description", "delta": "<chars>"}
-      {"type": "result", "data": {"edited_title": "...", "edited_description": "..."}}
-      {"type": "error",  "error": "<message>"}
+    Pushes: {"type": "token", "field": field, "delta": "..."} events, then
+            {"type": "_done", "field": field, "data": {field: "..."}}
+    On error pushes: {"type": "error", "error": "..."}
     """
+    import re as _re
     from backend.ebay_cli import call_text_llm_stream
 
-    prompt_template_path = "prompts/generateTextPrompt.txt"
-    try:
-        with open(prompt_template_path, "r", encoding="utf-8") as f:
-            prompt_template = f.read()
-    except Exception as e:
-        yield {"type": "error", "error": f"Failed to load prompt: {e}"}
-        return
-
-    prompt = prompt_template.format(
-        original_title=old_title,
-        original_description=old_description,
-    )
-
     accumulated = ""
-    # State machine: "before_title" -> "in_title" -> "before_desc" -> "in_description" -> "done"
-    state = "before_title"
-    # Markers that signal entry into each field value (JSON string after the key colon)
-    TITLE_MARKER = '"edited_title"'
-    DESC_MARKER = '"edited_description"'
+    marker = f'"{field}"'
+    state = "before_field"
 
     for token in call_text_llm_stream(prompt, model):
         if token is None:
-            yield {"type": "error", "error": "LLM stream returned no content"}
+            out_queue.put({"type": "error", "error": f"LLM stream returned no content for {field}"})
             return
 
         accumulated += token
 
-        if state == "before_title":
-            if TITLE_MARKER in accumulated:
-                # Find the opening quote of the value
-                marker_end = accumulated.index(TITLE_MARKER) + len(TITLE_MARKER)
+        if state == "before_field":
+            if marker in accumulated:
+                marker_end = accumulated.index(marker) + len(marker)
                 rest = accumulated[marker_end:]
-                # Skip : and whitespace to find the opening "
                 colon_pos = rest.find(":")
                 if colon_pos != -1:
                     after_colon = rest[colon_pos + 1:].lstrip()
                     if after_colon.startswith('"'):
-                        # Everything after the opening quote is title content
-                        title_content = after_colon[1:]
-                        # Find the first unescaped closing quote in the buffered content
-                        close_pos = _find_closing_quote(title_content)
+                        content = after_colon[1:]
+                        close_pos = _find_closing_quote(content)
                         if close_pos != -1:
-                            title_content = title_content[:close_pos]
-                            if title_content:
-                                yield {"type": "token", "field": "title", "delta": title_content}
-                            state = "before_desc"  # title already complete
+                            content = content[:close_pos]
+                            if content:
+                                out_queue.put({"type": "token", "field": field, "delta": content})
+                            state = "done"
                         else:
-                            if title_content:
-                                yield {"type": "token", "field": "title", "delta": title_content}
-                            state = "in_title"
+                            if content:
+                                out_queue.put({"type": "token", "field": field, "delta": content})
+                            state = "in_field"
 
-        elif state == "in_title":
-            # Send the new token; stop at closing unescaped quote
-            # Simple heuristic: if the token ends the title value
-            if '"' in token:
-                # Split at first unescaped quote
-                parts = token.split('"', 1)
-                if parts[0]:
-                    yield {"type": "token", "field": "title", "delta": parts[0]}
-                state = "before_desc"
-            else:
-                yield {"type": "token", "field": "title", "delta": token}
-
-        elif state == "before_desc":
-            if DESC_MARKER in accumulated:
-                marker_end = accumulated.rindex(DESC_MARKER) + len(DESC_MARKER)
-                rest = accumulated[marker_end:]
-                colon_pos = rest.find(":")
-                if colon_pos != -1:
-                    after_colon = rest[colon_pos + 1:].lstrip()
-                    if after_colon.startswith('"'):
-                        desc_content = after_colon[1:]
-                        if desc_content:
-                            yield {"type": "token", "field": "description", "delta": desc_content}
-                        state = "in_description"
-
-        elif state == "in_description":
+        elif state == "in_field":
             if '"' in token:
                 parts = token.split('"', 1)
                 if parts[0]:
-                    yield {"type": "token", "field": "description", "delta": parts[0]}
+                    out_queue.put({"type": "token", "field": field, "delta": parts[0]})
                 state = "done"
             else:
-                yield {"type": "token", "field": "description", "delta": token}
+                out_queue.put({"type": "token", "field": field, "delta": token})
 
-        elif state == "done":
-            pass  # ignore remaining JSON tokens after description closes
-
-    # Parse final accumulated JSON for the clean result
-    import re as _re
+    # Parse final result
     result = None
-
-    # Attempt 1: strip markdown fences then json.loads
     try:
         clean = accumulated.strip()
         if clean.startswith("```"):
@@ -194,7 +172,6 @@ def create_text_stream(old_title, old_description, model="deepseek/deepseek-v4-f
     except json.JSONDecodeError:
         pass
 
-    # Attempt 2: find the first {...} block in the response (handles leading explanation text)
     if result is None:
         m = _re.search(r'\{[\s\S]*\}', accumulated)
         if m:
@@ -204,7 +181,84 @@ def create_text_stream(old_title, old_description, model="deepseek/deepseek-v4-f
                 pass
 
     if result is not None:
-        # Overwrite editableTitle with the clean parsed value (corrects any truncation from streaming)
-        yield {"type": "result", "data": result}
+        out_queue.put({"type": "_done", "field": field, "data": result})
     else:
-        yield {"type": "error", "error": f"Failed to parse LLM JSON response: {accumulated[:200]}"}
+        out_queue.put({"type": "error", "error": f"Failed to parse {field} JSON response: {accumulated[:200]}"})
+
+
+_SENTINEL = object()
+
+
+def create_text_stream(
+    old_title,
+    old_description,
+    model="deepseek/deepseek-v4-flash",
+    title_prompt=None,
+    description_prompt=None,
+    comp_titles="",
+):
+    """
+    Stream optimized title/description tokens from two parallel LLM calls.
+
+    Args:
+        title_prompt: filename inside prompts/title/. Defaults to generateTitlePrompt.txt.
+        description_prompt: filename inside prompts/description/. Defaults to generateDescriptionPrompt.txt.
+        comp_titles: optional string of comparable listing titles passed into the prompt.
+
+    Yields dicts:
+      {"type": "token", "field": "title",       "delta": "<chars>"}
+      {"type": "token", "field": "description", "delta": "<chars>"}
+      {"type": "result", "data": {"edited_title": "...", "edited_description": "..."}}
+      {"type": "error",  "error": "<message>"}
+    """
+    title_file = title_prompt or "generateTitlePrompt.txt"
+    desc_file = description_prompt or "generateDescriptionPrompt.txt"
+
+    try:
+        title_prompt_text = _load_prompt(
+            f"prompts/title/{title_file}", old_title, old_description, comp_titles
+        )
+        desc_prompt_text = _load_prompt(
+            f"prompts/description/{desc_file}", old_title, old_description, comp_titles
+        )
+    except Exception as e:
+        yield {"type": "error", "error": f"Failed to load prompts: {e}"}
+        return
+
+    event_queue = queue.Queue()
+    done_count = [0]
+    lock = threading.Lock()
+
+    def run_title():
+        _stream_field(title_prompt_text, "edited_title", model, event_queue)
+        with lock:
+            done_count[0] += 1
+        if done_count[0] == 2:
+            event_queue.put(_SENTINEL)
+
+    def run_description():
+        _stream_field(desc_prompt_text, "edited_description", model, event_queue)
+        with lock:
+            done_count[0] += 1
+        if done_count[0] == 2:
+            event_queue.put(_SENTINEL)
+
+    threading.Thread(target=run_title, daemon=True).start()
+    threading.Thread(target=run_description, daemon=True).start()
+
+    combined_result = {}
+
+    while True:
+        item = event_queue.get()
+        if item is _SENTINEL:
+            break
+        if item.get("type") == "_done":
+            combined_result.update(item["data"])
+        else:
+            yield item
+
+    if "edited_title" in combined_result and "edited_description" in combined_result:
+        yield {"type": "result", "data": combined_result}
+    else:
+        missing = [f for f in ("edited_title", "edited_description") if f not in combined_result]
+        yield {"type": "error", "error": f"Missing fields from LLM responses: {missing}"}
