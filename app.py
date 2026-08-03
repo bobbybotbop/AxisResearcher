@@ -309,6 +309,7 @@ def generate_image_with_delay(
     prompt_modifier=None,
     extra_instructions=None,
     image_model=None,
+    prompt_filename=None,
 ):
     """
     Generate image with rate limiting delay. Used for parallel execution.
@@ -344,6 +345,7 @@ def generate_image_with_delay(
             prompt_modifier=prompt_modifier,
             extra_instructions=extra_instructions,
             model=image_model or DEFAULT_IMAGE_MODEL,
+            prompt_filename=prompt_filename,
         )
         
         # Update progress: completed
