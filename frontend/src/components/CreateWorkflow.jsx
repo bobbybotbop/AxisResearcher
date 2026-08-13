@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import PhotoGallery from "./PhotoGallery";
+import ImageUploadModal from "./ImageUploadModal";
 import MessageBarInput from "./MessageBarInput";
 import Lightbox from "./Lightbox";
 import ProgressIndicator from "./ProgressIndicator";
 import ImageCanvas from "./ImageCanvas";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
-import { btnPillLg, btnPillSm } from "../styles/buttonPill";
+import { btnPill, btnPillLg, btnPillSm } from "../styles/buttonPill";
 import {
   DEFAULT_CHAT_CONTEXT,
   getChatContextInputPlaceholder,
@@ -79,6 +80,11 @@ function CreateWorkflow({
   onClearImagePromptModifier,
   onConfirmPhotoRegeneration,
   onCancelPhotoRegeneration,
+  onAddToGeneratedImages,
+  onDeleteGeneratedImages,
+  onRemoveBackgroundGenerated,
+  onDeleteOriginalPhotos,
+  onRemoveBackgroundOriginal,
   autoBackgroundRemovalEnabled = false,
   bgRemovedPhotos,
   bgRemovalProgress,
@@ -88,6 +94,10 @@ function CreateWorkflow({
   const [chatContext, setChatContext] = useState(DEFAULT_CHAT_CONTEXT);
   const [showOriginal, setShowOriginal] = useState(false);
   const [showMetadata, setShowMetadata] = useState(false);
+  const [genSelectMode, setGenSelectMode] = useState(false);
+  const [genSelectedPhotos, setGenSelectedPhotos] = useState(new Set());
+  const [genBulkDropdownOpen, setGenBulkDropdownOpen] = useState(false);
+  const [showGenUploadModal, setShowGenUploadModal] = useState(false);
 
   useEffect(() => {
     if (!listingLinkSubmitted) {
@@ -109,6 +119,32 @@ function CreateWorkflow({
   }, [isEditorOpen, onEditorToggle]);
 
   const imageSelectionActive = chatContext === "photos" && generatedImages?.length > 0;
+
+  useEffect(() => {
+    if (!genBulkDropdownOpen) return;
+    const close = () => setGenBulkDropdownOpen(false);
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [genBulkDropdownOpen]);
+
+  const toggleGenSelectMode = () => {
+    setGenSelectMode((prev) => {
+      if (prev) {
+        setGenSelectedPhotos(new Set());
+        setGenBulkDropdownOpen(false);
+      }
+      return !prev;
+    });
+  };
+
+  const toggleGenPhotoSelection = (index) => {
+    setGenSelectedPhotos((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (imageSelectionActive) {
@@ -510,6 +546,8 @@ function CreateWorkflow({
             onSkipPhoto={onSkipPhoto}
             onAddToOriginalPhotos={onAddToOriginalPhotos}
             onOpenEditor={onEditorToggle}
+            onDeletePhotos={onDeleteOriginalPhotos}
+            onRemoveBackgrounds={onRemoveBackgroundOriginal}
             showClassification={classifyImagesEnabled}
             hideConfirmButton={autoBackgroundRemovalEnabled}
           />
@@ -629,9 +667,71 @@ function CreateWorkflow({
 
       {generatedImages?.length > 0 && (
         <div className="mt-8 rounded-2xl border border-border-default bg-surface-panel p-6">
-          <h2 className="mb-5 text-xl font-semibold text-text-primary">
-            New Listing Photos
-          </h2>
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-xl font-semibold text-text-primary">New Listing Photos</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              {onEditorToggle && (
+                <button type="button" className={btnPill} onClick={onEditorToggle}>
+                  Image Editor
+                </button>
+              )}
+              {onAddToGeneratedImages && (
+                <button type="button" className={btnPill} onClick={() => setShowGenUploadModal(true)}>
+                  Upload Images
+                </button>
+              )}
+              <button
+                type="button"
+                className={`${btnPill} ${genSelectMode ? "ring-2 ring-inset ring-blue-500" : ""}`}
+                onClick={toggleGenSelectMode}
+              >
+                {genSelectMode ? "Done" : "Select"}
+              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  className={btnPill}
+                  disabled={!genSelectMode || genSelectedPhotos.size === 0}
+                  onClick={(e) => { e.stopPropagation(); setGenBulkDropdownOpen((prev) => !prev); }}
+                >
+                  Bulk Actions ▾
+                </button>
+                {genBulkDropdownOpen && (
+                  <div className="absolute right-0 top-full z-20 mt-1 min-w-36 rounded-lg border border-border-default bg-surface-panel py-1 shadow-lg">
+                    {onRemoveBackgroundGenerated && (
+                      <button
+                        type="button"
+                        className="w-full px-4 py-2 text-left text-sm text-text-primary hover:bg-surface-app"
+                        onClick={() => {
+                          const urls = Array.from(genSelectedPhotos).map((idx) => generatedImages[idx]);
+                          onRemoveBackgroundGenerated(urls);
+                          setGenSelectedPhotos(new Set());
+                          setGenSelectMode(false);
+                          setGenBulkDropdownOpen(false);
+                        }}
+                      >
+                        Remove Background
+                      </button>
+                    )}
+                    {onDeleteGeneratedImages && (
+                      <button
+                        type="button"
+                        className="w-full px-4 py-2 text-left text-sm text-text-primary hover:bg-surface-app"
+                        onClick={() => {
+                          onDeleteGeneratedImages(Array.from(genSelectedPhotos));
+                          setGenSelectedPhotos(new Set());
+                          setGenSelectMode(false);
+                          setGenBulkDropdownOpen(false);
+                        }}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
           <DragDropContext onDragEnd={onDragEnd}>
             <Droppable droppableId="new-listing-photos" direction="horizontal">
               {(provided) => (
@@ -656,7 +756,9 @@ function CreateWorkflow({
                           className="flex flex-col"
                         >
                           <div
-                            className={`group relative aspect-square cursor-grab overflow-hidden rounded-xl transition-all active:cursor-grabbing ${
+                            className={`group relative aspect-square overflow-hidden rounded-xl transition-all ${
+                              genSelectMode ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"
+                            } ${
                               snapshot.isDragging ? "opacity-80 shadow-lg" : ""
                             } ${imageSelectionActive ? "animate-jiggle" : ""} ${
                               imageSelectionActive && isSelected
@@ -668,23 +770,22 @@ function CreateWorkflow({
                                 : ""
                             }`}
                             onClick={() => {
-                              if (imageSelectionActive && onImageSelection) {
+                              if (genSelectMode) {
+                                toggleGenPhotoSelection(index);
+                              } else if (imageSelectionActive && onImageSelection) {
                                 onImageSelection(index);
                               }
                             }}
                           >
-                            <button
-                              type="button"
-                              className="absolute right-1.5 top-1.5 z-20 hidden h-8 w-8 items-center justify-center rounded-full bg-red-500 text-lg font-bold text-white shadow-md transition-colors hover:bg-red-600 group-hover:flex"
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onRemoveFromListing(index);
-                              }}
-                              title="Remove from listing"
-                            >
-                              &times;
-                            </button>
+                            {genSelectMode && genSelectedPhotos.has(index) && (
+                              <div className="pointer-events-none absolute inset-0 z-10 rounded-xl ring-4 ring-inset ring-blue-500">
+                                <div className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-blue-500 text-white">
+                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                                    <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                                  </svg>
+                                </div>
+                              </div>
+                            )}
                             {imageSelectionActive && isSelected && (
                               <div className="pointer-events-none absolute left-1.5 top-1.5 z-20 flex h-6 w-6 items-center justify-center rounded-full bg-blue-500 text-xs font-bold text-white shadow">
                                 &#10003;
@@ -786,6 +887,21 @@ function CreateWorkflow({
                 />
               </div>
             )}
+          {onAddToGeneratedImages && (
+            <ImageUploadModal
+              isOpen={showGenUploadModal}
+              onClose={() => setShowGenUploadModal(false)}
+              onAddImages={(images) => {
+                const items = Array.isArray(images) ? images : [images];
+                items.forEach((item) => {
+                  const url = typeof item === "string" ? item : item.dataUrl;
+                  onAddToGeneratedImages(url);
+                });
+              }}
+              canAddToOriginal={false}
+              mode="generated"
+            />
+          )}
         </div>
       )}
 

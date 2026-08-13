@@ -200,6 +200,13 @@ Ensure you run `collect` before `process`. Verify seller username matches folder
 
 ## Things to prompt:
 
+- title SEO is not SEOing: https://www.ebay.com/sch/i.html?_nkw=X3+Band+Protector+Edge+Guards&_sacat=0&_from=R40&_trksid=p2332490.m570.l1313
+
+- have skip photos and delete photos -> skip just doesn't pass it though AI
+  - wut is the best workflow for that
+
+- maybe include original images + AI to get minimum number of images
+
 
 
 goals "!" = not important:
@@ -210,6 +217,15 @@ goals "!" = not important:
   [] !shipping policies customization
 [] create a research workflow:
   [] find hot products: recently sold + low competition
+
+research tool outline:
+
+copy seller:
+  1. searches best sellers for the week / month from a certain seller
+  2. within those best sellers, search how much competition that product has
+    2a. simplify title -> short common phrase to search
+    2b. within search results, reverse image search (with AI or nah?) to double check that these listings are acc competition
+    2c. calculate demand coefficent: account for ratio of listings vs sold and days since last sold and maybe historic demand consistancy / slope
 
 
 next make this work:

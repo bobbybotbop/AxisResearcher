@@ -1894,6 +1894,147 @@ def upload_listing():
     return streaming_response(generate())
 
 
+@app.route('/api/upload-test-listing', methods=['POST'])
+def upload_test_listing():
+    """
+    Upload a synthetic test listing to eBay using real credentials.
+    Uses hardcoded test data (product details, pricing) but injects real
+    listing policies and merchant location from .env / listingPreferences.json.
+    Intended for debugging the upload pipeline from the Test Workflow tab.
+    Streams NDJSON progress events identical to /api/upload-listing.
+    """
+    def generate():
+        try:
+            print("[TEST-UPLOAD] /api/upload-test-listing called")
+
+            # --- Build test inventory item data ---
+            test_inventory_item = {
+                "availability": {
+                    "shipToLocationAvailability": {"quantity": 1}
+                },
+                "condition": "NEW",
+                "packageWeightAndSize": {
+                    "weight": {"value": "0.5", "unit": "POUND"},
+                    "dimensions": {"length": "8", "width": "6", "height": "2", "unit": "INCH"},
+                },
+                "product": {
+                    "title": "AxisResearcher Test Listing - Do Not Buy - Will Be Deleted",
+                    "description": "<p>This is a test listing created by AxisResearcher to verify the upload pipeline. It will be deleted immediately.</p>",
+                    "aspects": {
+                        "Brand": ["Unbranded"],
+                        "Type": ["Test"],
+                    },
+                    "imageUrls": [
+                        "https://picsum.photos/seed/axistest/400/400",
+                    ],
+                },
+            }
+
+            # --- Build test offer data ---
+            from backend.copyScripts.combine_data import MERCHANT_LOCATION_KEY, get_listing_policies
+            test_offer = {
+                "marketplaceId": "EBAY_US",
+                "format": "FIXED_PRICE",
+                "quantity": 1,
+                "pricingSummary": {
+                    "price": {"value": "999.99", "currency": "USD"}
+                },
+                "listingDuration": "GTC",
+                "categoryId": "181415",
+                "merchantLocationKey": MERCHANT_LOCATION_KEY,
+            }
+
+            # Inject real listing policies from .env
+            policies = get_listing_policies()
+            print(f"[TEST-UPLOAD] Listing policies from .env: {policies}")
+            if not policies:
+                yield error_event(
+                    "No listing policies found in .env. "
+                    "Set fulfillment_policy_id, payment_policy_id, return_policy_id."
+                )
+                return
+            test_offer["listingPolicies"] = policies
+
+            test_sku = "AXIS_TEST_DEBUG_001"
+
+            print(f"[TEST-UPLOAD] SKU: {test_sku}")
+            print(f"[TEST-UPLOAD] Title: {test_inventory_item['product']['title']}")
+            print(f"[TEST-UPLOAD] Price: {test_offer['pricingSummary']['price']['value']}")
+            print(f"[TEST-UPLOAD] merchantLocationKey: {MERCHANT_LOCATION_KEY}")
+            print(f"[TEST-UPLOAD] Policies: {policies}")
+            print(f"[TEST-UPLOAD] Full inventory item: {json.dumps(test_inventory_item, indent=2)}")
+            print(f"[TEST-UPLOAD] Full offer data: {json.dumps(test_offer, indent=2)}")
+
+            yield progress_event('Preparing listing data', 'completed')
+            yield progress_event('Uploading to eBay', 'in_progress')
+
+            try:
+                upload_result = upload_complete_listing(
+                    sku=test_sku,
+                    inventory_item_data=test_inventory_item,
+                    offer_data=test_offer,
+                    locale="en-US",
+                    use_user_token=True,
+                )
+            except Exception as upload_exc:
+                error_msg = str(upload_exc)
+                print(f"[TEST-UPLOAD] Exception during upload_complete_listing: {error_msg}")
+                import traceback
+                traceback.print_exc()
+                yield error_event(f"Upload exception: {error_msg}")
+                return
+
+            if not upload_result:
+                print("[TEST-UPLOAD] upload_complete_listing returned None")
+                yield error_event("Upload returned no result. Check server logs.")
+                return
+
+            print(f"[TEST-UPLOAD] Upload succeeded. Result: {upload_result}")
+            yield progress_event('Uploading to eBay', 'completed')
+
+            # Non-fatal promoted listings enrollment (same as real upload)
+            from backend.copyScripts.combine_data import (
+                get_promoted_listing_settings,
+                get_promoted_listing_campaign_ids,
+                save_promoted_listing_campaign_ids,
+            )
+            promote_settings = get_promoted_listing_settings()
+            if promote_settings.get("auto_promote_enabled"):
+                yield progress_event('Enrolling in Promoted Listings', 'in_progress')
+                try:
+                    ids = get_promoted_listing_campaign_ids()
+                    user_token = os.getenv("user_token", "")
+                    new_campaign_id, new_ad_group_id = promote_listing(
+                        sku=test_sku,
+                        user_token=user_token,
+                        campaign_id=ids["campaign_id"],
+                        ad_group_id=ids["ad_group_id"],
+                        ad_rate=promote_settings["promoted_listing_ad_rate"],
+                    )
+                    if new_campaign_id != ids["campaign_id"] or new_ad_group_id != ids["ad_group_id"]:
+                        save_promoted_listing_campaign_ids(new_campaign_id, new_ad_group_id)
+                    yield progress_event('Enrolling in Promoted Listings', 'completed')
+                except PromotionError as pe:
+                    print(f"[TEST-UPLOAD] Promoted listing enrollment failed: {pe}")
+                    yield progress_event(f'Promoted listing enrollment failed: {pe}', 'warning')
+                except Exception as pe:
+                    print(f"[TEST-UPLOAD] Unexpected error during promotion: {pe}")
+                    yield progress_event(f'Promoted listing enrollment failed (unexpected): {pe}', 'warning')
+
+            yield result_event({"upload_result": upload_result, "error": None})
+
+        except Exception as e:
+            try:
+                error_msg = str(e)
+            except UnicodeEncodeError:
+                error_msg = "An error occurred (encoding error)"
+            import traceback
+            traceback.print_exc()
+            yield error_event(f"Unexpected error in test upload: {error_msg}")
+
+    return streaming_response(generate())
+
+
 def _test_application_token():
     """Test application token by making a simple Browse API search call."""
     token = os.getenv('application_token')
@@ -2139,6 +2280,7 @@ def api_restock_listings():
 
     updated = []
     failed = []
+    failed_errors = {}  # sku -> list of eBay error message strings
 
     # --- MANUAL_ SKUs: route through ReviseInventoryStatus (Trading API) ---
     if manual_skus:
@@ -2155,8 +2297,10 @@ def api_restock_listings():
                     update_local_listing_quantity(sku=sku, quantity=quantity)
                 else:
                     failed.append(sku)
-        except Exception:
+        except Exception as e:
             failed.extend(manual_skus)
+            for sku in manual_skus:
+                failed_errors[sku] = [str(e)]
 
     # --- Automated SKUs: route through Sell Inventory API ---
     if automated_skus:
@@ -2211,23 +2355,36 @@ def api_restock_listings():
                     )
                     if r.status_code not in (200, 207):
                         failed.extend(batch)
+                        for sku in batch:
+                            failed_errors[sku] = [f'HTTP {r.status_code}: {r.text[:200]}']
                         continue
                     data = r.json() or {}
                     responses = data.get('responses', [])
-                    status_by_sku = {resp.get('sku'): resp.get('statusCode') for resp in responses}
+                    resp_by_sku = {resp.get('sku'): resp for resp in responses}
                     for sku in batch:
-                        if status_by_sku.get(sku) == 200:
+                        resp = resp_by_sku.get(sku)
+                        if resp and resp.get('statusCode') == 200:
                             updated.append(sku)
                         else:
                             failed.append(sku)
-                except Exception:
+                            errors = resp.get('errors', []) if resp else []
+                            if errors:
+                                failed_errors[sku] = [
+                                    e.get('message') or e.get('longMessage') or str(e)
+                                    for e in errors
+                                ]
+                            elif r.status_code not in (200, 207):
+                                failed_errors[sku] = [f'HTTP {r.status_code}']
+                except Exception as e:
                     failed.extend(batch)
+                    for sku in batch:
+                        failed_errors[sku] = [str(e)]
 
             for sku in updated:
                 if not sku.startswith('MANUAL_'):
                     update_local_listing_quantity(sku=sku, quantity=quantity)
 
-    return jsonify({'updated': updated, 'failed': failed, 'quantity': quantity}), 200
+    return jsonify({'updated': updated, 'failed': failed, 'failed_errors': failed_errors, 'quantity': quantity}), 200
 
 
 @app.route('/api/testing', methods=['POST'])

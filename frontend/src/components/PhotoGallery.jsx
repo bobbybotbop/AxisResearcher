@@ -13,6 +13,8 @@ function PhotoGallery({
   onSkipPhoto,
   onAddToOriginalPhotos,
   onOpenEditor,
+  onDeletePhotos,
+  onRemoveBackgrounds,
   showClassification = true,
   hideConfirmButton = false,
 }) {
@@ -142,7 +144,7 @@ function PhotoGallery({
               Bulk Actions ▾
             </button>
             {bulkDropdownOpen && (
-              <div className="absolute right-0 top-full z-20 mt-1 min-w-30 rounded-lg border border-border-default bg-surface-panel py-1 shadow-lg">
+              <div className="absolute right-0 top-full z-20 mt-1 min-w-36 rounded-lg border border-border-default bg-surface-panel py-1 shadow-lg">
                 <button
                   type="button"
                   className="w-full px-4 py-2 text-left text-sm text-text-primary hover:bg-surface-app"
@@ -158,6 +160,35 @@ function PhotoGallery({
                 >
                   Skip
                 </button>
+                {onRemoveBackgrounds && (
+                  <button
+                    type="button"
+                    className="w-full px-4 py-2 text-left text-sm text-text-primary hover:bg-surface-app"
+                    onClick={() => {
+                      const urls = Array.from(selectedPhotos).map((idx) => photos[idx]);
+                      onRemoveBackgrounds(urls);
+                      setSelectedPhotos(new Set());
+                      setSelectMode(false);
+                      setBulkDropdownOpen(false);
+                    }}
+                  >
+                    Remove Background
+                  </button>
+                )}
+                {onDeletePhotos && (
+                  <button
+                    type="button"
+                    className="w-full px-4 py-2 text-left text-sm text-text-primary hover:bg-surface-app"
+                    onClick={() => {
+                      onDeletePhotos(Array.from(selectedPhotos));
+                      setSelectedPhotos(new Set());
+                      setSelectMode(false);
+                      setBulkDropdownOpen(false);
+                    }}
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -181,18 +212,6 @@ function PhotoGallery({
                 }
               }}
             >
-              {onSkipPhoto && !selectMode && (
-                <button
-                  className="absolute right-1.5 top-1.5 z-10 flex h-8 w-8 items-center justify-center rounded-full text-lg font-bold text-white opacity-0 shadow-md transition-opacity hover:opacity-90 focus-visible:opacity-100 group-hover:opacity-100"
-                  style={{
-                    background: isSkipped ? "#4CAF50" : "#f44336",
-                  }}
-                  onClick={(e) => handleSkipClick(e, photoUrl)}
-                  title={isSkipped ? "Include this photo" : "Skip this photo"}
-                >
-                  {isSkipped ? "✓" : "×"}
-                </button>
-              )}
               <img
                 src={photoUrl}
                 alt={`Photo ${index + 1}`}

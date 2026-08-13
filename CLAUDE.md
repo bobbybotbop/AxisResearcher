@@ -88,7 +88,7 @@ The project uses two independent token types with distinct lifecycles:
 - **`backend/copyScripts/`** — the listing pipeline, roughly in call order:
   - `CopyListingMain.py` — fetches a listing by ID/URL, allocates the next SKU, categorizes source photos.
   - `create_image.py` — AI image generation (OpenRouter) and image categorization. Photos are classified into `professional_image` / `real_world_image` / `bad_image` / `edited_image` per the rules in `prompts/categorizeImage.txt`; generation prompts come from `prompts/generateImageFromProfessional`, `generateImageFromWorld.txt`, `experimental.txt` selected via the `ImageType` enum (`PROFESSIONAL`, `REAL_WORLD`, `EXPERIMENTAL`).
-  - `create_text.py` — generates optimized title/description via `call_text_llm` (in `ebay_cli.py`), using the `prompts/generateTextPrompt.txt` template.
+  - `create_text.py` — generates optimized title/description via two parallel `call_text_llm` calls (in `ebay_cli.py`), using `prompts/generateTitlePrompt.txt` and `prompts/generateDescriptionPrompt.txt` respectively.
   - `combine_data.py` — owns the SKU counter (`listingPreferences.json`) and all reads/writes of draft listing JSON under `Generated_Listings/<SKU>.json`. This is the local "draft" store that exists between fetching a source listing and actually uploading to eBay.
   - `upload_to_ebay.py` — publishes a draft (`Generated_Listings/*.json`) as a real eBay inventory item + offer.
   - `imageEditing.py` — background removal (`rembg`) and canvas compositing.

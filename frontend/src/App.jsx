@@ -724,6 +724,9 @@ function App() {
   };
 
   // Test workflow state (mock data, no API calls) — single state object
+  const [testRealUploadEnabled, setTestRealUploadEnabled] = useState(() => {
+    try { return localStorage.getItem("testRealUploadEnabled") === "true"; } catch { return false; }
+  });
   const [testWf, setTestWf] = useState(createTestWorkflowState);
   const setTestKey = (key) => (valOrFn) =>
     setTestWf((w) => ({
@@ -1638,6 +1641,115 @@ function App() {
     );
   }, [currentSku]);
 
+  const handleDeleteOriginalPhotos = useCallback((indices) => {
+    const indexSet = new Set(indices);
+    setPhotos((prev) => {
+      const removed = prev.filter((_, i) => indexSet.has(i));
+      setEditableCategories((cats) => {
+        const next = { ...cats };
+        removed.forEach((url) => delete next[url]);
+        return next;
+      });
+      setSkippedPhotos((s) => {
+        const next = new Set(s);
+        removed.forEach((url) => next.delete(url));
+        return next;
+      });
+      return prev.filter((_, i) => !indexSet.has(i));
+    });
+  }, []);
+
+  const handleRemoveBackgroundOriginal = useCallback(async (photoUrls) => {
+    for (const url of photoUrls) {
+      try {
+        const imgResp = await fetch(url);
+        const blob = await imgResp.blob();
+        const formData = new FormData();
+        formData.append("image", blob, "photo.png");
+        const resp = await fetch("/api/remove-background", { method: "POST", body: formData });
+        if (!resp.ok) continue;
+        const resultBlob = await resp.blob();
+        const dataUrl = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve(ev.target.result);
+          reader.readAsDataURL(resultBlob);
+        });
+        setPhotos((prev) => prev.map((u) => (u === url ? dataUrl : u)));
+        setEditableCategories((prev) => {
+          const next = { ...prev };
+          const cat = next[url];
+          delete next[url];
+          next[dataUrl] = cat;
+          return next;
+        });
+        setSkippedPhotos((prev) => {
+          if (!prev.has(url)) return prev;
+          const next = new Set(prev);
+          next.delete(url);
+          next.add(dataUrl);
+          return next;
+        });
+      } catch (err) {
+        console.error("BG removal failed for", url, err);
+      }
+    }
+  }, []);
+
+  const handleDeleteGeneratedImages = useCallback((indices) => {
+    const sorted = [...indices].sort((a, b) => b - a);
+    setGeneratedImages((prev) => {
+      const updated = prev.filter((_, i) => !indices.includes(i));
+      if (currentSku && updated.length > 0) {
+        fetch("/api/update-listing-images", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sku: currentSku, image_urls: updated }),
+        })
+          .then((r) => r.json())
+          .then((syncData) => { if (syncData.listing_data) setListingData(syncData.listing_data); })
+          .catch((err) => console.error("Failed to sync images to disk:", err));
+      }
+      return updated;
+    });
+    setSelectedImagesForRegen([]);
+    void sorted;
+  }, [currentSku]);
+
+  const handleRemoveBackgroundGenerated = useCallback(async (imageUrls) => {
+    for (const url of imageUrls) {
+      try {
+        const imgResp = await fetch(url);
+        const blob = await imgResp.blob();
+        const formData = new FormData();
+        formData.append("image", blob, "photo.png");
+        const resp = await fetch("/api/remove-background", { method: "POST", body: formData });
+        if (!resp.ok) continue;
+        const resultBlob = await resp.blob();
+        const dataUrl = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = (ev) => resolve(ev.target.result);
+          reader.readAsDataURL(resultBlob);
+        });
+        setGeneratedImages((prev) => {
+          const updated = prev.map((u) => (u === url ? dataUrl : u));
+          if (currentSku && updated.length > 0) {
+            fetch("/api/update-listing-images", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ sku: currentSku, image_urls: updated }),
+            })
+              .then((r) => r.json())
+              .then((syncData) => { if (syncData.listing_data) setListingData(syncData.listing_data); })
+              .catch((err) => console.error("Failed to sync images to disk:", err));
+          }
+          return updated;
+        });
+      } catch (err) {
+        console.error("BG removal failed for", url, err);
+      }
+    }
+  }, [currentSku]);
+
   const handleDragEnd = useCallback((result) => {
     if (!result.destination) return;
     const srcIdx = result.source.index;
@@ -2171,8 +2283,7 @@ function App() {
     if (!Number.isFinite(qty) || qty < 0) return;
 
     const skus = allListings
-      .filter((l) => !isIncomplete(l))
-      .filter((l) => String(l.ebayListingId ?? "").trim())
+      .filter((l) => l.sku.startsWith("MANUAL_") || isUploaded(l))
       .filter((l) => listingQuantities[l.sku] !== qty)
       .map((l) => l.sku);
     if (!skus.length) return;
@@ -2198,6 +2309,19 @@ function App() {
       }
       if (data.failed?.length) {
         addToast("error", `Failed to restock ${data.failed.length} listing(s)`);
+        const failedErrors = data.failed_errors || {};
+        const skuToListing = Object.fromEntries(allListings.map((l) => [l.sku, l]));
+        console.group(`Restock failed for ${data.failed.length} listing(s)`);
+        data.failed.forEach((sku) => {
+          const l = skuToListing[sku];
+          const ebayId = l?.ebayListingId || sku;
+          const url = ebayId && !sku.startsWith("MANUAL_")
+            ? `https://www.ebay.com/itm/${ebayId}`
+            : `(MANUAL item ${ebayId})`;
+          const errors = failedErrors[sku]?.join("; ") || "(no error details)";
+          console.warn(`SKU ${sku} | ${url} | ${errors}`);
+        });
+        console.groupEnd();
       }
     } catch (err) {
       console.error("Error restocking listings:", err);
@@ -2895,7 +3019,63 @@ function App() {
     }, 500);
   };
 
-  const testHandleUploadToEbay = (sku, listingData) => {
+  const testHandleUploadToEbay = async (sku, listingData) => {
+    if (testRealUploadEnabled) {
+      // Real upload mode: hit the dedicated test endpoint which uses real credentials
+      setTestUploadingSkus((prev) => new Set(prev).add(sku));
+      setTestError(null);
+      const steps = ["Preparing listing data", "Uploading to eBay"];
+      setTestUploadProgress({
+        isActive: true,
+        currentStep: null,
+        completedSteps: [],
+        totalSteps: steps,
+      });
+      try {
+        console.log("[TEST-UPLOAD] Calling real /api/upload-test-listing");
+        const data = await fetchWithProgress(
+          "/api/upload-test-listing",
+          { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
+          (event) => {
+            setTestUploadProgress((prev) => {
+              const completed = [...prev.completedSteps];
+              if (event.status === "completed" && !completed.includes(event.step)) {
+                completed.push(event.step);
+              }
+              return {
+                ...prev,
+                completedSteps: completed,
+                currentStep: event.status === "in_progress" ? event.step : prev.currentStep,
+              };
+            });
+          }
+        );
+        console.log("[TEST-UPLOAD] Response:", data);
+        if (!data?.upload_result) {
+          throw new Error("Upload completed but no result returned");
+        }
+        setTestUploadResult(data.upload_result);
+        setTestUploadProgress({
+          isActive: false,
+          currentStep: null,
+          completedSteps: steps,
+          totalSteps: steps,
+        });
+      } catch (err) {
+        console.error("[TEST-UPLOAD] Error:", err);
+        setTestError(err.message || "Real upload failed");
+        setTestUploadProgress({ isActive: false, currentStep: null, completedSteps: [], totalSteps: steps });
+      } finally {
+        setTestUploadingSkus((prev) => {
+          const s = new Set(prev);
+          s.delete(sku);
+          return s;
+        });
+      }
+      return;
+    }
+
+    // Mock mode
     setTestUploadingSkus((prev) => new Set(prev).add(sku));
     setTestError(null);
     const steps = ["Preparing listing data", "Uploading to eBay"];
@@ -3168,6 +3348,34 @@ function App() {
           }`}
         >
           {activeTab === "test-workflow" && (
+            <div
+              className={`mb-4 mt-6 flex items-center gap-3 rounded-lg border px-4 py-3 text-sm ${
+                testRealUploadEnabled
+                  ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                  : "border-border-default bg-surface-panel text-text-muted"
+              }`}
+            >
+              <label className="flex cursor-pointer items-center gap-2 select-none">
+                <input
+                  type="checkbox"
+                  checked={testRealUploadEnabled}
+                  onChange={(e) => {
+                    const val = e.target.checked;
+                    setTestRealUploadEnabled(val);
+                    try { localStorage.setItem("testRealUploadEnabled", String(val)); } catch {}
+                  }}
+                  className="rounded"
+                />
+                <span className="font-medium">Real eBay upload</span>
+              </label>
+              <span>
+                {testRealUploadEnabled
+                  ? "Upload button will hit the real eBay API using a test SKU (AXIS_TEST_DEBUG_001) and your real credentials. Check server logs for the full error."
+                  : "Upload button is mocked. Enable to test the real upload pipeline."}
+              </span>
+            </div>
+          )}
+          {activeTab === "test-workflow" && (
             <CreateWorkflow
               listingId={testListingId}
               listingLinkSubmitted={testListingLinkSubmitted}
@@ -3260,6 +3468,9 @@ function App() {
                 setTestSelectedImagesForRegen([]);
               }}
               onAddToListing={(url) =>
+                setTestGeneratedImages((prev) => [...prev, url])
+              }
+              onAddToGeneratedImages={(url) =>
                 setTestGeneratedImages((prev) => [...prev, url])
               }
               onAddToOriginalPhotos={(urls) => {
@@ -4066,6 +4277,11 @@ function App() {
               onRemoveFromListing={handleRemoveFromListing}
               onAddToListing={handleAddToListing}
               onAddToOriginalPhotos={handleAddToOriginalPhotos}
+              onAddToGeneratedImages={handleAddToListing}
+              onDeleteGeneratedImages={handleDeleteGeneratedImages}
+              onRemoveBackgroundGenerated={handleRemoveBackgroundGenerated}
+              onDeleteOriginalPhotos={handleDeleteOriginalPhotos}
+              onRemoveBackgroundOriginal={handleRemoveBackgroundOriginal}
               isGeneratingText={isGeneratingText}
               textGenStatus={textGenStatus}
               onCancelTextGen={cancelTextGeneration}

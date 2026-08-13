@@ -1,5 +1,5 @@
 {
-  "counter": 80,
+  "counter": 82,
   "merchant_location_key": "PlasticLoveShopLocation",
   "default_quantity": 15,
   "default_dimensions": {
@@ -14,8 +14,8 @@
   },
   "auto_restock_enabled": true,
   "auto_restock_quantity": 15,
-  "minimum_images_per_listing": 10,
-  "manual_listings_last_refreshed": "2026-07-27T02:12:57.865593+00:00",
+  "minimum_images_per_listing": 1,
+  "manual_listings_last_refreshed": "2026-08-13T07:40:06.395851+00:00",
   "auto_promote_enabled": true,
   "promoted_listing_ad_rate": 7.0,
   "promoted_listing_campaign_id": "",

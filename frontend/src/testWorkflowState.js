@@ -28,6 +28,9 @@ export function createTestWorkflowState() {
     isSavingTitle: false,
     editableDescription: '',
     isSavingDescription: false,
+    isGeneratingText: false,
+    textGenStatus: 'writing',
+    textGenComplete: false,
     lightboxOpen: false,
     lightboxIndex: 0,
     fetchProgress: {
