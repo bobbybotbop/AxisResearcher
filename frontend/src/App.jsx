@@ -2284,6 +2284,7 @@ function App() {
 
     const skus = allListings
       .filter((l) => l.sku.startsWith("MANUAL_") || isUploaded(l))
+      .filter((l) => !l.isVariationListing)
       .filter((l) => listingQuantities[l.sku] !== qty)
       .map((l) => l.sku);
     if (!skus.length) return;
@@ -3020,6 +3021,7 @@ function App() {
   };
 
   const testHandleUploadToEbay = async (sku, listingData) => {
+    console.log("[TEST-UPLOAD] testHandleUploadToEbay called", { sku, listingData });
     if (testRealUploadEnabled) {
       // Real upload mode: hit the dedicated test endpoint which uses real credentials
       setTestUploadingSkus((prev) => new Set(prev).add(sku));
@@ -3076,6 +3078,7 @@ function App() {
     }
 
     // Mock mode
+    console.log("[TEST-UPLOAD] Running in mock mode");
     setTestUploadingSkus((prev) => new Set(prev).add(sku));
     setTestError(null);
     const steps = ["Preparing listing data", "Uploading to eBay"];

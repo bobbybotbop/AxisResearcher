@@ -1648,6 +1648,8 @@ def get_seller_list(mod_time_from=None):
                 "condition": item_el.findtext(f"{ns}ConditionDisplayName", ""),
                 "start_time": item_el.findtext(f"{ns}ListingDetails/{ns}StartTime", ""),
                 "description": item_el.findtext(f"{ns}Description", ""),
+                "seller_sku": item_el.findtext(f"{ns}SKU", "") or "",
+                "is_variation": item_el.find(f"{ns}Variations") is not None,
             })
         has_more = root.findtext(f"{ns}HasMoreItems", "false").lower()
         if has_more != "true":
@@ -1662,7 +1664,7 @@ def revise_inventory_status_batch(items):
     Use this for MANUAL_ listings that don't exist in the Sell Inventory API.
     items: list of {'item_id': str, 'quantity': int} — eBay item IDs (not SKUs).
     eBay allows a maximum of 4 InventoryStatus elements per request.
-    Returns list of {'item_id': str, 'ok': bool}.
+    Returns list of {'item_id': str, 'ok': bool, 'errors': list[str]}.
     """
     load_dotenv(override=True)
     token = os.getenv('user_token', '').strip()
@@ -1678,6 +1680,22 @@ def revise_inventory_status_batch(items):
         "X-EBAY-API-CERT-NAME": CLIENT_SECRET,
         "Content-Type": "text/xml",
     }
+
+    def _parse_errors(parent_el):
+        """Return error messages for Error-severity elements only (Warnings are not failures)."""
+        msgs = []
+        for err_el in parent_el.findall(f"{ns}Errors"):
+            if err_el.findtext(f"{ns}SeverityCode", "Error") != "Error":
+                continue
+            msg = (
+                err_el.findtext(f"{ns}LongMessage")
+                or err_el.findtext(f"{ns}ShortMessage")
+                or ""
+            ).strip()
+            if msg:
+                msgs.append(msg)
+        return msgs
+
     results = []
     for i in range(0, len(items), 4):
         batch = items[i : i + 4]
@@ -1701,26 +1719,26 @@ def revise_inventory_status_batch(items):
         )
         if r.status_code != 200:
             for it in batch:
-                results.append({"item_id": it["item_id"], "ok": False})
+                results.append({"item_id": it["item_id"], "ok": False, "errors": [f"HTTP {r.status_code}"]})
             continue
         root = ET.fromstring(r.text)
         ack = root.findtext(f"{ns}Ack", "")
         if ack == "Failure":
-            # Whole batch failed — no per-item detail possible
+            top_errors = _parse_errors(root)
             for it in batch:
-                results.append({"item_id": it["item_id"], "ok": False})
+                results.append({"item_id": it["item_id"], "ok": False, "errors": top_errors or ["Request failed"]})
             continue
         # Parse per-item results from response InventoryStatus elements
         responded_ids = set()
         for status_el in root.findall(f"{ns}InventoryStatus"):
             item_id = status_el.findtext(f"{ns}ItemID", "")
-            has_errors = len(status_el.findall(f"{ns}Errors")) > 0
-            results.append({"item_id": item_id, "ok": not has_errors})
+            item_errors = _parse_errors(status_el)
+            results.append({"item_id": item_id, "ok": not item_errors, "errors": item_errors})
             responded_ids.add(item_id)
         # Any item not in the response gets ok=True (eBay omits successful items on Warning)
         for it in batch:
             if it["item_id"] not in responded_ids:
-                results.append({"item_id": it["item_id"], "ok": True})
+                results.append({"item_id": it["item_id"], "ok": True, "errors": []})
     return results
 
 

@@ -1188,8 +1188,10 @@ def write_manual_listing_json(item):
     data = {
         "sku": sku,
         "ebayListingId": item["item_id"],
+        "sellerSku": item.get("seller_sku", ""),
         "createdDateTime": item["start_time"],
         "isManualListing": True,
+        "isVariationListing": item.get("is_variation", False),
         "inventoryItem": {
             "product": {
                 "title": item["title"],

@@ -1619,6 +1619,7 @@ def list_all_listings():
                         'ebayListingId': str(listing_data.get('ebayListingId') or '').strip(),
                         'models': listing_data.get('models') or None,
                         'isManualListing': bool(listing_data.get('isManualListing', False)),
+                        'isVariationListing': bool(listing_data.get('isVariationListing', False)),
                     })
                 except Exception as e:
                     print(f"[API] Error reading {filename}: {e}")
@@ -1918,8 +1919,8 @@ def upload_test_listing():
                     "dimensions": {"length": "8", "width": "6", "height": "2", "unit": "INCH"},
                 },
                 "product": {
-                    "title": "AxisResearcher Test Listing - Do Not Buy - Will Be Deleted",
-                    "description": "<p>This is a test listing created by AxisResearcher to verify the upload pipeline. It will be deleted immediately.</p>",
+                    "title": "Vintage Ceramic Decorative Bowl Home Decor Accent Piece",
+                    "description": "<p>Beautiful ceramic decorative bowl suitable for home and office use. Great accent piece for any room.</p>",
                     "aspects": {
                         "Brand": ["Unbranded"],
                         "Type": ["Test"],
@@ -2297,6 +2298,8 @@ def api_restock_listings():
                     update_local_listing_quantity(sku=sku, quantity=quantity)
                 else:
                     failed.append(sku)
+                    if result_item.get('errors'):
+                        failed_errors[sku] = result_item['errors']
         except Exception as e:
             failed.extend(manual_skus)
             for sku in manual_skus:
@@ -2383,6 +2386,11 @@ def api_restock_listings():
             for sku in updated:
                 if not sku.startswith('MANUAL_'):
                     update_local_listing_quantity(sku=sku, quantity=quantity)
+
+    if failed:
+        for sku in failed:
+            errors = failed_errors.get(sku) or ['(no error details)']
+            print(f"[restock] FAILED {sku}: {'; '.join(errors)}")
 
     return jsonify({'updated': updated, 'failed': failed, 'failed_errors': failed_errors, 'quantity': quantity}), 200
 
