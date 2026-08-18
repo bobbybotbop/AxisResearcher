@@ -78,21 +78,14 @@ const IMAGE_MODEL_OPTIONS = [
     outputCostPer1M: 1.5,
   },
   {
+    value: "bytedance-seed/seedream-5-0-lite",
+    label: "Seedream 5.0 Lite",
+    costPerImage: 0.035,
+  },
+  {
     value: "bytedance-seed/seedream-4.5",
     label: "Seedream 4.5",
     costPerImage: 0.04,
-  },
-  {
-    value: "stability.stable-image-control-structure-v1:0",
-    label: "Stable Image Control Structure",
-    provider: "bedrock",
-    costPerImage: 0.08,
-  },
-  {
-    value: "stability.stable-image-search-recolor-v1:0",
-    label: "Stable Image Search Recolor",
-    provider: "bedrock",
-    costPerImage: 0.08,
   },
 ];
 
@@ -298,10 +291,17 @@ function App() {
   const [imageModel, setImageModel] = useState(() => {
     try {
       return (
-        localStorage.getItem("axisImageModel") || "sourceful/riverflow-v2-fast"
+        localStorage.getItem("axisImageModel") || "bytedance-seed/seedream-5-0-lite"
       );
     } catch {
-      return "sourceful/riverflow-v2-fast";
+      return "bytedance-seed/seedream-5-0-lite";
+    }
+  });
+  const [imageResolution, setImageResolution] = useState(() => {
+    try {
+      return localStorage.getItem("axisImageResolution") || "1024x1024";
+    } catch {
+      return "1024x1024";
     }
   });
   const [classifierModel, setClassifierModel] = useState(() => {
@@ -525,6 +525,14 @@ function App() {
       // ignore
     }
   }, [imageModel]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("axisImageResolution", imageResolution);
+    } catch {
+      // ignore
+    }
+  }, [imageResolution]);
 
   useEffect(() => {
     try {
@@ -1427,6 +1435,7 @@ function App() {
         photos: photosToProcess,
         categories: categoriesToProcess,
         image_model: imageModel,
+        image_resolution: imageResolution,
         classify_enabled: classifyImagesEnabled,
         ...(pendingImagePromptModifier && { prompt_modifier: pendingImagePromptModifier }),
         image_prompt_real_world: imagePromptRealWorld,
@@ -1830,6 +1839,7 @@ function App() {
           image_urls: imagesToRegen,
           prompt: promptToUse,
           image_model: imageModel,
+          image_resolution: imageResolution,
           image_prompt_experimental: imagePromptExperimental,
         }),
       });
@@ -1969,6 +1979,7 @@ function App() {
           image_urls: imagesToRegen,
           prompt: customPrompt.trim(),
           image_model: imageModel,
+          image_resolution: imageResolution,
           image_prompt_experimental: imagePromptExperimental,
         }),
       });
@@ -3057,6 +3068,7 @@ function App() {
           throw new Error("Upload completed but no result returned");
         }
         setTestUploadResult(data.upload_result);
+        console.log("[TEST-UPLOAD] setTestUploadResult called with", data.upload_result);
         setTestUploadProgress({
           isActive: false,
           currentStep: null,
@@ -3923,6 +3935,25 @@ function App() {
                     />
                     <span className="text-text-tertiary text-xs">
                       When classifier is off, angle variants are generated to reach this count.
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-text-secondary text-sm">
+                      Output image resolution
+                    </label>
+                    <select
+                      value={imageResolution}
+                      onChange={(e) => setImageResolution(e.target.value)}
+                      className="w-40 rounded-lg border border-border-default bg-surface-panel px-3 py-2 text-sm font-medium text-text-primary focus:border-primary focus:outline-none"
+                    >
+                      <option value="512x512">512 x 512</option>
+                      <option value="1024x1024">1024 x 1024</option>
+                      <option value="1080x1080">1080 x 1080</option>
+                      <option value="1600x1600">1600 x 1600</option>
+                      <option value="2048x2048">2048 x 2048</option>
+                    </select>
+                    <span className="text-text-tertiary text-xs">
+                      Resolution requested from the AI model. Higher values produce sharper images but cost more.
                     </span>
                   </div>
                 </div>

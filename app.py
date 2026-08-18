@@ -73,7 +73,7 @@ image_generation_tasks = {}
 image_generation_lock = threading.Lock()
 
 DEFAULT_TEXT_MODEL = "deepseek/deepseek-v4-flash"
-DEFAULT_IMAGE_MODEL = "sourceful/riverflow-v2-fast"
+DEFAULT_IMAGE_MODEL = "bytedance-seed/seedream-5-0-lite"
 DEFAULT_CLASSIFIER_MODEL = "bytedance-seed/seed-1.6-flash"
 
 ANGLE_VARIANTS = [
@@ -1956,7 +1956,8 @@ def upload_test_listing():
                 return
             test_offer["listingPolicies"] = policies
 
-            test_sku = "AXIS_TEST_DEBUG_001"
+            import time as _time
+            test_sku = f"AXIS_TEST_{int(_time.time())}"
 
             print(f"[TEST-UPLOAD] SKU: {test_sku}")
             print(f"[TEST-UPLOAD] Title: {test_inventory_item['product']['title']}")
@@ -3099,11 +3100,6 @@ def _test_text_model(prompt, model):
 
 def _test_image_model(prompt, model):
     import base64
-
-    if model.startswith('stability.'):
-        if not os.getenv('bedrock_api_key'):
-            return None, 'Bedrock API key is not set. Add bedrock_api_key in Settings.'
-        return {'content': 'Stability AI Bedrock models require an input image and cannot be tested here. They will work normally during listing generation.'}, None
 
     api_key = os.getenv('openrouter_api_key')
     if not api_key:

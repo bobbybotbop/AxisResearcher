@@ -543,7 +543,7 @@ def generate_image_from_urls(
     custom_prompt=None,
     prompt_modifier=None,
     extra_instructions=None,
-    model="sourceful/riverflow-v2-fast",
+    model="bytedance-seed/seedream-5-0-lite",
     prompt_filename=None,
 ):
     """
@@ -563,33 +563,6 @@ def generate_image_from_urls(
     Returns:
         list[str]: Array of eBay image URLs, or None on failure
     """
-    # Route Stability AI models to Bedrock
-    if model.startswith("stability."):
-        if custom_prompt:
-            prompt_text = custom_prompt.strip()
-        else:
-            script_dir = Path(__file__).parent.parent.parent
-            if "control-structure" in model:
-                prompt_file_path = script_dir / "prompts" / "image" / "generateImageStabilityControl.txt"
-            elif "search-recolor" in model:
-                prompt_file_path = script_dir / "prompts" / "image" / "generateImageStabilityRecolor.txt"
-            else:
-                prompt_file_path = script_dir / "prompts" / "image" / "generateImageStabilityControl.txt"
-            try:
-                with open(prompt_file_path, 'r', encoding='utf-8') as f:
-                    prompt_text = f.read().strip()
-            except Exception as e:
-                print(f"  Error loading prompt file: {e}")
-                return None
-        if prompt_modifier and isinstance(prompt_modifier, str) and prompt_modifier.strip():
-            prompt_text = prompt_text + " " + prompt_modifier.strip()
-        if extra_instructions and isinstance(extra_instructions, str) and extra_instructions.strip():
-            prompt_text = prompt_text + " " + extra_instructions.strip()
-        if not image_urls or not isinstance(image_urls, list) or len(image_urls) == 0:
-            print("  image_urls must be a non-empty list of image URLs")
-            return None
-        return _bedrock_stability_generate(image_urls, prompt_text, model)
-
     # Load API key
     openrouter_api_key = os.getenv('openrouter_api_key')
     if not openrouter_api_key:
@@ -691,12 +664,12 @@ def generate_image_from_urls(
     
     # Prepare API request
     url = "https://openrouter.ai/api/v1/chat/completions"
-    
+
     headers = {
         "Authorization": f"Bearer {openrouter_api_key}",
         "Content-Type": "application/json",
     }
-    
+
     data = {
         "model": model,
         "messages": [
@@ -704,9 +677,10 @@ def generate_image_from_urls(
                 "role": "user",
                 "content": content
             }
-        ]
+        ],
+        "aspect_ratio": "1:1",
     }
-    
+
     try:
         print(f"🤖 Calling OpenRouter image model {model} ({image_type.value})...")
         response = requests.post(url, headers=headers, data=json.dumps(data), timeout=60)
@@ -771,91 +745,6 @@ def generate_image_from_urls(
         return None
 
 
-def _bedrock_stability_generate(image_urls, prompt_text, model):
-    """
-    Call a Stability AI model on AWS Bedrock (invoke_model) with image input(s).
-    Returns a list of eBay URLs on success, or None on failure.
-
-    Supports:
-      stability.stable-image-control-structure-v1:0  — structure-guided generation
-      stability.stable-image-search-recolor-v1:0     — search-and-recolor
-
-    The first URL in image_urls is used as the primary `image`; additional URLs
-    are ignored (Stability models accept one image input via this API).
-    """
-    import boto3
-    from backend.ebay_cli import _sync_bedrock_bearer_token, _BEDROCK_REGION
-
-    _sync_bedrock_bearer_token()
-
-    if not os.getenv('AWS_BEARER_TOKEN_BEDROCK') and not os.getenv('bedrock_api_key'):
-        print("  Bedrock API key not configured. Set bedrock_api_key in .env")
-        return None
-
-    if not image_urls:
-        print("  No image URLs provided for Bedrock Stability generation")
-        return None
-
-    # Fetch the first image, downscale, and base64-encode it
-    try:
-        img_response = requests.get(image_urls[0], timeout=30)
-        img_response.raise_for_status()
-        image_b64 = base64.b64encode(downscale_image_bytes(img_response.content)).decode("utf-8")
-    except Exception as e:
-        print(f"  Failed to fetch source image for Bedrock: {e}")
-        return None
-
-    body = {
-        "prompt": prompt_text,
-        "image": image_b64,
-        "output_format": "png",
-    }
-    if "control-structure" in model:
-        body["control_strength"] = 0.7
-
-    try:
-        client = boto3.client(service_name="bedrock-runtime", region_name=_BEDROCK_REGION)
-        # Bedrock requires an inference profile ID (us.<model>) for on-demand invocation
-        inference_profile_id = f"us.{model}" if not model.startswith("us.") else model
-        print(f"  Calling Bedrock Stability model via inference profile {inference_profile_id}...")
-        response = client.invoke_model(
-            modelId=inference_profile_id,
-            body=json.dumps(body),
-            contentType="application/json",
-            accept="application/json",
-        )
-        result = json.loads(response["body"].read())
-    except Exception as e:
-        print(f"  Bedrock invoke_model error for {model}: {e}")
-        if hasattr(e, 'response'):
-            err = e.response.get('Error', {})
-            print(f"  AWS Error Code: {err.get('Code', 'unknown')}")
-            print(f"  AWS Error Message: {err.get('Message', 'unknown')}")
-        return None
-
-    # Stability returns {"images": ["<b64>", ...], "finish_reasons": [...]}
-    images = result.get("images") or []
-    if not images:
-        print(f"  No images in Bedrock Stability response: {result}")
-        return None
-
-    ebay_urls = []
-    for idx, img_b64 in enumerate(images):
-        try:
-            image_bytes = base64.b64decode(img_b64)
-        except Exception as e:
-            print(f"⚠️ Failed to decode Bedrock image {idx}: {e}")
-            continue
-
-        picture_name = f"Generated bedrock image {idx + 1}" if len(images) > 1 else "Generated bedrock image"
-        ebay_url = upload_image_bytes_to_ebay(image_bytes, "image/png", picture_name)
-        if ebay_url:
-            ebay_urls.append(ebay_url)
-            print(f"✅ Bedrock image {idx + 1} uploaded to eBay: {ebay_url}")
-        else:
-            print(f"⚠️ Failed to upload Bedrock image {idx + 1} to eBay")
-
-    return ebay_urls if ebay_urls else None
 
 
 def _extension_from_mime(mime_type: str) -> str:
