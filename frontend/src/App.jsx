@@ -2608,7 +2608,7 @@ function App() {
   // Reset to page 0 when filters change.
   useEffect(() => {
     setHistoryPage(0);
-  }, [uploadListingsSearch, uploadListingsDateFrom, uploadListingsDateTo, uploadListingsShowIncomplete]);
+  }, [uploadListingsSearch, uploadListingsDateFrom, uploadListingsDateTo, uploadListingsShowIncomplete, uploadListingsShowUnuploaded, uploadListingsShowManual]);
 
   // Re-fetch quantities when navigating to a new page.
   useEffect(() => {
