@@ -1,6 +1,5 @@
 # UNIVERSAL PROFESSIONAL PRODUCT PHOTOGRAPHY EDITING RULES:
 
-- Format: Square aspect ratio (1:1)
 - Composition: Center subject with tight framing - product should fill most of the frame with minimal whitespace, leaving only necessary margins for clean presentation
 - Perspective correction: Remove lens and camera distortion; straighten all lines and edges
 -Camera angle: Adjust viewpoint by approximately 10 degrees for improved presentation

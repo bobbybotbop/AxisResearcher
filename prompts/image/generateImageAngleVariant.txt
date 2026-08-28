@@ -1,9 +1,8 @@
 # PRODUCT ANGLE VARIANT — E-COMMERCE PHOTOGRAPHY
 
-Re-photograph this product from a {angle}.
+Re-photograph this product strictly from the {angle}. The camera must be positioned to face the product from exactly that direction — do not shoot from any other side or vantage point.
 
-- Format: Square aspect ratio (1:1)
-- Camera angle: Strictly from the specified angle — {angle}
+- Camera angle: Strictly from the specified direction — {angle}. If the angle is "left side view", the camera faces the product's left side. If "right side view", the camera faces the right side. If "top view", the camera looks straight down from above.
 - Background: Pure white studio backdrop, no visible horizon line
 - Lighting: Soft, diffused overhead lighting with even distribution; subtle drop shadows beneath the product for depth
 - Composition: Product fills most of the frame, centered, minimal whitespace

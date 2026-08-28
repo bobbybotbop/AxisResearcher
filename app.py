@@ -77,14 +77,11 @@ DEFAULT_IMAGE_MODEL = "bytedance-seed/seedream-5-0-lite"
 DEFAULT_CLASSIFIER_MODEL = "bytedance-seed/seed-1.6-flash"
 
 ANGLE_VARIANTS = [
-    "front view",
-    "left side view",
-    "right side view",
-    "3/4 front-left view",
-    "3/4 front-right view",
-    "elevated front view",
-    "low front view",
-    "rear view",
+    "45 degree left",
+    "45 degree right",
+    "90 degree left",
+    "90 degree right",
+    "top",
 ]
 
 PROMPT_TYPES = {"title", "description", "image"}
@@ -359,6 +356,7 @@ def generate_image_with_delay(
     prompt_modifier=None,
     extra_instructions=None,
     image_model=None,
+    image_resolution=None,
     prompt_filename=None,
 ):
     """
@@ -395,6 +393,7 @@ def generate_image_with_delay(
             prompt_modifier=prompt_modifier,
             extra_instructions=extra_instructions,
             model=image_model or DEFAULT_IMAGE_MODEL,
+            image_resolution=image_resolution,
             prompt_filename=prompt_filename,
         )
         
@@ -457,6 +456,7 @@ def generate_images():
         categories = data.get("categories", {})
         prompt_modifier = data.get("prompt_modifier", "")
         image_model = data.get("image_model") or DEFAULT_IMAGE_MODEL
+        image_resolution = data.get("image_resolution") or "1024x1024"
         image_prompt_real_world = data.get("image_prompt_real_world") or None
         image_prompt_professional = data.get("image_prompt_professional") or None
         image_prompt_angle_variant = data.get("image_prompt_angle_variant") or None
@@ -575,6 +575,7 @@ def generate_images():
                             prompt_modifier=angle if angle else (prompt_modifier or None),
                             extra_instructions=prompt_modifier if angle else None,
                             image_model=image_model,
+                            image_resolution=image_resolution,
                             prompt_filename=image_prompt_map.get(image_type),
                         )
                         futures[future] = (idx, photo_url)
@@ -662,6 +663,7 @@ def regenerate_images():
         image_urls = data.get("image_urls", [])
         prompt = data.get("prompt", "")
         image_model = data.get("image_model") or DEFAULT_IMAGE_MODEL
+        image_resolution = data.get("image_resolution") or "1024x1024"
         image_prompt_experimental = data.get("image_prompt_experimental") or None
         
         if not image_urls or not isinstance(image_urls, list):
@@ -691,6 +693,7 @@ def regenerate_images():
                     ImageType.EXPERIMENTAL,
                     custom_prompt=prompt.strip(),
                     model=image_model,
+                    image_resolution=image_resolution,
                     prompt_filename=image_prompt_experimental,
                 )
                 
@@ -3105,19 +3108,15 @@ def _test_image_model(prompt, model):
     if not api_key:
         return None, 'OpenRouter API key is not set. Add openrouter_api_key in Settings.'
 
-    url = 'https://openrouter.ai/api/v1/chat/completions'
+    url = 'https://openrouter.ai/api/v1/images'
     headers = {
         'Authorization': f'Bearer {api_key}',
         'Content-Type': 'application/json',
     }
     data = {
         'model': model,
-        'messages': [
-            {
-                'role': 'user',
-                'content': [{'type': 'text', 'text': prompt}],
-            }
-        ],
+        'prompt': prompt,
+        'aspect_ratio': '1:1',
     }
 
     try:

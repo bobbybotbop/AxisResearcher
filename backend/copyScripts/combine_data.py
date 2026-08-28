@@ -1058,63 +1058,75 @@ def update_listing_with_aspects(sku, localizedAspects=None, pre_fetched_aspects=
         # Get aspects for this category
         aspects_data = get_item_aspects_for_category(category_id)
         if not aspects_data:
-            print(f"❌ Error: Could not get aspects for category {category_id}")
-            return False
-
-        # Get list of available aspects from API response
-        aspects_list = aspects_data.get('aspects', [])
-
-        # Create a mapping of category aspect names (case-insensitive) to their actual names
-        category_aspect_map = {}
-        for aspect in aspects_list:
-            aspect_name = aspect.get('localizedAspectName', '')
-            if aspect_name:
-                category_aspect_map[aspect_name.lower()] = aspect_name
-
-        # Debug: Print available aspects for this category
-        print(f"\n📋 Available aspects for category {category_id}:")
-        for aspect_name in category_aspect_map.values():
-            print(f"   - {aspect_name}")
-
-        # Start with matched aspects dictionary
-        matched_aspects = {}
-
-        # Step 1: Apply localized aspects first (if provided)
-        if localizedAspects:
-            print(f"\n🔄 Processing {len(localizedAspects)} localized aspects...")
+            print(f"⚠ Warning: Could not get aspects for category {category_id}, applying raw aspects without category validation")
+            # Fallback: write localizedAspects and hardcoded aspects directly, without category map matching
+            matched_aspects = {}
             for localized_aspect in localizedAspects:
                 if not isinstance(localized_aspect, dict):
                     continue
+                name = localized_aspect.get('name', '')
+                value = localized_aspect.get('value', '')
+                if name and value:
+                    matched_aspects[name] = [value]
+                    print(f"   ✓ Raw localized aspect: {name} = {value}")
+            for h_name, h_value in hardcoded_aspects.items():
+                matched_aspects[h_name] = h_value
+                print(f"   ✓ Raw hardcoded aspect: {h_name} = {h_value}")
+        else:
+            # Get list of available aspects from API response
+            aspects_list = aspects_data.get('aspects', [])
 
-                aspect_name = localized_aspect.get('name', '')
-                aspect_value = localized_aspect.get('value', '')
+            # Create a mapping of category aspect names (case-insensitive) to their actual names
+            category_aspect_map = {}
+            for aspect in aspects_list:
+                aspect_name = aspect.get('localizedAspectName', '')
+                if aspect_name:
+                    category_aspect_map[aspect_name.lower()] = aspect_name
 
-                if not aspect_name or not aspect_value:
-                    continue
+            # Debug: Print available aspects for this category
+            print(f"\n📋 Available aspects for category {category_id}:")
+            for aspect_name in category_aspect_map.values():
+                print(f"   - {aspect_name}")
 
+            # Start with matched aspects dictionary
+            matched_aspects = {}
+
+            # Step 1: Apply localized aspects first (if provided)
+            if localizedAspects:
+                print(f"\n🔄 Processing {len(localizedAspects)} localized aspects...")
+                for localized_aspect in localizedAspects:
+                    if not isinstance(localized_aspect, dict):
+                        continue
+
+                    aspect_name = localized_aspect.get('name', '')
+                    aspect_value = localized_aspect.get('value', '')
+
+                    if not aspect_name or not aspect_value:
+                        continue
+
+                    # Use flexible matching to find the aspect in category
+                    actual_aspect_name = _find_matching_aspect_name(aspect_name, category_aspect_map)
+                    if actual_aspect_name:
+                        # Convert value to array format to match eBay format
+                        matched_aspects[actual_aspect_name] = [aspect_value]
+                        print(f"   ✓ Matched localized aspect: {actual_aspect_name} = {aspect_value}")
+                    else:
+                        print(f"   ⚠ Skipped localized aspect (not in category): {aspect_name}")
+
+            # Step 2: Apply hardcoded aspects (these override localized aspects)
+            print(f"\n🔧 Processing {len(hardcoded_aspects)} hardcoded aspects...")
+            for hardcoded_name, hardcoded_value in hardcoded_aspects.items():
                 # Use flexible matching to find the aspect in category
-                actual_aspect_name = _find_matching_aspect_name(aspect_name, category_aspect_map)
+                actual_aspect_name = _find_matching_aspect_name(hardcoded_name, category_aspect_map)
                 if actual_aspect_name:
-                    # Convert value to array format to match eBay format
-                    matched_aspects[actual_aspect_name] = [aspect_value]
-                    print(f"   ✓ Matched localized aspect: {actual_aspect_name} = {aspect_value}")
+                    # Override with hardcoded value
+                    matched_aspects[actual_aspect_name] = hardcoded_value
+                    print(f"   ✓ Matched hardcoded aspect: {actual_aspect_name} = {hardcoded_value}")
                 else:
-                    print(f"   ⚠ Skipped localized aspect (not in category): {aspect_name}")
-
-        # Step 2: Apply hardcoded aspects (these override localized aspects)
-        print(f"\n🔧 Processing {len(hardcoded_aspects)} hardcoded aspects...")
-        for hardcoded_name, hardcoded_value in hardcoded_aspects.items():
-            # Use flexible matching to find the aspect in category
-            actual_aspect_name = _find_matching_aspect_name(hardcoded_name, category_aspect_map)
-            if actual_aspect_name:
-                # Override with hardcoded value
-                matched_aspects[actual_aspect_name] = hardcoded_value
-                print(f"   ✓ Matched hardcoded aspect: {actual_aspect_name} = {hardcoded_value}")
-            else:
-                # If not found in category, try to add it anyway (eBay may accept it or reject it)
-                # Use the hardcoded name as-is
-                matched_aspects[hardcoded_name] = hardcoded_value
-                print(f"   ⚠ Added hardcoded aspect (not verified in category): {hardcoded_name} = {hardcoded_value}")
+                    # If not found in category, try to add it anyway (eBay may accept it or reject it)
+                    # Use the hardcoded name as-is
+                    matched_aspects[hardcoded_name] = hardcoded_value
+                    print(f"   ⚠ Added hardcoded aspect (not verified in category): {hardcoded_name} = {hardcoded_value}")
 
     if not matched_aspects:
         print(f"ℹ️  No matching aspects found")

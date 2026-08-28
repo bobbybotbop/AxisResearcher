@@ -81,6 +81,7 @@ const IMAGE_MODEL_OPTIONS = [
     value: "bytedance-seed/seedream-5-0-lite",
     label: "Seedream 5.0 Lite",
     costPerImage: 0.035,
+    defaultSize: "2048x2048",
   },
   {
     value: "bytedance-seed/seedream-4.5",
@@ -533,6 +534,16 @@ function App() {
       // ignore
     }
   }, [imageResolution]);
+
+  // Auto-bump resolution when switching to a model that requires a larger minimum size
+  useEffect(() => {
+    const modelOption = IMAGE_MODEL_OPTIONS.find((m) => m.value === imageModel);
+    if (!modelOption?.defaultSize) return;
+    const pixels = (s) => { const [w, h] = s.toLowerCase().split("x"); return parseInt(w) * parseInt(h); };
+    if (pixels(imageResolution) < pixels(modelOption.defaultSize)) {
+      setImageResolution(modelOption.defaultSize);
+    }
+  }, [imageModel]);
 
   useEffect(() => {
     try {

@@ -19,6 +19,36 @@ from backend.copyScripts.imageEditing import downscale_image_bytes
 # Load environment variables
 load_dotenv()
 
+# Per-model minimum output sizes. When the requested resolution is smaller than
+# a model's minimum, the model's default is used instead.
+MODEL_DEFAULT_SIZES = {
+    "bytedance-seed/seedream-5-0-lite": "2048x2048",
+}
+
+
+def _get_effective_resolution(model: str, requested: str | None) -> str | None:
+    """Return the resolution to send, enforcing per-model pixel minimums.
+
+    Returns None when neither a valid requested size nor a model default exists
+    (caller should fall back to aspect_ratio).
+    """
+    model_default = MODEL_DEFAULT_SIZES.get(model)
+    if not requested:
+        return model_default  # None -> caller uses aspect_ratio fallback
+
+    def _pixels(size_str: str) -> int:
+        try:
+            w, h = size_str.lower().split("x")
+            return int(w) * int(h)
+        except Exception:
+            return 0
+
+    if model_default and _pixels(requested) < _pixels(model_default):
+        print(f"⚠️  Resolution {requested} is below {model}'s minimum; using {model_default}")
+        return model_default
+    return requested
+
+
 # eBay API credentials
 CLIENT_ID = os.getenv('client_id')
 API_KEY = os.getenv('api_key')
@@ -544,10 +574,11 @@ def generate_image_from_urls(
     prompt_modifier=None,
     extra_instructions=None,
     model="bytedance-seed/seedream-5-0-lite",
+    image_resolution=None,
     prompt_filename=None,
 ):
     """
-    Generate an image using OpenRouter's Gemini 2.5 Flash Image API from input image URLs.
+    Generate an image using OpenRouter's API from input image URLs.
     Extracts images from response, saves them to files, uploads to eBay, and returns eBay URLs.
 
     Args:
@@ -559,6 +590,7 @@ def generate_image_from_urls(
         extra_instructions (str, optional): User-supplied text always appended to the final
             prompt, regardless of image type. Used so angle-variant tasks can carry the user
             modifier independently of the angle substitution.
+        image_resolution (str, optional): Desired output resolution (e.g. "1024x1024", "2048x2048").
 
     Returns:
         list[str]: Array of eBay image URLs, or None on failure
@@ -622,17 +654,9 @@ def generate_image_from_urls(
     if extra_instructions and isinstance(extra_instructions, str) and extra_instructions.strip():
         prompt_text = prompt_text + "\n\nAdditional instructions: " + extra_instructions.strip()
         print(f"📝 Appended extra instructions: {extra_instructions.strip()}")
-    
-    # Construct the content array for the API request
-    content = [
-        {
-            "type": "text",
-            "text": prompt_text
-        }
-    ]
-    
-    # Add image URLs to content array, downscaling all to max 1024px.
-    # Local Flask API paths are read from disk; remote URLs are fetched and inlined as base64.
+
+    # Resolve image URLs: inline local files and remote images as base64 for input_references
+    input_references = []
     project_root = Path(__file__).parent.parent.parent
     for image_url in image_urls:
         resolved_url = image_url
@@ -655,86 +679,107 @@ def generate_image_from_urls(
                 resolved_url = f"data:image/jpeg;base64,{encoded}"
             except Exception as e:
                 print(f"⚠️ Could not fetch/downscale remote image, passing URL directly: {e}")
-        content.append({
+        input_references.append({
             "type": "image_url",
-            "image_url": {
-                "url": resolved_url
-            }
+            "image_url": {"url": resolved_url},
         })
-    
-    # Prepare API request
-    url = "https://openrouter.ai/api/v1/chat/completions"
 
+    # Prepare Image API request
+    api_url = "https://openrouter.ai/api/v1/images"
     headers = {
         "Authorization": f"Bearer {openrouter_api_key}",
         "Content-Type": "application/json",
     }
-
-    data = {
+    request_body = {
         "model": model,
-        "messages": [
-            {
-                "role": "user",
-                "content": content
-            }
-        ],
-        "aspect_ratio": "1:1",
+        "prompt": prompt_text,
+        "input_references": input_references,
     }
+    # size and aspect_ratio are mutually exclusive per OpenRouter Image API spec
+    effective_resolution = _get_effective_resolution(model, image_resolution)
+    if effective_resolution:
+        request_body["size"] = effective_resolution
+    else:
+        request_body["aspect_ratio"] = "1:1"
 
     try:
-        print(f"🤖 Calling OpenRouter image model {model} ({image_type.value})...")
-        response = requests.post(url, headers=headers, data=json.dumps(data), timeout=60)
-        
+        print(f"🤖 Calling OpenRouter Image API with model {model} ({image_type.value})...")
+        response = requests.post(api_url, headers=headers, json=request_body, timeout=60)
         response.raise_for_status()
-        
         result = response.json()
+        print("✅ Received response from OpenRouter Image API")
 
-        print("✅ Received response from OpenRouter API")
-
-        # Extract all images from response and save them to files
-        extracted_images = extract_and_save_images_from_response(result, image_type)
-
-        if not extracted_images:
-            print("❌ No images found in API response")
+        image_items = result.get("data") if isinstance(result.get("data"), list) else []
+        if not image_items:
+            print("❌ No images found in Image API response")
+            print(f"Full response: {json.dumps(result, indent=2)}")
             return None
-        
-        # Upload each image to eBay and collect URLs
+
         ebay_urls = []
-        
-        for idx, img_info in enumerate(extracted_images):
-            image_bytes = img_info['image_bytes']
-            mime_type = img_info['mime_type']
-            
-            # Generate picture name for eBay
-            image_type_str = image_type.value.lower() if isinstance(image_type, ImageType) else 'generated'
-            if len(extracted_images) > 1:
-                picture_name = f"Generated {image_type_str} image {idx + 1}"
+        image_type_str = image_type.value.lower() if isinstance(image_type, ImageType) else "generated"
+        output_dir = Path(__file__).parent.parent.parent / "generated-images"
+        output_dir.mkdir(exist_ok=True)
+
+        for idx, item in enumerate(image_items):
+            picture_name = (
+                f"Generated {image_type_str} image"
+                if len(image_items) == 1
+                else f"Generated {image_type_str} image {idx + 1}"
+            )
+            b64 = item.get("b64_json")
+            img_url = item.get("url")
+
+            if b64:
+                try:
+                    image_bytes = base64.b64decode(b64)
+                except Exception as e:
+                    print(f"❌ Error decoding base64 data: {e}")
+                    continue
+                mime_type = "image/png"
+            elif img_url:
+                try:
+                    img_resp = requests.get(img_url, timeout=30)
+                    img_resp.raise_for_status()
+                    image_bytes = img_resp.content
+                    mime_type = img_resp.headers.get("Content-Type", "image/jpeg").split(";")[0]
+                except Exception as e:
+                    print(f"⚠️ Could not download generated image: {e}")
+                    continue
             else:
-                picture_name = f"Generated {image_type_str} image"
-            
-            # Upload to eBay
+                print(f"⚠️ Image item {idx + 1} has no b64_json or url, skipping")
+                continue
+
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            ext = mime_type.split("/")[-1] if "/" in mime_type else "png"
+            file_path = output_dir / f"generated_{image_type_str}_{ts}_{idx}.{ext}"
+            try:
+                with open(file_path, "wb") as f:
+                    f.write(image_bytes)
+                print(f"💾 Saved generated image: {file_path}")
+            except Exception as e:
+                print(f"⚠️ Could not save image to disk: {e}")
+
             ebay_url = upload_image_bytes_to_ebay(image_bytes, mime_type, picture_name)
-            
             if ebay_url:
                 ebay_urls.append(ebay_url)
                 print(f"✅ Image {idx + 1} uploaded to eBay: {ebay_url}")
             else:
-                print(f"⚠️ Failed to upload image {idx + 1} to eBay, but file saved: {img_info['file_path']}")
-        
+                print(f"⚠️ Failed to upload image {idx + 1} to eBay, but file saved: {file_path}")
+
         if not ebay_urls:
             print("❌ Failed to upload any images to eBay")
             return None
-        
+
         print(f"✅ Successfully uploaded {len(ebay_urls)} image(s) to eBay")
         return ebay_urls
-            
+
     except requests.exceptions.RequestException as e:
-        print(f"❌ Error calling OpenRouter API: {e}")
-        if hasattr(e, 'response') and e.response is not None:
+        print(f"❌ Error calling OpenRouter Image API: {e}")
+        if hasattr(e, "response") and e.response is not None:
             try:
                 error_detail = e.response.json()
                 print(f"Error details: {json.dumps(error_detail, indent=2)}")
-            except:
+            except Exception:
                 print(f"Error response: {e.response.text[:200]}")
         return None
     except json.JSONDecodeError as e:
