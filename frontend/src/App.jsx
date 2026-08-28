@@ -412,6 +412,7 @@ function App() {
   const [isRestocking, setIsRestocking] = useState(false);
   const [historySelectMode, setHistorySelectMode] = useState(false);
   const [historySelectedSkus, setHistorySelectedSkus] = useState(new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const autoRestockRanRef = useRef(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
@@ -1736,6 +1737,7 @@ function App() {
   const handleBulkDeleteListings = async () => {
     const skus = Array.from(historySelectedSkus);
     if (skus.length === 0) return;
+    setIsBulkDeleting(true);
     try {
       const res = await fetch('/api/listings/bulk-delete', {
         method: 'POST',
@@ -1753,6 +1755,8 @@ function App() {
     } catch (err) {
       console.error('[History] bulk delete failed:', err);
       addToast('error', err.message || 'Bulk delete failed');
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
@@ -2604,6 +2608,9 @@ function App() {
           if (typeof data.quantity === "number") setAutoRestockQuantity(data.quantity);
         })
         .catch(() => {});
+    } else {
+      setHistorySelectMode(false);
+      setHistorySelectedSkus(new Set());
     }
   }, [activeTab]);
 
@@ -3630,9 +3637,10 @@ function App() {
                     <button
                       type="button"
                       onClick={handleBulkDeleteListings}
+                      disabled={isBulkDeleting}
                       className={btnPillSm}
                     >
-                      Delete Selected
+                      {isBulkDeleting ? "Deleting..." : "Delete Selected"}
                     </button>
                   </>
                 )}
