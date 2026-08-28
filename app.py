@@ -2263,30 +2263,41 @@ def api_bulk_delete_listings():
     Request body: { "skus": ["axis_84", "axis_85"] }
     Response: { "deleted": [...], "not_found": [...] }
     """
-    try:
-        data = request.get_json(force=True) or {}
-        skus = data.get('skus', [])
-        if not isinstance(skus, list):
-            return jsonify({'error': 'skus must be a list'}), 400
+    data = request.get_json() or {}
+    skus = data.get('skus', [])
+    if not isinstance(skus, list):
+        return jsonify({'error': 'skus must be a list'}), 400
 
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        output_dir = os.path.join(base_dir, 'Generated_Listings')
+    # Derive the safe root once via the shared helper so path resolution stays
+    # consistent if the directory ever moves.
+    safe_root = os.path.realpath(os.path.dirname(resolve_listing_json_path(sku='__probe__')))
 
-        deleted = []
-        not_found = []
-        for sku in skus:
-            filepath = os.path.join(output_dir, f'{sku}.json')
-            if os.path.isfile(filepath):
-                os.remove(filepath)
+    deleted = []
+    not_found = []
+    errors = []
+    for sku in skus:
+        if not isinstance(sku, str) or not sku:
+            not_found.append(sku)
+            continue
+        filepath = resolve_listing_json_path(sku=sku)
+        resolved = os.path.realpath(filepath)
+        if not resolved.startswith(safe_root + os.sep):
+            not_found.append(sku)
+            continue
+        try:
+            if os.path.isfile(resolved):
+                os.remove(resolved)
                 deleted.append(sku)
             else:
                 not_found.append(sku)
+        except Exception as e:
+            print(f"[API] bulk-delete error removing {sku}: {e}")
+            errors.append({'sku': sku, 'error': str(e)})
 
-        print(f"[API] bulk-delete: deleted={deleted}, not_found={not_found}")
-        return jsonify({'deleted': deleted, 'not_found': not_found}), 200
-    except Exception as e:
-        print(f"[API] bulk-delete error: {e}")
-        return jsonify({'error': str(e)}), 500
+    print(f"[API] bulk-delete: deleted={deleted}, not_found={not_found}, errors={errors}")
+    if errors:
+        return jsonify({'deleted': deleted, 'not_found': not_found, 'errors': errors}), 500
+    return jsonify({'deleted': deleted, 'not_found': not_found}), 200
 
 
 @app.route('/api/listings/restock', methods=['POST'])
