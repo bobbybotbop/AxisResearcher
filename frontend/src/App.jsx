@@ -1743,11 +1743,16 @@ function App() {
         body: JSON.stringify({ skus }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.errors?.length > 0) {
+        addToast('error', `${data.errors.length} listing(s) could not be deleted`);
+      }
       setHistorySelectMode(false);
       setHistorySelectedSkus(new Set());
       await fetchAllListings();
     } catch (err) {
       console.error('[History] bulk delete failed:', err);
+      addToast('error', err.message || 'Bulk delete failed');
     }
   };
 
