@@ -2296,7 +2296,7 @@ def api_bulk_delete_listings():
 
     print(f"[API] bulk-delete: deleted={deleted}, not_found={not_found}, errors={errors}")
     if errors:
-        return jsonify({'deleted': deleted, 'not_found': not_found, 'errors': errors}), 500
+        return jsonify({'deleted': deleted, 'not_found': not_found, 'errors': errors}), 200
     return jsonify({'deleted': deleted, 'not_found': not_found}), 200
 
 
