@@ -3613,6 +3613,31 @@ function App() {
                 onViewModeChange={handleHistoryViewModeChange}
               />
 
+              {/* Select / bulk-action controls */}
+              <div className="mb-3 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={toggleHistorySelectMode}
+                  className={`${btnPillSm} ${historySelectMode ? "ring-2 ring-inset ring-blue-500" : ""}`}
+                >
+                  {historySelectMode ? "Done" : "Select"}
+                </button>
+                {historySelectMode && historySelectedSkus.size > 0 && (
+                  <>
+                    <span className="text-sm text-text-muted">
+                      {historySelectedSkus.size} selected
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleBulkDeleteListings}
+                      className={btnPillSm}
+                    >
+                      Delete Selected
+                    </button>
+                  </>
+                )}
+              </div>
+
               {loadingListings ? (
                 <div className="flex flex-col items-center justify-center gap-4 py-12">
                   <div className="h-12 w-12 animate-spin rounded-full border-4 border-border-default border-t-primary" />
@@ -3645,6 +3670,9 @@ function App() {
                           quantity={listingQuantities[listing.sku]}
                           loadingQuantity={loadingQuantities}
                           isManual={!!listing.isManualListing}
+                          isSelectMode={historySelectMode}
+                          isSelected={historySelectedSkus.has(listing.sku)}
+                          onToggleSelect={() => toggleHistorySkuSelection(listing.sku)}
                         />
                       ) : (
                         <GeneratedListingCard
@@ -3657,6 +3685,9 @@ function App() {
                           quantity={listingQuantities[listing.sku]}
                           loadingQuantity={loadingQuantities}
                           isManual={!!listing.isManualListing}
+                          isSelectMode={historySelectMode}
+                          isSelected={historySelectedSkus.has(listing.sku)}
+                          onToggleSelect={() => toggleHistorySkuSelection(listing.sku)}
                         />
                       )
                     )}
