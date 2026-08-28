@@ -1,17 +1,19 @@
 export const LISTING_PLACEHOLDER = "[need to change]";
 
-/** Draft / placeholder rows hidden from Upload tab by default. */
+/** Returns true when the listing is missing data required to upload to eBay. */
 export function isIncomplete(listing) {
   const title = String(listing?.title ?? "").trim();
-  if (title === LISTING_PLACEHOLDER) return true;
+  if (!title || title === LISTING_PLACEHOLDER) return true;
   const urls = listing?.imageUrls;
-  const hasImages = Array.isArray(urls) && urls.length > 0;
-  if (hasImages) return false;
-  const desc = String(listing?.description ?? "").trim();
-  return desc === LISTING_PLACEHOLDER;
+  if (!Array.isArray(urls) || urls.length === 0) return true;
+  const price = listing?.price;
+  if (!price || String(price).trim() === "N/A") return true;
+  const categoryId = listing?.categoryId;
+  if (!categoryId || String(categoryId).trim() === "N/A") return true;
+  return false;
 }
 
-/** Check if a listing is uploaded to eBay (has valid ebayListingId). */
+/** Returns true when the listing has been published to eBay (has a valid ebayListingId). */
 export function isUploaded(listing) {
   return Boolean(String(listing?.ebayListingId ?? "").trim());
 }
