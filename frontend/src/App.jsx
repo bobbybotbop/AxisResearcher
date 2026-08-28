@@ -410,6 +410,8 @@ function App() {
   const [minimumImagesPerListing, setMinimumImagesPerListing] = useState(10);
   const [autoRestockConfirm, setAutoRestockConfirm] = useState(null);
   const [isRestocking, setIsRestocking] = useState(false);
+  const [historySelectMode, setHistorySelectMode] = useState(false);
+  const [historySelectedSkus, setHistorySelectedSkus] = useState(new Set());
   const autoRestockRanRef = useRef(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
@@ -1714,6 +1716,40 @@ function App() {
       }
     }
   }, []);
+
+  const toggleHistorySelectMode = () => {
+    setHistorySelectMode((prev) => {
+      if (prev) setHistorySelectedSkus(new Set());
+      return !prev;
+    });
+  };
+
+  const toggleHistorySkuSelection = (sku) => {
+    setHistorySelectedSkus((prev) => {
+      const next = new Set(prev);
+      if (next.has(sku)) next.delete(sku);
+      else next.add(sku);
+      return next;
+    });
+  };
+
+  const handleBulkDeleteListings = async () => {
+    const skus = Array.from(historySelectedSkus);
+    if (skus.length === 0) return;
+    try {
+      const res = await fetch('/api/listings/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skus }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setHistorySelectMode(false);
+      setHistorySelectedSkus(new Set());
+      await fetchAllListings();
+    } catch (err) {
+      console.error('[History] bulk delete failed:', err);
+    }
+  };
 
   const handleDeleteGeneratedImages = useCallback((indices) => {
     const sorted = [...indices].sort((a, b) => b - a);
