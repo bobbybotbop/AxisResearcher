@@ -42,6 +42,9 @@ export default function CompactListingRow({
   quantity,
   loadingQuantity,
   isManual = false,
+  isSelectMode = false,
+  isSelected = false,
+  onToggleSelect,
 }) {
   const urls = Array.isArray(listing.imageUrls) ? listing.imageUrls : [];
   const [imageIndex, setImageIndex] = useState(0);
@@ -61,15 +64,31 @@ export default function CompactListingRow({
     <div
       role="button"
       tabIndex={0}
-      onClick={() => onCardClick?.(listing)}
+      onClick={() => isSelectMode ? onToggleSelect?.() : onCardClick?.(listing)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onCardClick?.(listing);
+          isSelectMode ? onToggleSelect?.() : onCardClick?.(listing);
         }
       }}
-      className={`flex w-full cursor-pointer overflow-hidden rounded-xl bg-surface-panel shadow-sm transition-shadow hover:shadow-md ${isManual ? "border-2 border-border-default" : "border border-border-default"}`}
+      className={`flex w-full cursor-pointer overflow-hidden rounded-xl bg-surface-panel shadow-sm transition-shadow hover:shadow-md ${isSelected ? "ring-2 ring-inset ring-blue-500" : ""} ${isManual ? "border-2 border-border-default" : "border border-border-default"}`}
     >
+      {/* Select checkbox */}
+      {isSelectMode && (
+        <div
+          className="flex h-20 w-10 shrink-0 items-center justify-center"
+          onClick={(e) => { e.stopPropagation(); onToggleSelect?.(); }}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <input
+            type="checkbox"
+            readOnly
+            checked={isSelected}
+            className="h-4 w-4 rounded border-border-default text-blue-500 focus:ring-blue-500"
+            aria-label={`Select ${listing.sku}`}
+          />
+        </div>
+      )}
       {/* Thumbnail */}
       <div className="relative h-20 w-24 shrink-0 bg-surface-muted">
         {urls.length > 0 ? (
@@ -108,41 +127,43 @@ export default function CompactListingRow({
       </div>
 
       {/* eBay action strip — side by side with image */}
-      <div
-        className="flex h-20 w-8 shrink-0 border-l border-r border-border-default"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={(e) => e.stopPropagation()}
-      >
-        {ebayItemUrl ? (
-          <a
-            href={ebayItemUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="View on eBay"
-            className="flex h-full w-full items-center justify-center bg-surface-muted text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <LinkIcon />
-          </a>
-        ) : (
-          <button
-            type="button"
-            title={isUploading ? "Uploading..." : "Upload to eBay"}
-            className="flex h-full w-full cursor-pointer items-center justify-center bg-surface-muted text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
-            onClick={(e) => {
-              e.stopPropagation();
-              onUpload?.(listing);
-            }}
-            disabled={isUploading}
-          >
-            {isUploading ? (
-              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-            ) : (
-              <UploadIcon />
-            )}
-          </button>
-        )}
-      </div>
+      {!isSelectMode && (
+        <div
+          className="flex h-20 w-8 shrink-0 border-l border-r border-border-default"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          {ebayItemUrl ? (
+            <a
+              href={ebayItemUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="View on eBay"
+              className="flex h-full w-full items-center justify-center bg-surface-muted text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <LinkIcon />
+            </a>
+          ) : (
+            <button
+              type="button"
+              title={isUploading ? "Uploading..." : "Upload to eBay"}
+              className="flex h-full w-full cursor-pointer items-center justify-center bg-surface-muted text-text-muted transition-colors hover:bg-surface-hover hover:text-text-primary disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={(e) => {
+                e.stopPropagation();
+                onUpload?.(listing);
+              }}
+              disabled={isUploading}
+            >
+              {isUploading ? (
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              ) : (
+                <UploadIcon />
+              )}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Content column */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col justify-center gap-1 px-3 py-2">
