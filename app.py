@@ -1683,6 +1683,7 @@ def api_import_listings():
     try:
         items = get_seller_list(mod_time_from=last_refreshed)
     except Exception as e:
+        log_event("import", "error", error=str(e))
         return jsonify({'error': str(e)}), 500
 
     # Build set of eBay item IDs already claimed by non-MANUAL listings
@@ -1705,6 +1706,7 @@ def api_import_listings():
     }
 
     imported = updated = skipped = 0
+    imported_skus = []
     for item in items:
         if item['item_id'] in known_ids:
             skipped += 1
@@ -1715,6 +1717,7 @@ def api_import_listings():
         if written:
             if is_new:
                 imported += 1
+                imported_skus.append(sku)
             else:
                 updated += 1
         else:
@@ -1723,6 +1726,8 @@ def api_import_listings():
     save_manual_import_last_refreshed(
         datetime.now(timezone.utc).isoformat()
     )
+    if imported or updated:
+        log_event("import", "success", count=imported + updated, skus=imported_skus)
     return jsonify({'imported': imported, 'updated': updated, 'skipped': skipped})
 
 @app.route('/api/listings/<sku>', methods=['GET'])
