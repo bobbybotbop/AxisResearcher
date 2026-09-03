@@ -2345,7 +2345,7 @@ function App() {
     }
   };
 
-  const performRestock = async (targetQty) => {
+  const performRestock = async (targetQty, source = "manual") => {
     const qty = Number(targetQty);
     if (!Number.isFinite(qty) || qty < 0) return;
 
@@ -2361,7 +2361,7 @@ function App() {
       const res = await fetch("/api/listings/restock", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ skus, quantity: qty }),
+        body: JSON.stringify({ skus, quantity: qty, source }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to restock listings");
@@ -2470,7 +2470,7 @@ function App() {
     } catch {
       // settings persistence is non-critical to the immediate restock action
     }
-    performRestock(nextQuantity);
+    performRestock(nextQuantity, "auto");
   };
 
   const cancelAutoRestock = () => {
@@ -2624,7 +2624,7 @@ function App() {
       !autoRestockRanRef.current
     ) {
       autoRestockRanRef.current = true;
-      performRestock(autoRestockQuantity);
+      performRestock(autoRestockQuantity, "auto");
     }
     if (activeTab !== "upload") {
       autoRestockRanRef.current = false;
