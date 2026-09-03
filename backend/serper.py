@@ -1,5 +1,6 @@
 import os
 import requests
+from urllib.parse import urlparse
 
 
 INCLUDE_SITES = [
@@ -22,6 +23,14 @@ EXCLUDE_SITES = [
     "mercari.com",
     "poshmark.com",
 ]
+
+
+def _is_allowed_site(link: str) -> bool:
+    try:
+        host = urlparse(link).netloc.lower().lstrip("www.")
+        return any(host == s or host.endswith("." + s) for s in INCLUDE_SITES)
+    except Exception:
+        return False
 
 
 def _build_query():
@@ -67,7 +76,7 @@ def extract_top_links(serper_response: dict, limit: int = 10) -> list[dict]:
             items = [items]
         for item in items:
             link = item.get("link")
-            if not link:
+            if not link or not _is_allowed_site(link):
                 continue
             results.append({
                 "title": item.get("title", ""),

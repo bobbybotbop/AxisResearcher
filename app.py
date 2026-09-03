@@ -2571,6 +2571,9 @@ def serper_lens_search():
 
     except ValueError as ve:
         return jsonify({"error": str(ve)}), 400
+    except requests.exceptions.RequestException as e:
+        print(f"[API] Serper HTTP error: {e}")
+        return jsonify({"error": "Serper request failed"}), 502
     except Exception as e:
         print(f"[API] Serper lens error: {e}")
         return jsonify({"error": f"Serper search failed: {str(e)}"}), 500
