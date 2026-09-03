@@ -4,6 +4,7 @@ import {
   History,
   Route,
   FlaskConical,
+  ScrollText,
   Settings,
   ChevronLeft,
   ChevronRight,
@@ -16,6 +17,7 @@ import CompactListingRow from "./components/CompactListingRow";
 import UploadListingsToolbar from "./components/UploadListingsToolbar";
 import ApiKeyManagementSection from "./components/ApiKeyManagementSection";
 import TestAiModelSection from "./components/TestAiModelSection";
+import LogsTab from "./components/LogsTab";
 import { MOCK_DATA, MOCK_GENERATED_TITLE, MOCK_GENERATED_DESCRIPTION } from "./mockData";
 import { createTestWorkflowState } from "./testWorkflowState";
 import { trimTransparentPadding } from "./utils/trimImage";
@@ -243,6 +245,7 @@ function App() {
   const tabPaths = {
     create: "/create",
     upload: "/history",
+    logs: "/logs",
     "test-workflow": "/test-workflow",
     testing: "/testing",
     settings: "/settings",
@@ -258,6 +261,7 @@ function App() {
     const p = normalizePathname(location.pathname);
     if (p === "/" || p === tabPaths.create) return "create";
     if (p === tabPaths.upload) return "upload";
+    if (p === tabPaths.logs) return "logs";
     if (p === tabPaths["test-workflow"]) return "test-workflow";
     if (p === tabPaths.testing) return "testing";
     if (p === tabPaths.settings) return "settings";
@@ -3363,6 +3367,15 @@ function App() {
             </button>
             <button
               type="button"
+              className={navItemClass("logs", sidebarCollapsed)}
+              onClick={() => handleTabChange("logs")}
+              title={sidebarCollapsed ? "Logs" : undefined}
+            >
+              <ScrollText size={20} strokeWidth={1.75} className="shrink-0" />
+              {!sidebarCollapsed && <span>Logs</span>}
+            </button>
+            <button
+              type="button"
               className={navItemClass("test-workflow", sidebarCollapsed)}
               onClick={() => handleTabChange("test-workflow")}
               title={sidebarCollapsed ? "Test Workflow" : undefined}
@@ -3590,6 +3603,15 @@ function App() {
               bgRemovalProgress={testBgRemovalProgress}
               autoBackgroundRemovalEnabled={autoBackgroundRemovalEnabled}
               onError={(msg) => addToast("error", msg)}
+            />
+          )}
+
+          {activeTab === "logs" && (
+            <LogsTab
+              onNavigateToSku={(sku) => {
+                setUploadListingsSearch(sku);
+                handleTabChange("upload");
+              }}
             />
           )}
 
