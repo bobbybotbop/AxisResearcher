@@ -890,10 +890,20 @@ def create_listing():
             listing_data = load_listing_data(sku=sku)
 
             if not listing_data:
+                log_event("draft_completed", "error", sku=sku, error="Failed to load created listing data")
                 yield error_event("Failed to load created listing data")
                 return
 
             print(f"[API] Successfully created listing: {sku}")
+
+            _title = (listing_data.get("inventoryItem") or {}).get("product", {}).get("title", "")
+            log_event(
+                "draft_completed", "success",
+                sku=sku,
+                title=_title,
+                textModel=(models_payload or {}).get("text_model"),
+                imageModel=(models_payload or {}).get("image_model"),
+            )
 
             yield result_event({
                 "listing_data": listing_data,
@@ -909,6 +919,7 @@ def create_listing():
             import traceback
             traceback.print_exc()
 
+            log_event("draft_completed", "error", sku=sku, error=error_msg)
             yield error_event(f"An error occurred while creating listing: {error_msg}")
 
     return streaming_response(generate())
