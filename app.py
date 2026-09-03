@@ -1853,11 +1853,13 @@ def upload_listing():
                 print(f"[API] Exception during upload_complete_listing: {error_msg}")
                 import traceback
                 traceback.print_exc()
+                log_event("upload", "error", sku=actual_sku, error=error_msg)
                 yield error_event(f"Exception during upload: {error_msg}")
                 return
 
             if not upload_result:
                 print(f"[API] upload_complete_listing returned None - upload failed")
+                log_event("upload", "error", sku=actual_sku, error="upload_complete_listing returned None")
                 yield error_event("Failed to upload listing to eBay. Check server logs for details.")
                 return
 
@@ -1869,6 +1871,9 @@ def upload_listing():
                 save_ebay_listing_id(sku=sku, filename=filename, ebay_listing_id=lid)
             else:
                 print("[API] Warning: publish succeeded but listingId missing; ebayListingId not saved to JSON")
+
+            _upload_title = (inventory_item_data.get("product") or {}).get("title", "")
+            log_event("upload", "success", sku=actual_sku, title=_upload_title, ebayListingId=lid or "")
 
             yield progress_event('Uploading to eBay', 'completed')
 
