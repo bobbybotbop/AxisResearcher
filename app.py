@@ -60,6 +60,7 @@ from backend.ebay_cli import call_text_llm, get_seller_list, revise_inventory_st
 from backend.copyScripts.imageEditing import remove_background, compile_images, downscale_image_bytes
 from backend.copyScripts.upload_to_ebay import upload_complete_listing
 from backend.promoted_listings import promote_listing, PromotionError
+from backend.logger import log_event
 import requests
 from dotenv import load_dotenv
 
@@ -2442,6 +2443,24 @@ def api_restock_listings():
             print(f"[restock] FAILED {sku}: {'; '.join(errors)}")
 
     return jsonify({'updated': updated, 'failed': failed, 'failed_errors': failed_errors, 'quantity': quantity}), 200
+
+
+@app.route('/api/logs', methods=['GET'])
+def api_get_logs():
+    log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs.ndjson')
+    if not os.path.exists(log_file):
+        return jsonify({'logs': []})
+    with open(log_file, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+    logs = []
+    for line in reversed(lines):
+        line = line.strip()
+        if line:
+            try:
+                logs.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return jsonify({'logs': logs})
 
 
 @app.route('/api/testing', methods=['POST'])
