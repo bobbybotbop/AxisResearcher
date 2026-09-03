@@ -2376,12 +2376,13 @@ function App() {
         });
       }
       if (data.failed?.length) {
-        addToast("error", `Failed to restock ${data.failed.length} listing(s)`);
         const failedErrors = data.failed_errors || {};
         const skuToListing = Object.fromEntries(allListings.map((l) => [l.sku, l]));
-        console.group(`Restock failed for ${data.failed.length} listing(s)`);
         data.failed.forEach((sku) => {
           const l = skuToListing[sku];
+          const raw = l?.title || sku;
+          const title = raw.length > 50 ? raw.slice(0, 50) + "…" : raw;
+          addToast("error", `Failed to restock "${title}"`);
           const ebayId = l?.ebayListingId || sku;
           const url = ebayId && !sku.startsWith("MANUAL_")
             ? `https://www.ebay.com/itm/${ebayId}`
@@ -2389,7 +2390,6 @@ function App() {
           const errors = failedErrors[sku]?.join("; ") || "(no error details)";
           console.warn(`SKU ${sku} | ${url} | ${errors}`);
         });
-        console.groupEnd();
       }
     } catch (err) {
       console.error("Error restocking listings:", err);
