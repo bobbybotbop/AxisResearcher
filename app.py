@@ -238,7 +238,12 @@ def get_listing_photos(listing_id):
 
             # Step 2: Create initial JSON file
             yield progress_event('Creating initial JSON file', 'in_progress')
-            new_sku = create_listing_with_preferences()
+            try:
+                new_sku = create_listing_with_preferences()
+                log_event("draft_created", "success", sku=new_sku, sourceListingId=item_id)
+            except Exception as create_err:
+                log_event("draft_created", "error", sourceListingId=item_id, error=str(create_err))
+                raise
             yield progress_event('Creating initial JSON file', 'completed')
 
             # Extract photo URLs — use aggregated variant images if available
