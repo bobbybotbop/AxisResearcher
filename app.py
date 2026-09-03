@@ -1727,7 +1727,7 @@ def api_import_listings():
         datetime.now(timezone.utc).isoformat()
     )
     if imported or updated:
-        log_event("import", "success", count=imported + updated, skus=imported_skus)
+        log_event("import", "success", count=imported + updated, imported_skus=imported_skus)
     return jsonify({'imported': imported, 'updated': updated, 'skipped': skipped})
 
 @app.route('/api/listings/<sku>', methods=['GET'])
