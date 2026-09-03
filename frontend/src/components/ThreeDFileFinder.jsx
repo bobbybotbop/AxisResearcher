@@ -169,7 +169,7 @@ function ThreeDFileFinder({ addToast }) {
                     {r.title || r.link}
                   </a>
                   <p className="truncate text-xs text-text-muted">
-                    {r.source || new URL(r.link).hostname}
+                    {r.source || (() => { try { return new URL(r.link).hostname; } catch { return r.link; } })()}
                   </p>
                 </div>
               </li>
