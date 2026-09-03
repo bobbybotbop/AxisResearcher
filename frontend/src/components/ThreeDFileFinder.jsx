@@ -1,38 +1,7 @@
 import { useState } from "react";
 import MessageBarInput from "./MessageBarInput";
 import { btnPill } from "../styles/buttonPill";
-
-async function fetchWithProgress(url, options, onProgress) {
-  const response = await fetch(url, options);
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || response.statusText);
-  }
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let result = null;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop();
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const parsed = JSON.parse(line);
-        if (parsed.type === "progress" && onProgress) onProgress(parsed);
-        if (parsed.type === "result") result = parsed.data;
-        if (parsed.type === "error") throw new Error(parsed.message);
-      } catch (e) {
-        if (e.message && !e.message.startsWith("Unexpected")) throw e;
-      }
-    }
-  }
-  return result;
-}
+import { fetchWithProgress } from "../utils/fetchWithProgress";
 
 function ThreeDFileFinder({ addToast }) {
   const [linkValue, setLinkValue] = useState("");
