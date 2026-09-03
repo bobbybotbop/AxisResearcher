@@ -18,6 +18,7 @@ import UploadListingsToolbar from "./components/UploadListingsToolbar";
 import ApiKeyManagementSection from "./components/ApiKeyManagementSection";
 import TestAiModelSection from "./components/TestAiModelSection";
 import LogsTab from "./components/LogsTab";
+import ThreeDFileFinder from "./components/ThreeDFileFinder";
 import { MOCK_DATA, MOCK_GENERATED_TITLE, MOCK_GENERATED_DESCRIPTION } from "./mockData";
 import { createTestWorkflowState } from "./testWorkflowState";
 import { trimTransparentPadding } from "./utils/trimImage";
@@ -3851,6 +3852,8 @@ function App() {
                     </pre>
                   </div>
                 )}
+                <hr className="border-border-default" />
+                <ThreeDFileFinder addToast={addToast} />
               </div>
             </div>
           )}
