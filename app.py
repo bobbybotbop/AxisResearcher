@@ -2465,15 +2465,15 @@ def api_restock_listings():
             print(f"[restock] FAILED {sku}: {'; '.join(errors)}")
 
     if updated or failed:
-        _restock_status = "success" if updated else "error"
-        _restock_kwargs = {"source": source, "quantity": quantity}
+        restock_status = "success" if updated else "error"
+        restock_kwargs = {"source": source, "quantity": quantity}
         if updated:
-            _restock_kwargs["skus"] = updated
+            restock_kwargs["skus"] = updated
         if failed:
-            _restock_kwargs["failed_skus"] = failed
+            restock_kwargs["failed_skus"] = failed
         if not updated:
-            _restock_kwargs["error"] = f"{len(failed)} SKU(s) failed to restock"
-        log_event("restock", _restock_status, **_restock_kwargs)
+            restock_kwargs["error"] = f"{len(failed)} SKU(s) failed to restock"
+        log_event("restock", restock_status, **restock_kwargs)
 
     return jsonify({'updated': updated, 'failed': failed, 'failed_errors': failed_errors, 'quantity': quantity}), 200
 
