@@ -1,5 +1,40 @@
 import os
 import serpapi
+from urllib.parse import urlparse
+
+
+WHITELISTED_SITES = [
+    "makerworld.com",
+    "printables.com",
+    "yeggi.com",
+    "cults3d.com",
+    "thingiverse.com",
+    "myminifactory.com",
+    "thangs.com",
+]
+
+BLACKLISTED_SITES = [
+    "ebay.com",
+    "amazon.com",
+    "walmart.com",
+    "etsy.com",
+    "aliexpress.com",
+    "temu.com",
+    "mercari.com",
+    "poshmark.com",
+]
+
+
+def _classify_site(link: str) -> str:
+    try:
+        host = urlparse(link).netloc.lower().removeprefix("www.")
+        if any(host == s or host.endswith("." + s) for s in WHITELISTED_SITES):
+            return "whitelisted"
+        if any(host == s or host.endswith("." + s) for s in BLACKLISTED_SITES):
+            return "blacklisted"
+    except Exception:
+        pass
+    return "neutral"
 
 
 def search_by_image(image_url: str) -> dict:
@@ -28,6 +63,7 @@ def extract_top_links(serpapi_response: dict, limit: int = 10) -> list[dict]:
             "link": link,
             "source": item.get("source", ""),
             "thumbnail": item.get("thumbnail", ""),
+            "site_type": _classify_site(link),
         })
 
     seen = set()

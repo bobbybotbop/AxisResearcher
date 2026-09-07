@@ -144,36 +144,58 @@ function ThreeDFileFinder({ addToast }) {
             Results ({searchResults.length})
           </p>
           <ol className="flex flex-col gap-2">
-            {searchResults.map((r, i) => (
-              <li
-                key={r.link}
-                className="flex items-start gap-3 rounded-lg border border-border-default bg-surface-muted p-3 transition-colors hover:bg-surface-hover"
-              >
-                <span className="mt-0.5 shrink-0 text-sm font-bold text-text-muted">
-                  {i + 1}.
-                </span>
-                {r.thumbnail && (
-                  <img
-                    src={r.thumbnail}
-                    alt=""
-                    className="h-10 w-10 shrink-0 rounded object-cover"
-                  />
-                )}
-                <div className="min-w-0 flex-1">
-                  <a
-                    href={r.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm font-medium text-primary hover:underline"
-                  >
-                    {r.title || r.link}
-                  </a>
-                  <p className="truncate text-xs text-text-muted">
-                    {r.source || (() => { try { return new URL(r.link).hostname; } catch { return r.link; } })()}
-                  </p>
-                </div>
-              </li>
-            ))}
+            {searchResults.map((r, i) => {
+              const isWhitelisted = r.site_type === "whitelisted";
+              const isBlacklisted = r.site_type === "blacklisted";
+              return (
+                <li
+                  key={r.link}
+                  className={`flex items-start gap-3 rounded-lg border p-3 transition-colors ${
+                    isWhitelisted
+                      ? "border-green-500/40 bg-green-500/5 hover:bg-green-500/10"
+                      : isBlacklisted
+                        ? "border-red-500/30 bg-red-500/5 hover:bg-red-500/10 opacity-60"
+                        : "border-border-default bg-surface-muted hover:bg-surface-hover"
+                  }`}
+                >
+                  <span className="mt-0.5 shrink-0 text-sm font-bold text-text-muted">
+                    {i + 1}.
+                  </span>
+                  {r.thumbnail && (
+                    <img
+                      src={r.thumbnail}
+                      alt=""
+                      className="h-10 w-10 shrink-0 rounded object-cover"
+                    />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <a
+                        href={r.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm font-medium text-primary hover:underline"
+                      >
+                        {r.title || r.link}
+                      </a>
+                      {isWhitelisted && (
+                        <span className="shrink-0 rounded-full bg-green-500/15 px-2 py-0.5 text-xs font-medium text-green-400">
+                          3D site
+                        </span>
+                      )}
+                      {isBlacklisted && (
+                        <span className="shrink-0 rounded-full bg-red-500/15 px-2 py-0.5 text-xs font-medium text-red-400">
+                          marketplace
+                        </span>
+                      )}
+                    </div>
+                    <p className="truncate text-xs text-text-muted">
+                      {r.source || (() => { try { return new URL(r.link).hostname; } catch { return r.link; } })()}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
           </ol>
         </div>
       )}
