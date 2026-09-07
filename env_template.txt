@@ -16,8 +16,8 @@ openrouter_api_key=
 # AWS Bedrock API (optional alternate AI provider)
 bedrock_api_key=
 
-# Serper API (for reverse image search)
-serper_api_token=
+# SerpAPI (for reverse image search)
+serp_api_token=
 
 # eBay OAuth Tokens
 user_token=
