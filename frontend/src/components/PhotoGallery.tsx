@@ -1,6 +1,23 @@
 import { useState, useCallback, useEffect } from "react";
-import ImageUploadModal from "./ImageUploadModal";
+import ImageUploadModal, { type PendingImage } from "./ImageUploadModal";
 import { btnPill, btnPillLg } from "../styles/buttonPill";
+
+interface PhotoGalleryProps {
+  photos: string[];
+  editableCategories: Record<string, string>;
+  onCategoryChange?: (photoUrl: string, category: string) => void;
+  onConfirm?: () => void;
+  isConfirming: boolean;
+  onPhotoClick?: (index: number) => void;
+  skippedPhotos?: Set<string>;
+  onSkipPhoto?: (photoUrl: string) => void;
+  onAddToOriginalPhotos?: (urls: string[]) => void;
+  onOpenEditor?: () => void;
+  onDeletePhotos?: (indices: number[]) => void;
+  onRemoveBackgrounds?: (urls: string[]) => void;
+  showClassification?: boolean;
+  hideConfirmButton?: boolean;
+}
 
 function PhotoGallery({
   photos,
@@ -17,10 +34,10 @@ function PhotoGallery({
   onRemoveBackgrounds,
   showClassification = true,
   hideConfirmButton = false,
-}) {
+}: PhotoGalleryProps) {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
-  const [selectedPhotos, setSelectedPhotos] = useState(new Set());
+  const [selectedPhotos, setSelectedPhotos] = useState<Set<number>>(new Set());
   const [bulkDropdownOpen, setBulkDropdownOpen] = useState(false);
 
   useEffect(() => {
@@ -31,10 +48,9 @@ function PhotoGallery({
   }, [bulkDropdownOpen]);
 
   const handleModalAddImages = useCallback(
-    (images, destination) => {
+    (images: PendingImage[] | string[], destination: "pool" | "original") => {
       if (destination === "original" && onAddToOriginalPhotos) {
-        const urls = Array.isArray(images) ? images : [images];
-        onAddToOriginalPhotos(urls);
+        onAddToOriginalPhotos(images as string[]);
       }
     },
     [onAddToOriginalPhotos],
@@ -44,7 +60,7 @@ function PhotoGallery({
     return null;
   }
 
-  const formatCategoryName = (category) => {
+  const formatCategoryName = (category: string) => {
     if (!category) return "Unknown";
     return category
       .split("_")
@@ -52,8 +68,8 @@ function PhotoGallery({
       .join(" ");
   };
 
-  const getCategoryGradient = (category) => {
-    const gradients = {
+  const getCategoryGradient = (category: string) => {
+    const gradients: Record<string, string> = {
       professional_image: "from-green-500/90 via-green-500/70 to-transparent",
       edited_image: "from-red-500/90 via-red-500/70 to-transparent",
       bad_image: "from-amber-500/90 via-amber-500/70 to-transparent",
@@ -71,7 +87,7 @@ function PhotoGallery({
     { value: "edited_image", label: "Edited Image" },
   ];
 
-  const handleCategorySelect = (e, photoUrl) => {
+  const handleCategorySelect = (e: React.ChangeEvent<HTMLSelectElement>, photoUrl: string) => {
     e.stopPropagation();
     const newCategory = e.target.value;
     if (onCategoryChange) {
@@ -79,7 +95,7 @@ function PhotoGallery({
     }
   };
 
-  const handleSkipClick = (e, photoUrl) => {
+  const handleSkipClick = (e: React.MouseEvent, photoUrl: string) => {
     e.stopPropagation();
     if (onSkipPhoto) {
       onSkipPhoto(photoUrl);
@@ -96,7 +112,7 @@ function PhotoGallery({
     });
   };
 
-  const togglePhotoSelection = (index) => {
+  const togglePhotoSelection = (index: number) => {
     setSelectedPhotos((prev) => {
       const next = new Set(prev);
       if (next.has(index)) {
@@ -218,7 +234,7 @@ function PhotoGallery({
                 className="h-full w-full object-cover"
                 loading="lazy"
                 onError={(e) => {
-                  e.target.src =
+                  (e.target as HTMLImageElement).src =
                     'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="200" height="200"%3E%3Crect fill="%23ddd" width="200" height="200"/%3E%3Ctext fill="%23999" font-family="sans-serif" font-size="14" x="50%25" y="50%25" text-anchor="middle" dy=".3em"%3EFailed to load%3C/text%3E%3C/svg%3E';
                 }}
               />

@@ -1,17 +1,30 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { btnPillSm } from "../styles/buttonPill";
 
+export interface PendingImage {
+  dataUrl: string;
+  name: string;
+}
+
+interface ImageUploadModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onAddImages?: (images: PendingImage[] | string[], destination: "pool" | "original") => void;
+  canAddToOriginal?: boolean;
+  mode?: "pool" | "original";
+}
+
 export default function ImageUploadModal({
   isOpen,
   onClose,
   onAddImages,
   canAddToOriginal = true,
   mode,
-}) {
-  const [pendingImages, setPendingImages] = useState([]);
-  const [destination, setDestination] = useState("pool");
+}: ImageUploadModalProps) {
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  const [destination, setDestination] = useState<"pool" | "original">("pool");
   const [isDragging, setIsDragging] = useState(false);
-  const fileInputRef = useRef(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const reset = useCallback(() => {
     setPendingImages([]);
@@ -23,7 +36,7 @@ export default function ImageUploadModal({
   }, [isOpen, reset]);
 
   useEffect(() => {
-    const handleEscape = (e) => {
+    const handleEscape = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     if (isOpen) {
@@ -36,18 +49,18 @@ export default function ImageUploadModal({
     };
   }, [isOpen, onClose]);
 
-  const addFilesToPending = useCallback((files) => {
-    const imageFiles = Array.from(files || []).filter((f) =>
+  const addFilesToPending = useCallback((files: FileList | File[]) => {
+    const imageFiles = Array.from(files).filter((f) =>
       f.type?.startsWith("image/"),
     );
     if (imageFiles.length === 0) return;
     const promises = imageFiles.map(
       (file) =>
-        new Promise((resolve) => {
+        new Promise<PendingImage>((resolve) => {
           const reader = new FileReader();
           reader.onload = (ev) =>
             resolve({
-              dataUrl: ev.target.result,
+              dataUrl: ev.target!.result as string,
               name: file.name || `image-${Date.now()}.png`,
             });
           reader.readAsDataURL(file);
@@ -60,10 +73,10 @@ export default function ImageUploadModal({
 
   useEffect(() => {
     if (!isOpen) return;
-    const handlePasteGlobal = (e) => {
+    const handlePasteGlobal = (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
       if (!items) return;
-      const files = [];
+      const files: File[] = [];
       for (const item of items) {
         if (item.type.startsWith("image/")) {
           const file = item.getAsFile();
@@ -80,7 +93,7 @@ export default function ImageUploadModal({
   }, [isOpen, addFilesToPending]);
 
   const handleFileChange = useCallback(
-    (e) => {
+    (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (files?.length) addFilesToPending(files);
       e.target.value = "";
@@ -89,7 +102,7 @@ export default function ImageUploadModal({
   );
 
   const handleDrop = useCallback(
-    (e) => {
+    (e: React.DragEvent<HTMLDivElement>) => {
       e.preventDefault();
       setIsDragging(false);
       const files = e.dataTransfer?.files;
@@ -98,12 +111,12 @@ export default function ImageUploadModal({
     [addFilesToPending],
   );
 
-  const handleDragOver = useCallback((e) => {
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(true);
   }, []);
 
-  const handleDragLeave = useCallback((e) => {
+  const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDragging(false);
   }, []);
@@ -120,7 +133,7 @@ export default function ImageUploadModal({
     onClose();
   }, [pendingImages, destination, mode, onAddImages, onClose]);
 
-  const removePending = useCallback((index) => {
+  const removePending = useCallback((index: number) => {
     setPendingImages((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
