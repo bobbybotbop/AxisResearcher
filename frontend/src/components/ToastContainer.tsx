@@ -1,7 +1,13 @@
 import { useEffect } from "react";
 import ReactDOM from "react-dom";
+import type { Toast } from "../types/toast";
 
-function Toast({ toast, onRemove }) {
+interface ToastItemProps {
+  toast: Toast;
+  onRemove: (id: number) => void;
+}
+
+function Toast({ toast, onRemove }: ToastItemProps) {
   useEffect(() => {
     if (toast.type === "success") {
       const t = setTimeout(() => onRemove(toast.id), 4000);
@@ -38,7 +44,12 @@ function Toast({ toast, onRemove }) {
   );
 }
 
-export default function ToastContainer({ toasts, onRemove }) {
+interface ToastContainerProps {
+  toasts: Toast[];
+  onRemove: (id: number) => void;
+}
+
+export default function ToastContainer({ toasts, onRemove }: ToastContainerProps) {
   if (toasts.length === 0) return null;
   return ReactDOM.createPortal(
     <div

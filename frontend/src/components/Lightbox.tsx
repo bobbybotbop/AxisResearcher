@@ -1,8 +1,15 @@
 import { useEffect } from 'react'
 
-function Lightbox({ photos, currentIndex, onClose, onNavigate }) {
+interface LightboxProps {
+  photos: string[];
+  currentIndex: number;
+  onClose: () => void;
+  onNavigate: (direction: "prev" | "next") => void;
+}
+
+function Lightbox({ photos, currentIndex, onClose, onNavigate }: LightboxProps) {
   useEffect(() => {
-    const handleKeyDown = (e) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onClose()
       } else if (e.key === 'ArrowLeft') {
@@ -21,7 +28,7 @@ function Lightbox({ photos, currentIndex, onClose, onNavigate }) {
     }
   }, [onClose, onNavigate])
 
-  const handleBackdropClick = (e) => {
+  const handleBackdropClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) {
       onClose()
     }

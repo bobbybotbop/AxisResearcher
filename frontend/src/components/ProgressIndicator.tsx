@@ -1,9 +1,16 @@
-function ProgressIndicator({ steps, currentStep, completedSteps = [], showProgressBar = true }) {
+interface ProgressIndicatorProps {
+  steps: string[];
+  currentStep: string | null;
+  completedSteps?: string[];
+  showProgressBar?: boolean;
+}
+
+function ProgressIndicator({ steps, currentStep, completedSteps = [], showProgressBar = true }: ProgressIndicatorProps) {
   if (!steps || steps.length === 0) {
     return null
   }
 
-  const getStepStatus = (step) => {
+  const getStepStatus = (step: string): "completed" | "current" | "pending" => {
     if (completedSteps.includes(step)) {
       return 'completed'
     } else if (currentStep === step) {
@@ -13,7 +20,7 @@ function ProgressIndicator({ steps, currentStep, completedSteps = [], showProgre
     }
   }
 
-  const getStepIcon = (step) => {
+  const getStepIcon = (step: string) => {
     const status = getStepStatus(step)
     switch (status) {
       case 'completed':
