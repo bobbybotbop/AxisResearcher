@@ -1,7 +1,9 @@
+import type { Listing } from "../types/listing";
+
 export const LISTING_PLACEHOLDER = "[need to change]";
 
 /** Returns true when the listing is missing data required to upload to eBay. */
-export function isIncomplete(listing) {
+export function isIncomplete(listing: Partial<Listing> | null | undefined): boolean {
   const title = String(listing?.title ?? "").trim();
   if (!title || title === LISTING_PLACEHOLDER) return true;
   const urls = listing?.imageUrls;
@@ -14,6 +16,6 @@ export function isIncomplete(listing) {
 }
 
 /** Returns true when the listing has been published to eBay (has a valid ebayListingId). */
-export function isUploaded(listing) {
+export function isUploaded(listing: Partial<Listing> | null | undefined): boolean {
   return Boolean(String(listing?.ebayListingId ?? "").trim());
 }

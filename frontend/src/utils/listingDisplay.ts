@@ -1,4 +1,4 @@
-export function formatPrice(value, currency = "USD") {
+export function formatPrice(value: unknown, currency: string = "USD"): string {
   if (value === undefined || value === null || value === "N/A") return "—";
   const num = Number(value);
   if (Number.isNaN(num)) return `$${value}`;
@@ -14,7 +14,7 @@ export function formatPrice(value, currency = "USD") {
 }
 
 /** e.g. "07/11/2026, 14:43" — MM/DD/YYYY, local time 24 h. */
-export function formatListingDateTime(iso) {
+export function formatListingDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   try {
     const d = new Date(iso);
@@ -29,7 +29,7 @@ export function formatListingDateTime(iso) {
   }
 }
 
-export function formatCategoryShort(categoryId) {
+export function formatCategoryShort(categoryId: unknown): string {
   const id = String(categoryId ?? "—");
   return id.length > 10 ? `${id.slice(0, 8)}…` : id;
 }
