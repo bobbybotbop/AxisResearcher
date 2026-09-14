@@ -1,0 +1,40 @@
+import type { Listing, ProgressState, ImageGenProgress } from "./listing";
+
+export interface TestWorkflowState {
+  listingId: string;
+  photos: string[];
+  categories: Record<string, string>;
+  editableCategories: Record<string, string>;
+  listing: Listing | null;
+  loading: boolean;
+  isConfirming: boolean;
+  error: string | null;
+  generatedImages: string[];
+  isRegenerating: boolean;
+  useRealEbayUpload: boolean;
+  isCreatingListing: boolean;
+  listingData: Listing | null;
+  uploadResult: unknown;
+  currentSku: string | null;
+  skippedPhotos: Set<string>;
+  pendingImagePromptModifier: string;
+  pendingPhotoPrompt: string;
+  isEditorOpen: boolean;
+  editableTitle: string;
+  isTrimmingTitle: boolean;
+  isSavingTitle: boolean;
+  editableDescription: string;
+  isSavingDescription: boolean;
+  isGeneratingText: boolean;
+  textGenStatus: string;
+  textGenComplete: boolean;
+  lightboxOpen: boolean;
+  lightboxIndex: number;
+  fetchProgress: ProgressState;
+  imageGenProgress: ImageGenProgress;
+  createListingProgress: ProgressState;
+  uploadProgress: ProgressState;
+  uploadingSkus: Set<string>;
+  bgRemovedPhotos: Record<string, string>;
+  bgRemovalProgress: ProgressState;
+}
