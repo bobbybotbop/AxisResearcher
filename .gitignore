@@ -1,5 +1,9 @@
 .env
 *.json
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/tsconfig.json
+!frontend/tsconfig.node.json
 __pycache__/
 *.pyc
 *.pyo
@@ -10,3 +14,4 @@ frontend/dist
 .cursor/debug.log
 frontend/dist/index.html
 docs/superpowers/
+logs.ndjson
