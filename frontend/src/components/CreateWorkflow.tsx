@@ -2,11 +2,13 @@ import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import PhotoGallery from "./PhotoGallery";
 import ImageUploadModal from "./ImageUploadModal";
+import type { PendingImage } from "./ImageUploadModal";
 import MessageBarInput from "./MessageBarInput";
 import Lightbox from "./Lightbox";
 import ProgressIndicator from "./ProgressIndicator";
 import ImageCanvas from "./ImageCanvas";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
+import type { DropResult } from "@hello-pangea/dnd";
 import { btnPill, btnPillLg, btnPillSm } from "../styles/buttonPill";
 import {
   DEFAULT_CHAT_CONTEXT,
@@ -17,6 +19,131 @@ import {
   formatListingDateTime,
   formatCategoryShort,
 } from "../utils/listingDisplay";
+
+interface ProgressState {
+  isActive: boolean;
+  totalSteps: string[];
+  currentStep: string;
+  completedSteps: string[];
+}
+
+interface ImageGenProgress {
+  isActive: boolean;
+  completed: number;
+  total: number;
+}
+
+interface BgRemovalProgress {
+  isActive: boolean;
+  totalSteps: string[];
+  completedSteps: string[];
+}
+
+interface AutoSaveStatus {
+  title: "idle" | "saving" | "saved";
+  description: "idle" | "saving" | "saved";
+}
+
+interface UploadResult {
+  listingId?: string;
+  ebayId?: string;
+  href?: string;
+}
+
+interface ListingData {
+  sku?: string;
+  offer?: {
+    pricingSummary?: { price?: { value?: string | number } };
+    categoryId?: string;
+  };
+  inventoryItem?: {
+    product?: { imageUrls?: string[] };
+  };
+  createdDateTime?: string;
+}
+
+interface SourceListing {
+  title?: string;
+  description?: string;
+  price?: string | number;
+  currency?: string;
+  categoryId?: string | number;
+  itemCreationDate?: string;
+  [key: string]: unknown;
+}
+
+interface CreateWorkflowProps {
+  listingId: string;
+  listingLinkSubmitted?: boolean;
+  sidebarCollapsed?: boolean;
+  photos?: string[];
+  categories?: unknown[];
+  editableCategories?: Record<string, string>;
+  listing?: SourceListing | null;
+  currentSku?: string;
+  skippedPhotos?: Set<string>;
+  generatedImages?: string[];
+  loading?: boolean;
+  isConfirming?: boolean;
+  isCreatingListing?: boolean;
+  listingData?: ListingData | null;
+  editableTitle?: string;
+  editableDescription?: string;
+  uploadResult?: UploadResult | null;
+  isEditorOpen?: boolean;
+  fetchProgress?: ProgressState | null;
+  imageGenProgress?: ImageGenProgress | null;
+  createListingProgress?: ProgressState | null;
+  uploadProgress?: ProgressState | null;
+  uploadingSkus?: Set<string>;
+  isTrimmingTitle?: boolean;
+  autoSaveStatus?: AutoSaveStatus;
+  isGeneratingText?: boolean;
+  textGenStatus?: string;
+  onCancelTextGen?: () => void;
+  onListingIdChange: (value: string) => void;
+  onSubmit: (e: React.FormEvent) => void;
+  onChatSubmit: (prompt: string, context: string) => void;
+  onCategoryChange?: (photoUrl: string, category: string) => void;
+  onSkipPhoto?: (url: string) => void;
+  onConfirmCategories?: () => void;
+  onDragEnd: (result: DropResult) => void;
+  onRemoveFromListing?: (url: string) => void;
+  onAddToListing?: (url: string) => void;
+  onAddToOriginalPhotos?: (urls: string[]) => void;
+  onEditableTitleChange?: (value: string) => void;
+  onTrimTitle?: () => void;
+  onEditableDescriptionChange?: (value: string) => void;
+  onUploadToEbay?: (sku: string, data: ListingData) => void;
+  onEditorToggle?: () => void;
+  useRealEbayUpload?: boolean;
+  onUseRealEbayUploadChange?: ((checked: boolean) => void) | null;
+  onPhotoClick?: (index: number) => void;
+  onCloseLightbox?: () => void;
+  onNavigateLightbox?: (direction: "prev" | "next") => void;
+  lightboxOpen?: boolean;
+  lightboxIndex?: number;
+  selectedImagesForRegen?: number[];
+  onImageSelection?: (index: number) => void;
+  onSelectAllImages?: () => void;
+  onClearImageSelection?: () => void;
+  classifyImagesEnabled?: boolean;
+  photoSelectionActive?: boolean;
+  pendingPhotoPrompt?: string;
+  pendingImagePromptModifier?: string;
+  onClearImagePromptModifier?: () => void;
+  onConfirmPhotoRegeneration?: () => void;
+  onCancelPhotoRegeneration?: () => void;
+  onAddToGeneratedImages?: (url: string) => void;
+  onDeleteGeneratedImages?: (indices: number[]) => void;
+  onRemoveBackgroundGenerated?: (urls: string[]) => void;
+  onDeleteOriginalPhotos?: (indices: number[]) => void;
+  onRemoveBackgroundOriginal?: (urls: string[]) => void;
+  autoBackgroundRemovalEnabled?: boolean;
+  bgRemovedPhotos?: Record<string, string>;
+  bgRemovalProgress?: BgRemovalProgress | null;
+  onError?: (message: string) => void;
+}
 
 function CreateWorkflow({
   listingId,
@@ -89,13 +216,13 @@ function CreateWorkflow({
   bgRemovedPhotos,
   bgRemovalProgress,
   onError = () => {},
-}) {
+}: CreateWorkflowProps) {
   const [descriptionEditMode, setDescriptionEditMode] = useState(false);
   const [chatContext, setChatContext] = useState(DEFAULT_CHAT_CONTEXT);
   const [showOriginal, setShowOriginal] = useState(false);
   const [showMetadata, setShowMetadata] = useState(false);
   const [genSelectMode, setGenSelectMode] = useState(false);
-  const [genSelectedPhotos, setGenSelectedPhotos] = useState(new Set());
+  const [genSelectedPhotos, setGenSelectedPhotos] = useState(new Set<number>());
   const [genBulkDropdownOpen, setGenBulkDropdownOpen] = useState(false);
   const [showGenUploadModal, setShowGenUploadModal] = useState(false);
 
@@ -109,7 +236,7 @@ function CreateWorkflow({
 
   useEffect(() => {
     if (!isEditorOpen) return;
-    const handleKeyDown = (e) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && onEditorToggle) {
         onEditorToggle();
       }
@@ -118,7 +245,7 @@ function CreateWorkflow({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isEditorOpen, onEditorToggle]);
 
-  const imageSelectionActive = chatContext === "photos" && generatedImages?.length > 0;
+  const imageSelectionActive = chatContext === "photos" && (generatedImages?.length ?? 0) > 0;
 
   useEffect(() => {
     if (!genBulkDropdownOpen) return;
@@ -137,7 +264,7 @@ function CreateWorkflow({
     });
   };
 
-  const toggleGenPhotoSelection = (index) => {
+  const toggleGenPhotoSelection = (index: number) => {
     setGenSelectedPhotos((prev) => {
       const next = new Set(prev);
       if (next.has(index)) next.delete(index);
@@ -154,7 +281,7 @@ function CreateWorkflow({
     }
   }, [imageSelectionActive]);
 
-  const [expandedPromptIndex, setExpandedPromptIndex] = useState(null);
+  const [expandedPromptIndex, setExpandedPromptIndex] = useState<number | null>(null);
 
   const sidebarLeft = sidebarCollapsed ? "4.25rem" : "15rem";
   const barWrapperClassName = listingLinkSubmitted
@@ -226,7 +353,7 @@ function CreateWorkflow({
         <div className="flex flex-col items-center justify-center gap-4 py-12">
           <div className="h-12 w-12 animate-spin rounded-full border-4 border-border-default border-t-primary" />
           <p className="text-text-muted">Fetching listing data...</p>
-          {fetchProgress?.isActive && fetchProgress?.totalSteps?.length > 0 && (
+          {fetchProgress?.isActive && fetchProgress.totalSteps.length > 0 && (
             <ProgressIndicator
               steps={fetchProgress.totalSteps}
               currentStep={fetchProgress.currentStep}
@@ -235,7 +362,6 @@ function CreateWorkflow({
           )}
         </div>
       )}
-
 
       {listing && (isGeneratingText || editableTitle !== "") && (
         <div className="mt-8 rounded-xl border border-border-default bg-surface-panel px-4 pb-4 pt-5 shadow-sm sm:px-5 sm:pb-5 sm:pt-6">
@@ -249,7 +375,7 @@ function CreateWorkflow({
               )}
               {listing.itemCreationDate && (
                 <span className="rounded-md border border-border-default px-2 py-0.5 text-xs text-text-muted">
-                  {formatListingDateTime(listing.itemCreationDate)}
+                  {formatListingDateTime(String(listing.itemCreationDate))}
                 </span>
               )}
               <span className="rounded-md border border-border-default px-2 py-0.5 text-xs text-text-muted">
@@ -272,10 +398,10 @@ function CreateWorkflow({
                 <div className="flex items-center gap-2">
                   <strong className="text-primary">Title:</strong>
                   {autoSaveStatus.title === "saving" && (
-                    <span className="text-xs text-text-muted ml-2">Saving...</span>
+                    <span className="ml-2 text-xs text-text-muted">Saving...</span>
                   )}
                   {autoSaveStatus.title === "saved" && (
-                    <span className="text-xs text-success ml-2">Saved</span>
+                    <span className="ml-2 text-xs text-success">Saved</span>
                   )}
                   {isGeneratingText && (
                     <button
@@ -289,17 +415,17 @@ function CreateWorkflow({
                 </div>
                 <span
                   className={`rounded-full px-2.5 py-1 text-sm font-semibold ${
-                    editableTitle?.length > 80
+                    (editableTitle?.length ?? 0) > 80
                       ? "bg-red-100 text-red-700"
-                      : editableTitle?.length >= 73 &&
-                          editableTitle?.length <= 80
+                      : (editableTitle?.length ?? 0) >= 73 &&
+                          (editableTitle?.length ?? 0) <= 80
                         ? "bg-green-100 text-green-700"
                         : "bg-primary/10 text-primary"
                   }`}
                 >
                   {editableTitle?.length ?? 0} / 80
-                  {editableTitle?.length > 80 &&
-                    ` (${editableTitle.length - 80} over)`}
+                  {(editableTitle?.length ?? 0) > 80 &&
+                    ` (${(editableTitle?.length ?? 0) - 80} over)`}
                 </span>
               </div>
               <input
@@ -307,12 +433,12 @@ function CreateWorkflow({
                 className={`w-full rounded-lg border-2 px-3 py-2.5 transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20 ${
                   isGeneratingText
                     ? "cursor-not-allowed border-border-default bg-surface-muted text-text-muted opacity-60"
-                    : editableTitle?.length > 80
+                    : (editableTitle?.length ?? 0) > 80
                       ? "border-red-500 bg-red-50 focus:border-red-500 focus:ring-red-500/20"
                       : "border-border-default bg-surface-panel text-text-primary focus:border-primary"
                 }`}
                 value={editableTitle}
-                onChange={(e) => onEditableTitleChange(e.target.value)}
+                onChange={(e) => onEditableTitleChange?.(e.target.value)}
                 placeholder="Listing title..."
                 disabled={isGeneratingText}
               />
@@ -323,13 +449,12 @@ function CreateWorkflow({
                     : "AI is writing..."}
                 </p>
               )}
-              {editableTitle?.length > 80 && (
+              {(editableTitle?.length ?? 0) > 80 && (
                 <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                  Title exceeds 80 characters. Edit manually or use AI to trim
-                  it.
+                  Title exceeds 80 characters. Edit manually or use AI to trim it.
                 </div>
               )}
-              {!isGeneratingText && editableTitle?.length > 80 && (
+              {!isGeneratingText && (editableTitle?.length ?? 0) > 80 && (
                 <button
                   type="button"
                   className={btnPillSm}
@@ -345,10 +470,10 @@ function CreateWorkflow({
                 <div className="flex items-center gap-2">
                   <strong className="text-primary">Description:</strong>
                   {autoSaveStatus.description === "saving" && (
-                    <span className="text-xs text-text-muted ml-2">Saving...</span>
+                    <span className="ml-2 text-xs text-text-muted">Saving...</span>
                   )}
                   {autoSaveStatus.description === "saved" && (
-                    <span className="text-xs text-success ml-2">Saved</span>
+                    <span className="ml-2 text-xs text-success">Saved</span>
                   )}
                 </div>
                 {!isGeneratingText && (
@@ -369,7 +494,7 @@ function CreateWorkflow({
                       : "border-border-default bg-surface-panel text-text-primary focus:border-primary"
                   }`}
                   value={editableDescription}
-                  onChange={(e) => onEditableDescriptionChange(e.target.value)}
+                  onChange={(e) => onEditableDescriptionChange?.(e.target.value)}
                   placeholder="HTML description..."
                   rows={12}
                   spellCheck={false}
@@ -406,11 +531,11 @@ function CreateWorkflow({
                     {listing.title || "No title"}
                   </p>
                   {listing.description &&
-                    listing.description.trim() !== "" &&
+                    String(listing.description).trim() !== "" &&
                     listing.description !== "No description available" && (
                       <div className="max-h-[calc(1.625em*6)] overflow-y-auto overscroll-contain rounded-lg border border-border-default bg-surface-muted p-3">
                         <p className="whitespace-pre-wrap text-sm leading-relaxed text-text-primary">
-                          {listing.description.trim()}
+                          {String(listing.description).trim()}
                         </p>
                       </div>
                     )}
@@ -421,7 +546,7 @@ function CreateWorkflow({
 
           {isCreatingListing &&
             createListingProgress?.isActive &&
-            createListingProgress?.totalSteps?.length > 0 && (
+            (createListingProgress.totalSteps.length ?? 0) > 0 && (
               <div className="mt-4">
                 <ProgressIndicator
                   steps={createListingProgress.totalSteps}
@@ -433,7 +558,7 @@ function CreateWorkflow({
 
           {(listing || listingData) && (
             <>
-              {/* Listing details disclosure (hidden by default) */}
+              {/* Listing details disclosure */}
               <div className="mt-4">
                 <button
                   type="button"
@@ -533,14 +658,14 @@ function CreateWorkflow({
         </div>
       )}
 
-      {photos?.length > 0 && (
+      {(photos?.length ?? 0) > 0 && (
         <>
           <PhotoGallery
-            photos={photos}
-            editableCategories={editableCategories}
+            photos={photos!}
+            editableCategories={editableCategories ?? {}}
             onCategoryChange={onCategoryChange}
             onConfirm={onConfirmCategories}
-            isConfirming={isConfirming}
+            isConfirming={isConfirming ?? false}
             onPhotoClick={onPhotoClick}
             skippedPhotos={skippedPhotos}
             onSkipPhoto={onSkipPhoto}
@@ -551,7 +676,7 @@ function CreateWorkflow({
             showClassification={classifyImagesEnabled}
             hideConfirmButton={autoBackgroundRemovalEnabled}
           />
-          {pendingImagePromptModifier && !generatedImages?.length && (
+          {pendingImagePromptModifier && !(generatedImages?.length) && (
             <div className="mt-3 flex items-center gap-2 rounded-xl border border-border-default bg-surface-panel px-4 py-2.5">
               <span className="flex-1 text-sm text-text-muted">
                 Will generate with:{" "}
@@ -597,7 +722,7 @@ function CreateWorkflow({
               )}
               {Object.keys(bgRemovedPhotos || {}).length > 0 && (
                 <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))]">
-                  {Object.values(bgRemovedPhotos).map((url, idx) => (
+                  {Object.values(bgRemovedPhotos!).map((url, idx) => (
                     <div
                       key={url}
                       className="aspect-square overflow-hidden rounded-xl border border-border-default bg-surface-panel"
@@ -651,9 +776,7 @@ function CreateWorkflow({
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  if (onConfirmCategories) {
-                    onConfirmCategories();
-                  }
+                  onConfirmCategories?.();
                 }}
                 disabled={isConfirming}
               >
@@ -661,11 +784,10 @@ function CreateWorkflow({
               </button>
             </div>
           )}
-
         </>
       )}
 
-      {generatedImages?.length > 0 && (
+      {(generatedImages?.length ?? 0) > 0 && (
         <div className="mt-8 rounded-2xl border border-border-default bg-surface-panel p-6">
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-xl font-semibold text-text-primary">New Listing Photos</h2>
@@ -703,7 +825,7 @@ function CreateWorkflow({
                         type="button"
                         className="w-full px-4 py-2 text-left text-sm text-text-primary hover:bg-surface-app"
                         onClick={() => {
-                          const urls = Array.from(genSelectedPhotos).map((idx) => generatedImages[idx]);
+                          const urls = Array.from(genSelectedPhotos).map((idx) => generatedImages![idx]);
                           onRemoveBackgroundGenerated(urls);
                           setGenSelectedPhotos(new Set());
                           setGenSelectMode(false);
@@ -740,7 +862,7 @@ function CreateWorkflow({
                   ref={provided.innerRef}
                   {...provided.droppableProps}
                 >
-                  {generatedImages.map((imageUrl, index) => {
+                  {generatedImages!.map((imageUrl, index) => {
                     const isSelected = selectedImagesForRegen.includes(index);
                     return (
                     <Draggable
@@ -865,20 +987,20 @@ function CreateWorkflow({
               <button
                 type="button"
                 className={btnPillLg}
-                onClick={() => onUploadToEbay(listingData.sku, listingData)}
+                onClick={() => onUploadToEbay?.(listingData.sku!, listingData)}
                 disabled={
-                  uploadingSkus?.has(listingData?.sku) || !listingData?.sku
+                  uploadingSkus?.has(listingData?.sku ?? "") || !listingData?.sku
                 }
               >
-                {uploadingSkus?.has(listingData?.sku)
+                {uploadingSkus?.has(listingData?.sku ?? "")
                   ? "Uploading to eBay..."
                   : "Upload to eBay"}
               </button>
             </div>
           )}
-          {uploadingSkus?.has(listingData?.sku) &&
+          {uploadingSkus?.has(listingData?.sku ?? "") &&
             uploadProgress?.isActive &&
-            uploadProgress?.totalSteps?.length > 0 && (
+            (uploadProgress.totalSteps.length ?? 0) > 0 && (
               <div className="mt-4">
                 <ProgressIndicator
                   steps={uploadProgress.totalSteps}
@@ -894,27 +1016,26 @@ function CreateWorkflow({
               onAddImages={(images) => {
                 const items = Array.isArray(images) ? images : [images];
                 items.forEach((item) => {
-                  const url = typeof item === "string" ? item : item.dataUrl;
+                  const url = typeof item === "string" ? item : (item as PendingImage).dataUrl;
                   onAddToGeneratedImages(url);
                 });
               }}
               canAddToOriginal={false}
-              mode="generated"
             />
           )}
         </div>
       )}
 
-      {lightboxOpen && photos?.length > 0 && (
+      {lightboxOpen && (photos?.length ?? 0) > 0 && (
         <Lightbox
-          photos={photos}
-          currentIndex={lightboxIndex}
-          onClose={onCloseLightbox}
-          onNavigate={onNavigateLightbox}
+          photos={photos!}
+          currentIndex={lightboxIndex ?? 0}
+          onClose={onCloseLightbox!}
+          onNavigate={onNavigateLightbox!}
         />
       )}
 
-      {isEditorOpen && photos?.length > 0 && (
+      {isEditorOpen && (photos?.length ?? 0) > 0 && (
         <div
           className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4"
           onClick={onEditorToggle}
