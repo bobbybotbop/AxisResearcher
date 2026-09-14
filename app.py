@@ -39,7 +39,7 @@ from flask import Flask, jsonify, request, Response, stream_with_context
 from flask_cors import CORS
 from werkzeug.serving import WSGIRequestHandler
 from backend.copyScripts.CopyListingMain import copy_listing_main, testing_function
-from backend.serper import search_by_image, extract_top_links
+from backend.serp import search_by_image, extract_top_links
 from backend.copyScripts.create_image import (
     generate_image_from_urls,
     ImageType,
@@ -2546,10 +2546,10 @@ def run_testing_function():
             "result": None
         }), 500
 
-@app.route('/api/serper-lens', methods=['POST'])
-def serper_lens_search():
+@app.route('/api/serp-lens', methods=['POST'])
+def serp_lens_search():
     """
-    Reverse-image-search an eBay listing photo via Serper Google Lens,
+    Reverse-image-search an eBay listing photo via SerpAPI Google reverse image,
     filtered to 3D-print file hosting sites.
 
     Expects JSON: {"image_url": "https://..."}
@@ -2561,22 +2561,22 @@ def serper_lens_search():
             return jsonify({"error": "image_url is required"}), 400
 
         image_url = data["image_url"]
-        print(f"[API] Serper lens search for: {image_url}")
+        print(f"[API] SerpAPI reverse image search for: {image_url}")
 
         raw = search_by_image(image_url)
         links = extract_top_links(raw, limit=10)
 
-        print(f"[API] Serper returned {len(links)} results")
+        print(f"[API] SerpAPI returned {len(links)} results")
         return jsonify({"results": links}), 200
 
     except ValueError as ve:
         return jsonify({"error": str(ve)}), 400
     except requests.exceptions.RequestException as e:
-        print(f"[API] Serper HTTP error: {e}")
-        return jsonify({"error": "Serper request failed"}), 502
+        print(f"[API] SerpAPI HTTP error: {e}")
+        return jsonify({"error": "SerpAPI request failed"}), 502
     except Exception as e:
-        print(f"[API] Serper lens error: {e}")
-        return jsonify({"error": f"Serper search failed: {str(e)}"}), 500
+        print(f"[API] SerpAPI lens error: {e}")
+        return jsonify({"error": f"SerpAPI search failed: {str(e)}"}), 500
 
 
 @app.route('/api/remove-background', methods=['POST'])

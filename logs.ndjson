@@ -1,0 +1,21 @@
+{"timestamp": "2026-09-04T02:41:40.371164+00:00", "event": "import", "status": "error", "error": "GetSellerList failed (Ack=Failure): Auth token is hard expired."}
+{"timestamp": "2026-09-04T02:42:18.097909+00:00", "event": "draft_created", "status": "success", "sku": "AXIS_85", "sourceListingId": "285355871491"}
+{"timestamp": "2026-09-04T02:57:56.068276+00:00", "event": "import", "status": "success", "count": 9, "imported_skus": []}
+{"timestamp": "2026-09-04T03:02:47.620643+00:00", "event": "draft_created", "status": "success", "sku": "AXIS_86", "sourceListingId": "126828603644"}
+{"timestamp": "2026-09-04T14:08:58.770633+00:00", "event": "import", "status": "error", "error": "HTTPSConnectionPool(host='api.ebay.com', port=443): Max retries exceeded with url: /ws/api.dll (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x00000226DAD5D310>: Failed to establish a new connection: [Errno 11001] getaddrinfo failed'))"}
+{"timestamp": "2026-09-04T15:40:44.687269+00:00", "event": "import", "status": "error", "error": "GetSellerList failed (Ack=Failure): Auth token is hard expired."}
+{"timestamp": "2026-09-04T16:19:42.888923+00:00", "event": "import", "status": "error", "error": "HTTPSConnectionPool(host='api.ebay.com', port=443): Max retries exceeded with url: /ws/api.dll (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x000001E7BD421310>: Failed to establish a new connection: [Errno 11001] getaddrinfo failed'))"}
+{"timestamp": "2026-09-04T19:18:49.213920+00:00", "event": "import", "status": "error", "error": "GetSellerList failed (Ack=Failure): Auth token is hard expired."}
+{"timestamp": "2026-09-04T22:17:02.690448+00:00", "event": "import", "status": "error", "error": "GetSellerList failed (Ack=Failure): Auth token is hard expired."}
+{"timestamp": "2026-09-05T22:40:29.837305+00:00", "event": "import", "status": "error", "error": "GetSellerList failed (Ack=Failure): Auth token is hard expired."}
+{"timestamp": "2026-09-06T00:51:23.891880+00:00", "event": "import", "status": "error", "error": "HTTPSConnectionPool(host='api.ebay.com', port=443): Max retries exceeded with url: /ws/api.dll (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x0000021AE413F110>: Failed to establish a new connection: [Errno 11001] getaddrinfo failed'))"}
+{"timestamp": "2026-09-07T22:22:15.038856+00:00", "event": "import", "status": "error", "error": "GetSellerList failed (Ack=Failure): Auth token is hard expired."}
+{"timestamp": "2026-09-08T04:14:05.119863+00:00", "event": "import", "status": "error", "error": "GetSellerList failed (Ack=Failure): Auth token is hard expired."}
+{"timestamp": "2026-09-08T13:47:59.663366+00:00", "event": "import", "status": "error", "error": "GetSellerList failed (Ack=Failure): Auth token is hard expired."}
+{"timestamp": "2026-09-10T20:33:29.207067+00:00", "event": "import", "status": "error", "error": "GetSellerList failed (Ack=Failure): Auth token is hard expired."}
+{"timestamp": "2026-09-10T20:34:28.686001+00:00", "event": "restock", "status": "success", "source": "auto", "quantity": 15, "skus": ["MANUAL_197677975124", "MANUAL_198567743460", "MANUAL_197711484829", "MANUAL_197598303693", "MANUAL_197593696856", "MANUAL_197589873968", "MANUAL_197587435877", "MANUAL_197583927451", "MANUAL_197523731100", "MANUAL_197582812559", "AXIS_78", "AXIS_23", "AXIS_21", "AXIS_agn_20", "AXIS_17", "AXIS_16"]}
+{"timestamp": "2026-09-14T21:50:47.623076+00:00", "event": "import", "status": "error", "error": "GetSellerList failed (Ack=Failure): Auth token is hard expired."}
+{"timestamp": "2026-09-14T21:51:32.043174+00:00", "event": "draft_created", "status": "success", "sku": "AXIS_87", "sourceListingId": "126828603644"}
+{"timestamp": "2026-09-14T22:16:11.276149+00:00", "event": "import", "status": "success", "count": 9, "imported_skus": []}
+{"timestamp": "2026-09-14T22:16:12.694464+00:00", "event": "draft_created", "status": "success", "sku": "AXIS_88", "sourceListingId": "126828603644"}
+{"timestamp": "2026-09-14T22:16:33.848398+00:00", "event": "draft_created", "status": "success", "sku": "AXIS_89", "sourceListingId": "126828603644"}

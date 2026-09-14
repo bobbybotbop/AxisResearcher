@@ -52,7 +52,7 @@ function ThreeDFileFinder({ addToast }) {
     setSearchResults([]);
 
     try {
-      const res = await fetch("/api/serper-lens", {
+      const res = await fetch("/api/serp-lens", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ image_url: selectedPhoto }),
