@@ -15,11 +15,29 @@ import {
   PlusSquare,
 } from "@mynaui/icons-react";
 import { trimTransparentPadding } from "../utils/trimImage";
-import ImageUploadModal from "./ImageUploadModal";
+import ImageUploadModal, { type PendingImage } from "./ImageUploadModal";
 import { btnPill, btnPillSecondary, btnPillSm } from "../styles/buttonPill";
 
-const DISPLAY_MAX = 324; // 30% of 1080 for on-screen canvas display
+const DISPLAY_MAX = 324;
 let imageIdCounter = 0;
+
+interface PoolImage {
+  id: number;
+  dataUrl: string;
+  name: string;
+  isOriginal?: boolean;
+  isGenerated?: boolean;
+}
+
+interface ImageCanvasProps {
+  onAddToListing?: (url: string) => void;
+  onAddToOriginalPhotos?: (urls: string[]) => void;
+  originalPhotos?: string[];
+  generatedImages?: string[];
+  useRealUpload?: boolean;
+  onRequestClose?: () => void;
+  onError?: (message: string) => void;
+}
 
 export default function ImageCanvas({
   onAddToListing,
@@ -29,8 +47,7 @@ export default function ImageCanvas({
   useRealUpload = true,
   onRequestClose,
   onError = () => {},
-}) {
-  // Canvas settings
+}: ImageCanvasProps) {
   const [canvasWidth, setCanvasWidth] = useState(1080);
   const [canvasHeight, setCanvasHeight] = useState(1080);
   const [bgColor, setBgColor] = useState("#121212");
@@ -38,33 +55,27 @@ export default function ImageCanvas({
   const [showTextOptions, setShowTextOptions] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
 
-  // Temp settings (only applied on confirm)
-  const [tempWidth, setTempWidth] = useState(1080);
-  const [tempHeight, setTempHeight] = useState(1080);
+  const [tempWidth, setTempWidth] = useState<number | string>(1080);
+  const [tempHeight, setTempHeight] = useState<number | string>(1080);
   const [tempBgColor, setTempBgColor] = useState("#121212");
 
-  // Uploaded image pool
-  const [uploadedImages, setUploadedImages] = useState([]); // { id, dataUrl, name }
-  const [selectedIds, setSelectedIds] = useState(new Set());
-  const [processingIds, setProcessingIds] = useState(new Set()); // IDs currently having bg removed
+  const [uploadedImages, setUploadedImages] = useState<PoolImage[]>([]);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [processingIds, setProcessingIds] = useState<Set<number>>(new Set());
 
-  // Loading states
   const [isProcessing, setIsProcessing] = useState(false);
   const [isCompiling, setIsCompiling] = useState(false);
   const [processingCount, setProcessingCount] = useState(0);
   const [processingTotal, setProcessingTotal] = useState(0);
 
-  // Default text settings (for Add Text)
   const [textFontSize, setTextFontSize] = useState(48);
   const [textFontWeight, setTextFontWeight] = useState("normal");
 
-  // Refs
-  const canvasRef = useRef(null);
-  const fabricRef = useRef(null);
-  const settingsRef = useRef(null);
-  const textOptionsRef = useRef(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fabricRef = useRef<Canvas | null>(null);
+  const settingsRef = useRef<HTMLDivElement>(null);
+  const textOptionsRef = useRef<HTMLDivElement>(null);
 
-  // Compute display scale
   const displayScale = Math.min(
     DISPLAY_MAX / canvasWidth,
     DISPLAY_MAX / canvasHeight,
@@ -73,7 +84,6 @@ export default function ImageCanvas({
   const displayWidth = Math.round(canvasWidth * displayScale);
   const displayHeight = Math.round(canvasHeight * displayScale);
 
-  // Initialize fabric canvas at full logical resolution
   useEffect(() => {
     if (!canvasRef.current) return;
 
@@ -84,7 +94,6 @@ export default function ImageCanvas({
       selection: true,
     });
 
-    // Apply CSS transform to scale down for display (keeps logical coords at full res)
     const wrapper = fc.wrapperEl;
     if (wrapper) {
       wrapper.style.transformOrigin = "top left";
@@ -97,18 +106,17 @@ export default function ImageCanvas({
       fc.dispose();
       fabricRef.current = null;
     };
-    // Only re-init when dimensions or bg changes
   }, [canvasWidth, canvasHeight, bgColor, displayScale]);
 
-  // Delete key handler
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === "Delete" && fabricRef.current) {
-        const active = fabricRef.current.getActiveObjects();
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const fc = fabricRef.current;
+      if (e.key === "Delete" && fc) {
+        const active = fc.getActiveObjects();
         if (active && active.length > 0) {
-          active.forEach((obj) => fabricRef.current.remove(obj));
-          fabricRef.current.discardActiveObject();
-          fabricRef.current.requestRenderAll();
+          active.forEach((obj) => fc.remove(obj));
+          fc.discardActiveObject();
+          fc.requestRenderAll();
         }
       }
     };
@@ -116,20 +124,19 @@ export default function ImageCanvas({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Close settings and text options popovers on outside click
   useEffect(() => {
-    const handleClick = (e) => {
+    const handleClick = (e: MouseEvent) => {
       if (
         showSettings &&
         settingsRef.current &&
-        !settingsRef.current.contains(e.target)
+        !settingsRef.current.contains(e.target as Node)
       ) {
         setShowSettings(false);
       }
       if (
         showTextOptions &&
         textOptionsRef.current &&
-        !textOptionsRef.current.contains(e.target)
+        !textOptionsRef.current.contains(e.target as Node)
       ) {
         setShowTextOptions(false);
       }
@@ -138,21 +145,20 @@ export default function ImageCanvas({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [showSettings, showTextOptions]);
 
-  // Pre-populate pool with original listing photos when they change
   useEffect(() => {
     if (!originalPhotos || originalPhotos.length === 0) return;
 
     let cancelled = false;
     const loadOriginals = async () => {
-      const loaded = [];
+      const loaded: PoolImage[] = [];
       for (const url of originalPhotos) {
         if (cancelled) return;
         try {
           const response = await fetch(url);
           const blob = await response.blob();
-          const dataUrl = await new Promise((resolve) => {
+          const dataUrl = await new Promise<string>((resolve) => {
             const reader = new FileReader();
-            reader.onload = (ev) => resolve(ev.target.result);
+            reader.onload = (ev) => resolve(ev.target!.result as string);
             reader.readAsDataURL(blob);
           });
           const id = ++imageIdCounter;
@@ -175,21 +181,20 @@ export default function ImageCanvas({
     };
   }, [originalPhotos]);
 
-  // Add generated images to pool when they become available (after Confirm Categories)
   useEffect(() => {
     if (!generatedImages || generatedImages.length === 0) return;
 
     let cancelled = false;
     const loadGenerated = async () => {
-      const loaded = [];
+      const loaded: PoolImage[] = [];
       for (const url of generatedImages) {
         if (cancelled) return;
         try {
           const response = await fetch(url);
           const blob = await response.blob();
-          const dataUrl = await new Promise((resolve) => {
+          const dataUrl = await new Promise<string>((resolve) => {
             const reader = new FileReader();
-            reader.onload = (ev) => resolve(ev.target.result);
+            reader.onload = (ev) => resolve(ev.target!.result as string);
             reader.readAsDataURL(blob);
           });
           const id = ++imageIdCounter;
@@ -215,15 +220,13 @@ export default function ImageCanvas({
     };
   }, [generatedImages]);
 
-  // Helper: add an image (as data URL) to the fabric canvas
   const addImageToCanvas = useCallback(
-    (dataUrl) => {
+    (dataUrl: string) => {
       const fc = fabricRef.current;
       if (!fc) return;
 
       const imgEl = new Image();
       imgEl.onload = () => {
-        // Scale to fit 90% of the canvas, preserving aspect ratio
         const scaleX = (canvasWidth * 0.9) / imgEl.width;
         const scaleY = (canvasHeight * 0.9) / imgEl.height;
         const scale = Math.min(scaleX, scaleY);
@@ -246,21 +249,15 @@ export default function ImageCanvas({
     [canvasWidth, canvasHeight],
   );
 
-  // Handle images added from upload modal
   const handleModalAddImages = useCallback(
-    (images, destination) => {
+    (images: PendingImage[] | string[], destination: "pool" | "original") => {
       if (destination === "original") {
-        const urls = Array.isArray(images) ? images : [images];
-        onAddToOriginalPhotos?.(urls);
+        onAddToOriginalPhotos?.(images as string[]);
       } else {
-        const items = Array.isArray(images) ? images : [images];
+        const items = images as PendingImage[];
         const newImages = items.map((img) => {
           const id = ++imageIdCounter;
-          return {
-            id,
-            dataUrl: typeof img === "string" ? img : img.dataUrl,
-            name: typeof img === "string" ? `image-${id}.png` : img.name,
-          };
+          return { id, dataUrl: img.dataUrl, name: img.name };
         });
         setUploadedImages((prev) => [...prev, ...newImages]);
       }
@@ -268,8 +265,7 @@ export default function ImageCanvas({
     [onAddToOriginalPhotos],
   );
 
-  // Toggle image selection in the pool
-  const toggleImageSelection = useCallback((id) => {
+  const toggleImageSelection = useCallback((id: number) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -281,7 +277,6 @@ export default function ImageCanvas({
     });
   }, []);
 
-  // Select / deselect all
   const selectAll = useCallback(() => {
     setSelectedIds(new Set(uploadedImages.map((img) => img.id)));
   }, [uploadedImages]);
@@ -290,13 +285,11 @@ export default function ImageCanvas({
     setSelectedIds(new Set());
   }, []);
 
-  // Remove selected images from the pool
   const removeFromPool = useCallback(() => {
     setUploadedImages((prev) => prev.filter((img) => !selectedIds.has(img.id)));
     setSelectedIds(new Set());
   }, [selectedIds]);
 
-  // "Add" handler: add selected images directly to canvas
   const handleAddSelected = useCallback(() => {
     const selected = uploadedImages.filter((img) => selectedIds.has(img.id));
     if (selected.length === 0) return;
@@ -307,7 +300,6 @@ export default function ImageCanvas({
     setSelectedIds(new Set());
   }, [uploadedImages, selectedIds, addImageToCanvas]);
 
-  // "Remove + Add" handler: remove bg from selected images, then add to canvas
   const handleRemoveAddSelected = useCallback(async () => {
     const selected = uploadedImages.filter((img) => selectedIds.has(img.id));
     if (selected.length === 0) return;
@@ -316,12 +308,10 @@ export default function ImageCanvas({
     setProcessingCount(0);
     setProcessingTotal(selected.length);
 
-    // Mark all selected images as processing
     setProcessingIds(new Set(selected.map((img) => img.id)));
 
     for (let i = 0; i < selected.length; i++) {
       try {
-        // Convert data URL to blob for upload
         const resp = await fetch(selected[i].dataUrl);
         const blob = await resp.blob();
 
@@ -334,9 +324,8 @@ export default function ImageCanvas({
         });
 
         if (!response.ok) {
-          const err = await response.json();
+          const err = await response.json() as { error?: string };
           console.error("Background removal failed:", err.error);
-          // Remove this image from processing set even on failure
           setProcessingIds((prev) => {
             const next = new Set(prev);
             next.delete(selected[i].id);
@@ -346,9 +335,9 @@ export default function ImageCanvas({
         }
 
         const resultBlob = await response.blob();
-        const dataUrl = await new Promise((resolve) => {
+        const dataUrl = await new Promise<string>((resolve) => {
           const reader = new FileReader();
-          reader.onload = (ev) => resolve(ev.target.result);
+          reader.onload = (ev) => resolve(ev.target!.result as string);
           reader.readAsDataURL(resultBlob);
         });
 
@@ -356,7 +345,6 @@ export default function ImageCanvas({
         addImageToCanvas(trimmedUrl);
         setProcessingCount(i + 1);
 
-        // Remove this image from processing set
         setProcessingIds((prev) => {
           const next = new Set(prev);
           next.delete(selected[i].id);
@@ -377,13 +365,11 @@ export default function ImageCanvas({
     setSelectedIds(new Set());
   }, [uploadedImages, selectedIds, addImageToCanvas]);
 
-  // Download: client-side canvas export at full resolution
   const handleDownload = useCallback(() => {
     const fc = fabricRef.current;
     if (!fc) return;
 
-    // Canvas is at full logical resolution, no multiplier needed
-    const dataUrl = fc.toDataURL({ format: "png" });
+    const dataUrl = fc.toDataURL({ format: "png", multiplier: 1 });
 
     const link = document.createElement("a");
     link.href = dataUrl;
@@ -393,7 +379,6 @@ export default function ImageCanvas({
     onRequestClose?.();
   }, [onRequestClose]);
 
-  // Add to New Listing: export canvas, optionally upload to eBay, add to listing
   const handleAddToListing = useCallback(async () => {
     const fc = fabricRef.current;
     if (!fc) return;
@@ -406,22 +391,18 @@ export default function ImageCanvas({
     setIsCompiling(true);
 
     try {
-      // Export the fabric canvas at full logical resolution (WYSIWYG)
       const dataUrl = fc.toDataURL({ format: "png", multiplier: 1 });
 
       if (!useRealUpload) {
-        // Mock mode: add data URL directly without uploading to eBay
         if (onAddToListing) onAddToListing(dataUrl);
         setIsCompiling(false);
         onRequestClose?.();
         return;
       }
 
-      // Convert data URL to blob
       const resp = await fetch(dataUrl);
       const blob = await resp.blob();
 
-      // Upload to eBay Picture Services
       const formData = new FormData();
       formData.append("image", blob, "canvas-compiled.png");
 
@@ -431,39 +412,34 @@ export default function ImageCanvas({
       });
 
       if (!uploadResponse.ok) {
-        const err = await uploadResponse.json();
+        const err = await uploadResponse.json() as { error?: string };
         throw new Error(err.error || "Upload to eBay failed");
       }
 
-      const uploadData = await uploadResponse.json();
+      const uploadData = await uploadResponse.json() as { url?: string };
       const ebayUrl = uploadData.url;
 
       if (!ebayUrl) {
         throw new Error("No URL returned from eBay upload");
       }
 
-      // Add to the listing via callback
       if (onAddToListing) {
         onAddToListing(ebayUrl);
       }
       onRequestClose?.();
     } catch (err) {
       console.error("Error adding to listing:", err);
-      onError("Failed to add image to listing: " + err.message);
+      onError("Failed to add image to listing: " + (err as Error).message);
     } finally {
       setIsCompiling(false);
     }
-  }, [onAddToListing, useRealUpload, onRequestClose]);
+  }, [onAddToListing, useRealUpload, onRequestClose, onError]);
 
-  // Add text to canvas
   const handleAddText = useCallback(() => {
     const fc = fabricRef.current;
     if (!fc) return;
 
-    const fontSize = Math.max(
-      8,
-      Math.min(500, parseInt(textFontSize, 10) || 48),
-    );
+    const fontSize = Math.max(8, Math.min(500, textFontSize || 48));
     const fontWeight =
       textFontWeight === "bold"
         ? "bold"
@@ -487,7 +463,6 @@ export default function ImageCanvas({
     fc.requestRenderAll();
   }, [canvasWidth, canvasHeight, textFontSize, textFontWeight]);
 
-  // Delete selected object(s)
   const handleDelete = useCallback(() => {
     const fc = fabricRef.current;
     if (!fc) return;
@@ -499,7 +474,6 @@ export default function ImageCanvas({
     }
   }, []);
 
-  // Layer order controls
   const handleBringForward = useCallback(() => {
     const fc = fabricRef.current;
     if (!fc) return;
@@ -540,17 +514,15 @@ export default function ImageCanvas({
     }
   }, []);
 
-  // Apply settings
   const applySettings = () => {
-    const w = Math.max(1, parseInt(tempWidth, 10) || 1080);
-    const h = Math.max(1, parseInt(tempHeight, 10) || 1080);
+    const w = Math.max(1, parseInt(String(tempWidth), 10) || 1080);
+    const h = Math.max(1, parseInt(String(tempHeight), 10) || 1080);
     setCanvasWidth(w);
     setCanvasHeight(h);
     setBgColor(tempBgColor);
     setShowSettings(false);
   };
 
-  // Open settings
   const openSettings = () => {
     setTempWidth(canvasWidth);
     setTempHeight(canvasHeight);
@@ -876,7 +848,7 @@ export default function ImageCanvas({
                                 isSelected ? "opacity-100" : "opacity-0"
                               }`}
                             >
-                              {isSelected ? "\u2713" : ""}
+                              {isSelected ? "✓" : ""}
                             </div>
                             {isImgProcessing && (
                               <div className="absolute inset-0 flex items-center justify-center bg-black/40">
