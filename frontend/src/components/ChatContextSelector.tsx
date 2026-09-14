@@ -2,9 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { CHAT_CONTEXT_MODES } from "../constants/chatContextModes";
 
-function ChatContextSelector({ value, onChange, disabled = false }) {
+interface ChatContextSelectorProps {
+  value: string;
+  onChange?: (id: string) => void;
+  disabled?: boolean;
+}
+
+function ChatContextSelector({ value, onChange, disabled = false }: ChatContextSelectorProps) {
   const [open, setOpen] = useState(false);
-  const rootRef = useRef(null);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const selected =
     CHAT_CONTEXT_MODES.find((mode) => mode.id === value) ??
@@ -13,12 +19,12 @@ function ChatContextSelector({ value, onChange, disabled = false }) {
 
   useEffect(() => {
     if (!open) return;
-    const handlePointerDown = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) {
+    const handlePointerDown = (e: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     };
-    const handleKeyDown = (e) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
     document.addEventListener("pointerdown", handlePointerDown);
@@ -29,7 +35,7 @@ function ChatContextSelector({ value, onChange, disabled = false }) {
     };
   }, [open]);
 
-  const handleSelect = (id) => {
+  const handleSelect = (id: string) => {
     onChange?.(id);
     setOpen(false);
   };

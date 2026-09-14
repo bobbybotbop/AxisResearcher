@@ -3,6 +3,20 @@ import styled from 'styled-components'
 import { Loader2 } from 'lucide-react'
 import ChatContextSelector from './ChatContextSelector'
 
+interface MessageBarInputProps {
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  disabled?: boolean;
+  loading?: boolean;
+  "aria-label"?: string;
+  fullWidth?: boolean;
+  chatContext?: string;
+  onChatContextChange?: (id: string) => void;
+  showChatContextSelector?: boolean;
+  hasError?: boolean;
+}
+
 const MessageBarInput = ({
   value,
   onChange,
@@ -15,14 +29,14 @@ const MessageBarInput = ({
   onChatContextChange,
   showChatContextSelector = false,
   hasError = false,
-}) => {
+}: MessageBarInputProps) => {
   return (
     <StyledWrapper $fullWidth={Boolean(fullWidth)} $hasContext={showChatContextSelector}>
       <div className={`messageBox${hasError ? ' messageBoxError' : ''}`}>
         {showChatContextSelector && (
           <>
             <ChatContextSelector
-              value={chatContext}
+              value={chatContext ?? ''}
               onChange={onChatContextChange}
               disabled={disabled}
             />
@@ -63,7 +77,12 @@ const MessageBarInput = ({
   )
 }
 
-const StyledWrapper = styled.div`
+interface StyledWrapperProps {
+  $fullWidth: boolean;
+  $hasContext: boolean;
+}
+
+const StyledWrapper = styled.div<StyledWrapperProps>`
   ${(p) => (p.$fullWidth ? 'width: 100%;' : '')}
 
   .messageBox {
