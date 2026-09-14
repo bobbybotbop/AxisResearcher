@@ -2,7 +2,10 @@
  * Initial state for the Test Workflow tab (mock data path).
  * Single object replaces many parallel useState hooks in App.jsx.
  */
-export function createTestWorkflowState() {
+
+import type { TestWorkflowState } from "./types/workflow";
+
+export function createTestWorkflowState(): TestWorkflowState {
   return {
     listingId: '',
     photos: [],

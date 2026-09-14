@@ -3,6 +3,8 @@
  * Matches the shapes used throughout the Create Listing workflow.
  */
 
+import type { Listing } from "./types/listing";
+
 // Placeholder image URLs - use picsum.photos for reliable placeholders
 const MOCK_PHOTOS = [
   "https://picsum.photos/seed/axis1/400/400",
@@ -26,7 +28,7 @@ const MOCK_CATEGORIES = Object.fromEntries(
 );
 
 // Original eBay listing shape (from fetch)
-export const MOCK_LISTING = {
+export const MOCK_LISTING: Listing = {
   title: "Test Product - Mock Listing for Workflow Testing",
   itemId: "123456789012",
   price: 12.99,
