@@ -1,7 +1,33 @@
 import { useState, useEffect, useCallback } from "react";
 import { RefreshCw, CheckCircle, XCircle } from "lucide-react";
 
-const EVENT_LABELS = {
+interface LogEntry {
+  event: string;
+  status?: string;
+  sku?: string;
+  title?: string;
+  ebayListingId?: string;
+  sourceListingId?: string;
+  source?: string;
+  skus?: string[];
+  failed_skus?: string[];
+  quantity?: number;
+  count?: number;
+  error?: string;
+  timestamp: string;
+  [key: string]: unknown;
+}
+
+interface FilterOption {
+  key: string;
+  label: string;
+}
+
+interface LogsTabProps {
+  onNavigateToSku?: (sku: string) => void;
+}
+
+const EVENT_LABELS: Record<string, string> = {
   draft_created: "Draft Created",
   draft_completed: "Draft Completed",
   upload: "Upload",
@@ -9,7 +35,7 @@ const EVENT_LABELS = {
   import: "Import",
 };
 
-const FILTERS = [
+const FILTERS: FilterOption[] = [
   { key: "all", label: "All" },
   { key: "upload", label: "Uploads" },
   { key: "restock", label: "Restocks" },
@@ -18,7 +44,7 @@ const FILTERS = [
   { key: "import", label: "Imports" },
 ];
 
-function formatTimestamp(iso) {
+function formatTimestamp(iso: string) {
   const date = new Date(iso);
   const diff = Date.now() - date.getTime();
   const minutes = Math.floor(diff / 60000);
@@ -34,7 +60,7 @@ function formatTimestamp(iso) {
   });
 }
 
-function getEntryDetail(entry) {
+function getEntryDetail(entry: LogEntry): string {
   switch (entry.event) {
     case "draft_created":
       return `${entry.sku}${entry.sourceListingId ? ` from eBay ${entry.sourceListingId}` : ""}`;
@@ -61,10 +87,10 @@ function getEntryDetail(entry) {
   }
 }
 
-export default function LogsTab({ onNavigateToSku }) {
-  const [logs, setLogs] = useState([]);
+export default function LogsTab({ onNavigateToSku }: LogsTabProps) {
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
-  const [fetchError, setFetchError] = useState(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [filter, setFilter] = useState("all");
 
   const fetchLogs = useCallback(async () => {
@@ -73,10 +99,10 @@ export default function LogsTab({ onNavigateToSku }) {
     try {
       const res = await fetch("/api/logs");
       if (!res.ok) throw new Error(`Failed to load logs (${res.status})`);
-      const data = await res.json();
+      const data = await res.json() as { logs?: LogEntry[] };
       setLogs(data.logs || []);
     } catch (err) {
-      setFetchError(err.message);
+      setFetchError((err as Error).message);
     } finally {
       setLoading(false);
     }
@@ -143,7 +169,7 @@ export default function LogsTab({ onNavigateToSku }) {
               } ${hasSku && onNavigateToSku ? "cursor-pointer" : ""}`}
               onClick={
                 hasSku && onNavigateToSku
-                  ? () => onNavigateToSku(entry.sku)
+                  ? () => onNavigateToSku(entry.sku!)
                   : undefined
               }
             >

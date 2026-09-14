@@ -3,6 +3,31 @@ import { Search, Filter } from "@mynaui/icons-react";
 import { RefreshCw, LayoutList, LayoutGrid } from "lucide-react";
 import { btnPillSm } from "../styles/buttonPill";
 
+interface UploadListingsToolbarProps {
+  searchQuery: string;
+  onSearchChange: (value: string) => void;
+  showIncompleteListings: boolean;
+  onShowIncompleteListingsChange: (checked: boolean) => void;
+  showUnuploadedListings: boolean;
+  onShowUnuploadedListingsChange: (checked: boolean) => void;
+  showManualListings: boolean;
+  onShowManualListingsChange: (checked: boolean) => void;
+  dateFrom: string;
+  dateTo: string;
+  onDateFromChange: (value: string) => void;
+  onDateToChange: (value: string) => void;
+  onRefresh?: () => void;
+  isRefreshing?: boolean;
+  autoRestockEnabled?: boolean;
+  autoRestockQuantity?: number;
+  onAutoRestockEnabledChange?: (checked: boolean) => void;
+  onAutoRestockQuantityChange?: (quantity: number) => void;
+  onManualRestock?: () => void;
+  isRestocking?: boolean;
+  viewMode: "compact" | "detailed";
+  onViewModeChange: (mode: "compact" | "detailed") => void;
+}
+
 export default function UploadListingsToolbar({
   searchQuery,
   onSearchChange,
@@ -26,9 +51,9 @@ export default function UploadListingsToolbar({
   isRestocking,
   viewMode,
   onViewModeChange,
-}) {
+}: UploadListingsToolbarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const rootRef = useRef(null);
+  const rootRef = useRef<HTMLDivElement>(null);
   const [quantityDraft, setQuantityDraft] = useState(
     String(autoRestockQuantity ?? ""),
   );
@@ -47,12 +72,12 @@ export default function UploadListingsToolbar({
   useEffect(() => {
     if (!menuOpen) return;
 
-    const onPointerDown = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) {
+    const onPointerDown = (e: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
         setMenuOpen(false);
       }
     };
-    const onKeyDown = (e) => {
+    const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") setMenuOpen(false);
     };
 
@@ -106,7 +131,7 @@ export default function UploadListingsToolbar({
         )}
       </div>
 
-      {/* Filter button: separate from search bar so its dropdown isn't clipped by overflow-hidden */}
+      {/* Filter button */}
       <div className="relative shrink-0" ref={rootRef}>
         <button
           type="button"
@@ -261,7 +286,7 @@ export default function UploadListingsToolbar({
             onBlur={() => {
               const n = parseInt(quantityDraft, 10);
               if (Number.isFinite(n) && n >= 0) {
-                onAutoRestockQuantityChange(n);
+                onAutoRestockQuantityChange?.(n);
               } else {
                 setQuantityDraft(String(autoRestockQuantity ?? ""));
               }

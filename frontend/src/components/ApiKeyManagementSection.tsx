@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { btnPillSm } from "../styles/buttonPill";
 
-const API_KEY_FIELDS = [
+interface ApiKeyField {
+  name: string;
+  label: string;
+  placeholder: string;
+}
+
+const API_KEY_FIELDS: ApiKeyField[] = [
   {
     name: "openrouter_api_key",
     label: "OpenRouter API Key",
@@ -15,29 +21,34 @@ const API_KEY_FIELDS = [
   },
 ];
 
-const emptyInputs = () =>
-  API_KEY_FIELDS.reduce((acc, { name }) => {
+const emptyInputs = (): Record<string, string> =>
+  API_KEY_FIELDS.reduce<Record<string, string>>((acc, { name }) => {
     acc[name] = "";
     return acc;
   }, {});
 
-const emptyReveal = () =>
-  API_KEY_FIELDS.reduce((acc, { name }) => {
+const emptyReveal = (): Record<string, boolean> =>
+  API_KEY_FIELDS.reduce<Record<string, boolean>>((acc, { name }) => {
     acc[name] = false;
     return acc;
   }, {});
 
-export default function ApiKeyManagementSection({ active, onKeysSaved }) {
-  const [status, setStatus] = useState({});
-  const [inputs, setInputs] = useState(emptyInputs);
-  const [reveal, setReveal] = useState(emptyReveal);
+interface ApiKeyManagementSectionProps {
+  active: boolean;
+  onKeysSaved?: (data: unknown) => void | Promise<void>;
+}
+
+export default function ApiKeyManagementSection({ active, onKeysSaved }: ApiKeyManagementSectionProps) {
+  const [status, setStatus] = useState<Record<string, unknown>>({});
+  const [inputs, setInputs] = useState<Record<string, string>>(emptyInputs);
+  const [reveal, setReveal] = useState<Record<string, boolean>>(emptyReveal);
   const [isSaving, setIsSaving] = useState(false);
-  const [message, setMessage] = useState(null);
+  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const fetchKeys = async () => {
     try {
       const res = await fetch("/api/api-keys");
-      const data = await res.json();
+      const data = await res.json() as Record<string, unknown>;
       if (data && !data.error) setStatus(data);
     } catch {
       // Surface read failures only on save attempts; mounting silently is fine.
@@ -51,16 +62,16 @@ export default function ApiKeyManagementSection({ active, onKeysSaved }) {
     }
   }, [active]);
 
-  const handleChange = (name) => (e) => {
+  const handleChange = (name: string) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setInputs((prev) => ({ ...prev, [name]: e.target.value }));
   };
 
-  const toggleReveal = (name) => () => {
+  const toggleReveal = (name: string) => () => {
     setReveal((prev) => ({ ...prev, [name]: !prev[name] }));
   };
 
   const handleSave = async () => {
-    const payload = {};
+    const payload: Record<string, string> = {};
     for (const { name } of API_KEY_FIELDS) {
       const value = inputs[name].trim();
       if (value) payload[name] = value;
@@ -82,7 +93,7 @@ export default function ApiKeyManagementSection({ active, onKeysSaved }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      const data = await res.json() as { error?: string };
       if (!res.ok || data.error) {
         throw new Error(data.error || "Failed to update API keys");
       }
@@ -100,7 +111,7 @@ export default function ApiKeyManagementSection({ active, onKeysSaved }) {
     } catch (err) {
       setMessage({
         type: "error",
-        text: err.message || "Failed to update API keys",
+        text: (err as Error).message || "Failed to update API keys",
       });
     } finally {
       setIsSaving(false);
@@ -121,8 +132,8 @@ export default function ApiKeyManagementSection({ active, onKeysSaved }) {
 
       <div className="flex flex-col gap-4">
         {API_KEY_FIELDS.map(({ name, label, placeholder }) => {
-          const isSet = !!status[`${name}_set`];
-          const masked = status[name];
+          const isSet = !!(status[`${name}_set`]);
+          const masked = status[name] as string | undefined;
           const isRevealed = reveal[name];
           return (
             <div key={name} className="flex flex-col gap-2">

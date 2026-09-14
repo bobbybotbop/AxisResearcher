@@ -5,20 +5,47 @@ import {
   formatListingDateTime,
   formatCategoryShort,
 } from "../utils/listingDisplay";
+import type { Listing } from "../types/listing";
 
 const THUMB_PX = 80;
 const THUMB_GAP = 8;
 
-/** "org/some-model-name-v2-fast" → "some-model-name-v2" (last segment, strip trailing "-fast"/"-flash"/"-pro") */
-function shortenModel(id) {
+interface UploadResult {
+  listingId?: string;
+  href?: string;
+}
+
+interface GeneratedListingCardProps {
+  listing: Listing;
+  onCardClick?: (listing: Listing) => void;
+  onUpload?: (listing: Listing) => void;
+  isUploading?: boolean;
+  uploadResult?: UploadResult | null;
+  quantity?: number | null;
+  loadingQuantity?: boolean;
+  isManual?: boolean;
+}
+
+interface RestGalleryStripProps {
+  urls: string[];
+  heroIndex: number;
+  onPickIndex: (i: number) => void;
+}
+
+interface ListingModels {
+  text_model?: string;
+  image_model?: string;
+  classifier_model?: string;
+}
+
+function shortenModel(id: string | undefined): string | undefined {
   if (!id) return id;
-  const seg = id.split("/").pop();
+  const seg = id.split("/").pop()!;
   return seg.replace(/-(fast|flash|pro|preview|latest)$/i, "");
 }
 
-/** Thumbnails for all images except the hero; overflow → last slot blurred with +N. */
-function RestGalleryStrip({ urls, heroIndex, onPickIndex }) {
-  const containerRef = useRef(null);
+function RestGalleryStrip({ urls, heroIndex, onPickIndex }: RestGalleryStripProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
   const [maxSlots, setMaxSlots] = useState(12);
 
   useLayoutEffect(() => {
@@ -102,13 +129,13 @@ export default function GeneratedListingCard({
   quantity,
   loadingQuantity,
   isManual = false,
-}) {
+}: GeneratedListingCardProps) {
   const urls = Array.isArray(listing.imageUrls) ? listing.imageUrls : [];
   const [imageIndex, setImageIndex] = useState(0);
 
   const safeIndex = urls.length ? imageIndex % urls.length : 0;
   const title = listing.title || "No title";
-  const imageCount = listing.imageCount ?? urls.length ?? 0;
+  const imageCount = (listing.imageCount as number | undefined) ?? urls.length ?? 0;
   const categoryId = String(listing.categoryId ?? "—");
   const categoryShort = formatCategoryShort(listing.categoryId);
 
@@ -119,6 +146,9 @@ export default function GeneratedListingCard({
 
   const descriptionHtml =
     typeof listing.description === "string" ? listing.description.trim() : "";
+
+  const createdDateTime = listing.createdDateTime as string | undefined;
+  const models = listing.models as ListingModels | undefined;
 
   return (
     <div
@@ -133,7 +163,7 @@ export default function GeneratedListingCard({
       }}
       className={`flex w-full cursor-pointer flex-col overflow-hidden rounded-xl bg-surface-panel shadow-sm transition-shadow hover:shadow-md md:flex-row md:items-stretch ${isManual ? "border-2 border-border-default" : "border border-border-default"}`}
     >
-      {/* Image column — hero + dots + upload below image */}
+      {/* Image column */}
       <div className="flex w-full shrink-0 flex-col border-b border-border-default md:w-[30%] md:max-w-md md:border-b-0 md:border-r md:border-border-default">
         <div className="relative w-full">
           <div className="aspect-square w-full border-b border-border-default bg-surface-muted md:border-b-0">
@@ -236,9 +266,8 @@ export default function GeneratedListingCard({
         </div>
       </div>
 
-      {/* Content column — capped to the left column's height on md; description scrolls */}
+      {/* Content column */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 p-4 sm:p-5 md:overflow-hidden">
-        {/* Header */}
         <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -248,10 +277,10 @@ export default function GeneratedListingCard({
             </div>
             <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-muted">
               <span className="font-mono text-text-muted">{listing.sku}</span>
-              {listing.createdDateTime && (
+              {createdDateTime && (
                 <>
                   <span className="text-text-muted">·</span>
-                  <span>{formatListingDateTime(listing.createdDateTime)}</span>
+                  <span>{formatListingDateTime(createdDateTime)}</span>
                 </>
               )}
               <span className="text-text-muted">·</span>
@@ -288,38 +317,38 @@ export default function GeneratedListingCard({
                   )}
                 </>
               ) : null}
-              {listing.models && (
+              {models && (
                 <>
-                  {listing.models.text_model && (
+                  {models.text_model && (
                     <>
                       <span className="text-text-muted">·</span>
                       <span
                         className="whitespace-nowrap font-mono text-xs text-text-muted opacity-70"
-                        title={`Text: ${listing.models.text_model}`}
+                        title={`Text: ${models.text_model}`}
                       >
-                        {shortenModel(listing.models.text_model)}
+                        {shortenModel(models.text_model)}
                       </span>
                     </>
                   )}
-                  {listing.models.image_model && (
+                  {models.image_model && (
                     <>
                       <span className="text-text-muted">·</span>
                       <span
                         className="whitespace-nowrap font-mono text-xs text-text-muted opacity-70"
-                        title={`Image: ${listing.models.image_model}`}
+                        title={`Image: ${models.image_model}`}
                       >
-                        {shortenModel(listing.models.image_model)}
+                        {shortenModel(models.image_model)}
                       </span>
                     </>
                   )}
-                  {listing.models.classifier_model && (
+                  {models.classifier_model && (
                     <>
                       <span className="text-text-muted">·</span>
                       <span
                         className="whitespace-nowrap font-mono text-xs text-text-muted opacity-70"
-                        title={`Classifier: ${listing.models.classifier_model}`}
+                        title={`Classifier: ${models.classifier_model}`}
                       >
-                        {shortenModel(listing.models.classifier_model)}
+                        {shortenModel(models.classifier_model)}
                       </span>
                     </>
                   )}

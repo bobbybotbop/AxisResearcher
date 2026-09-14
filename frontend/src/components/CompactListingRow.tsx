@@ -4,6 +4,26 @@ import {
   formatListingDateTime,
   formatCategoryShort,
 } from "../utils/listingDisplay";
+import type { Listing } from "../types/listing";
+
+interface UploadResult {
+  listingId?: string;
+  href?: string;
+}
+
+interface CompactListingRowProps {
+  listing: Listing;
+  onCardClick?: (listing: Listing) => void;
+  onUpload?: (listing: Listing) => void;
+  isUploading?: boolean;
+  uploadResult?: UploadResult | null;
+  quantity?: number | null;
+  loadingQuantity?: boolean;
+  isManual?: boolean;
+  isSelectMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: () => void;
+}
 
 function LinkIcon() {
   return (
@@ -45,13 +65,13 @@ export default function CompactListingRow({
   isSelectMode = false,
   isSelected = false,
   onToggleSelect,
-}) {
+}: CompactListingRowProps) {
   const urls = Array.isArray(listing.imageUrls) ? listing.imageUrls : [];
   const [imageIndex, setImageIndex] = useState(0);
 
   const safeIndex = urls.length ? imageIndex % urls.length : 0;
   const title = listing.title || "No title";
-  const imageCount = listing.imageCount ?? urls.length ?? 0;
+  const imageCount = (listing.imageCount as number | undefined) ?? urls.length ?? 0;
   const categoryId = String(listing.categoryId ?? "—");
   const categoryShort = formatCategoryShort(listing.categoryId);
 
@@ -59,6 +79,8 @@ export default function CompactListingRow({
   const ebayItemUrl = ebayListingId
     ? `https://www.ebay.com/itm/${ebayListingId}`
     : "";
+
+  const createdDateTime = listing.createdDateTime as string | undefined;
 
   return (
     <div
@@ -126,7 +148,7 @@ export default function CompactListingRow({
         )}
       </div>
 
-      {/* eBay action strip — side by side with image */}
+      {/* eBay action strip */}
       {!isSelectMode && (
         <div
           className="flex h-20 w-8 shrink-0 border-l border-r border-border-default"
@@ -174,10 +196,10 @@ export default function CompactListingRow({
             </h3>
             <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0 text-sm text-text-muted">
               <span className="font-mono text-text-muted">{listing.sku}</span>
-              {listing.createdDateTime && (
+              {createdDateTime && (
                 <>
                   <span className="text-text-muted">·</span>
-                  <span>{formatListingDateTime(listing.createdDateTime)}</span>
+                  <span>{formatListingDateTime(createdDateTime)}</span>
                 </>
               )}
               <span className="text-text-muted">·</span>

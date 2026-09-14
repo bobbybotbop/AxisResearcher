@@ -1,19 +1,35 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { btnPillSm } from "../styles/buttonPill";
+import type { ModelOption } from "../types/listing";
 
 const DEFAULT_TEXT_PROMPT = "Reply with exactly: OK";
 const DEFAULT_IMAGE_PROMPT =
   "Generate a simple 64x64 solid blue square on a white background.";
 
-const PROVIDER_LABELS = {
+const PROVIDER_LABELS: Record<string, string> = {
   openrouter: "OpenRouter",
   bedrock: "Bedrock",
 };
 
-function groupByProvider(options) {
+interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  serverLog?: string | null;
+  ok?: boolean;
+  imageUrl?: string | null;
+}
+
+interface TestAiModelSectionProps {
+  textModel: string;
+  imageModel: string;
+  textModelOptions: ModelOption[];
+  imageModelOptions: ModelOption[];
+}
+
+function groupByProvider(options: ModelOption[]): [string, ModelOption[]][] {
   return Object.entries(
-    options.reduce((acc, option) => {
+    options.reduce<Record<string, ModelOption[]>>((acc, option) => {
       const key = option.provider || "openrouter";
       (acc[key] = acc[key] || []).push(option);
       return acc;
@@ -26,14 +42,14 @@ export default function TestAiModelSection({
   imageModel,
   textModelOptions,
   imageModelOptions,
-}) {
+}: TestAiModelSectionProps) {
   const [expanded, setExpanded] = useState(false);
-  const [kind, setKind] = useState("text");
+  const [kind, setKind] = useState<"text" | "image">("text");
   const [model, setModel] = useState(textModel);
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const chatEndRef = useRef(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setModel(kind === "text" ? textModel : imageModel);
@@ -49,17 +65,17 @@ export default function TestAiModelSection({
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
-  const handleKindChange = (nextKind) => {
+  const handleKindChange = (nextKind: "text" | "image") => {
     setKind(nextKind);
     setModel(nextKind === "text" ? textModel : imageModel);
   };
 
-  const handleSend = async (e) => {
+  const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     const prompt = input.trim();
     if (!prompt || isLoading) return;
 
-    const userMessage = { role: "user", content: prompt };
+    const userMessage: ChatMessage = { role: "user", content: prompt };
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setIsLoading(true);
@@ -70,7 +86,12 @@ export default function TestAiModelSection({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ kind, model, prompt }),
       });
-      const data = await res.json();
+      const data = await res.json() as {
+        error?: string;
+        server_log?: string;
+        content?: string;
+        image_url?: string;
+      };
       if (!res.ok || data.error) {
         setMessages((prev) => [
           ...prev,
@@ -97,7 +118,7 @@ export default function TestAiModelSection({
         ...prev,
         {
           role: "assistant",
-          content: err.message || "Model test failed",
+          content: (err as Error).message || "Model test failed",
           serverLog: null,
           ok: false,
         },
@@ -113,9 +134,7 @@ export default function TestAiModelSection({
   };
 
   const placeholder =
-    kind === "text"
-      ? DEFAULT_TEXT_PROMPT
-      : DEFAULT_IMAGE_PROMPT;
+    kind === "text" ? DEFAULT_TEXT_PROMPT : DEFAULT_IMAGE_PROMPT;
 
   return (
     <div className="mt-4 border-t border-border-default pt-4">
@@ -133,10 +152,12 @@ export default function TestAiModelSection({
           <div className="mb-3 flex flex-wrap items-end gap-3">
             <fieldset className="m-0 flex gap-1 rounded-lg border border-border-default bg-surface-muted p-1">
               <legend className="sr-only">Model type</legend>
-              {[
-                { value: "text", label: "Text" },
-                { value: "image", label: "Image" },
-              ].map(({ value, label }) => (
+              {(
+                [
+                  { value: "text", label: "Text" },
+                  { value: "image", label: "Image" },
+                ] as { value: "text" | "image"; label: string }[]
+              ).map(({ value, label }) => (
                 <button
                   key={value}
                   type="button"

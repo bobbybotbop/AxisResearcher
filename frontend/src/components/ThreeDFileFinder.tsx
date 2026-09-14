@@ -3,16 +3,28 @@ import MessageBarInput from "./MessageBarInput";
 import { btnPill } from "../styles/buttonPill";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
 
-function ThreeDFileFinder({ addToast }) {
+interface SearchResult {
+  site_type?: string;
+  link: string;
+  title?: string;
+  thumbnail?: string;
+  source?: string;
+}
+
+interface ThreeDFileFinderProps {
+  addToast?: (type: string, message: string) => void;
+}
+
+function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
   const [linkValue, setLinkValue] = useState("");
-  const [photos, setPhotos] = useState([]);
+  const [photos, setPhotos] = useState<string[]>([]);
   const [listingTitle, setListingTitle] = useState("");
   const [fetchingPhotos, setFetchingPhotos] = useState(false);
-  const [selectedPhoto, setSelectedPhoto] = useState(null);
-  const [searchResults, setSearchResults] = useState([]);
+  const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
 
-  const handleSubmitLink = async (e) => {
+  const handleSubmitLink = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = linkValue.trim();
     if (!trimmed) {
@@ -31,14 +43,14 @@ function ThreeDFileFinder({ addToast }) {
         `/api/photos/${encodeURIComponent(trimmed)}?classify=false`,
         {},
         () => {},
-      );
+      ) as { photos?: string[]; listing?: { title?: string } };
       setPhotos(data.photos || []);
       setListingTitle(data.listing?.title || "");
-      if (data.photos?.length > 0) {
+      if (data.photos && data.photos.length > 0) {
         setSelectedPhoto(data.photos[0]);
       }
     } catch (err) {
-      addToast?.("error", err.message || "Failed to fetch listing photos");
+      addToast?.("error", (err as Error).message || "Failed to fetch listing photos");
     } finally {
       setFetchingPhotos(false);
       setLinkValue("");
@@ -57,16 +69,16 @@ function ThreeDFileFinder({ addToast }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ image_url: selectedPhoto }),
       });
-      const data = await res.json();
+      const data = await res.json() as { error?: string; results?: SearchResult[] };
       if (!res.ok || data.error) {
         throw new Error(data.error || "Search failed");
       }
       setSearchResults(data.results || []);
-      if (data.results?.length === 0) {
+      if (!data.results || data.results.length === 0) {
         addToast?.("info", "No 3D file results found for this image");
       }
     } catch (err) {
-      addToast?.("error", err.message || "Serper search failed");
+      addToast?.("error", (err as Error).message || "Serper search failed");
     } finally {
       setSearching(false);
     }
@@ -147,6 +159,9 @@ function ThreeDFileFinder({ addToast }) {
             {searchResults.map((r, i) => {
               const isWhitelisted = r.site_type === "whitelisted";
               const isBlacklisted = r.site_type === "blacklisted";
+              const hostname = (() => {
+                try { return new URL(r.link).hostname; } catch { return r.link; }
+              })();
               return (
                 <li
                   key={r.link}
@@ -190,7 +205,7 @@ function ThreeDFileFinder({ addToast }) {
                       )}
                     </div>
                     <p className="truncate text-xs text-text-muted">
-                      {r.source || (() => { try { return new URL(r.link).hostname; } catch { return r.link; } })()}
+                      {r.source || hostname}
                     </p>
                   </div>
                 </li>
