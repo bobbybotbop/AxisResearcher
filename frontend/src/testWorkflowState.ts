@@ -69,5 +69,10 @@ export function createTestWorkflowState(): TestWorkflowState {
       completedSteps: [],
       totalSteps: [],
     },
+    customPrompt: "",
+    selectedImagesForRegen: [],
+    isTrimming: false,
+    isAddingNewVersions: false,
+    promptModifier: "",
   }
 }

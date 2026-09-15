@@ -24,6 +24,9 @@ interface GeneratedListingCardProps {
   quantity?: number | null;
   loadingQuantity?: boolean;
   isManual?: boolean;
+  isSelectMode?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: () => void;
 }
 
 interface RestGalleryStripProps {
@@ -129,6 +132,9 @@ export default function GeneratedListingCard({
   quantity,
   loadingQuantity,
   isManual = false,
+  isSelectMode,
+  isSelected,
+  onToggleSelect,
 }: GeneratedListingCardProps) {
   const urls = Array.isArray(listing.imageUrls) ? listing.imageUrls : [];
   const [imageIndex, setImageIndex] = useState(0);

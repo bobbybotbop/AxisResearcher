@@ -23,7 +23,7 @@ import {
 interface ProgressState {
   isActive: boolean;
   totalSteps: string[];
-  currentStep: string;
+  currentStep: string | null;
   completedSteps: string[];
 }
 
@@ -57,9 +57,10 @@ interface ListingData {
     categoryId?: string;
   };
   inventoryItem?: {
-    product?: { imageUrls?: string[] };
+    product?: { imageUrls?: string[]; title?: string; description?: string };
   };
   createdDateTime?: string;
+  [key: string]: unknown;
 }
 
 interface SourceListing {
@@ -77,10 +78,10 @@ interface CreateWorkflowProps {
   listingLinkSubmitted?: boolean;
   sidebarCollapsed?: boolean;
   photos?: string[];
-  categories?: unknown[];
+  categories?: Record<string, string>;
   editableCategories?: Record<string, string>;
   listing?: SourceListing | null;
-  currentSku?: string;
+  currentSku?: string | null;
   skippedPhotos?: Set<string>;
   generatedImages?: string[];
   loading?: boolean;
@@ -108,13 +109,13 @@ interface CreateWorkflowProps {
   onSkipPhoto?: (url: string) => void;
   onConfirmCategories?: () => void;
   onDragEnd: (result: DropResult) => void;
-  onRemoveFromListing?: (url: string) => void;
+  onRemoveFromListing?: (index: number) => void;
   onAddToListing?: (url: string) => void;
   onAddToOriginalPhotos?: (urls: string[]) => void;
   onEditableTitleChange?: (value: string) => void;
   onTrimTitle?: () => void;
   onEditableDescriptionChange?: (value: string) => void;
-  onUploadToEbay?: (sku: string, data: ListingData) => void;
+  onUploadToEbay?: (sku: string, data?: ListingData | null) => void;
   onEditorToggle?: () => void;
   useRealEbayUpload?: boolean;
   onUseRealEbayUploadChange?: ((checked: boolean) => void) | null;
@@ -143,6 +144,17 @@ interface CreateWorkflowProps {
   bgRemovedPhotos?: Record<string, string>;
   bgRemovalProgress?: BgRemovalProgress | null;
   onError?: (message: string) => void;
+  promptModifier?: string;
+  customPrompt?: string;
+  error?: string | null;
+  isRegenerating?: boolean;
+  isTrimming?: boolean;
+  isAddingNewVersions?: boolean;
+  onPromptModifierChange?: (value: string) => void;
+  onRegenerateImages?: (prompt?: string) => void | Promise<void>;
+  onTrimSelected?: () => void | Promise<void>;
+  onAddNewVersions?: () => void | Promise<void>;
+  onCustomPromptChange?: (value: string) => void;
 }
 
 function CreateWorkflow({

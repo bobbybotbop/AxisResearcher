@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+﻿import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   FilePlus,
   History,
@@ -25,11 +25,13 @@ import { trimTransparentPadding } from "./utils/trimImage";
 import { isIncomplete, isUploaded } from "./utils/listingStatus";
 import { btnPill, btnPillSm } from "./styles/buttonPill";
 import { fetchWithProgress } from "./utils/fetchWithProgress";
-
+import type { DropResult } from "@hello-pangea/dnd";
+import type { Listing, ModelOption, ProgressState, ImageGenProgress } from "./types/listing";
+import type { TestWorkflowState } from "./types/workflow";
 // Default text model options shown before /api/text-models responds. The
 // server is the source of truth and may add Bedrock models when the
 // bedrock_api_key is set.
-const DEFAULT_TEXT_MODEL_OPTIONS = [
+const DEFAULT_TEXT_MODEL_OPTIONS: ModelOption[] = [
   {
     value: "deepseek/deepseek-v4-flash",
     label: "DeepSeek V4 Flash",
@@ -39,26 +41,26 @@ const DEFAULT_TEXT_MODEL_OPTIONS = [
   },
 ];
 
-const PROVIDER_LABELS = {
+const PROVIDER_LABELS: Record<string, string> = {
   openrouter: "OpenRouter",
   bedrock: "Bedrock",
 };
 
-function modelCostLabel(m) {
+function modelCostLabel(m: ModelOption): string | null {
   if (m.costPerImage != null) return `$${m.costPerImage}/img`;
   if (m.inputCostPer1M != null && m.outputCostPer1M != null)
     return `$${m.inputCostPer1M}/$${m.outputCostPer1M} per 1M`;
   return null;
 }
 
-function modelOptionLabel(m) {
+function modelOptionLabel(m: ModelOption): string {
   const cost = modelCostLabel(m);
   return cost ? `${m.label} — ${cost}` : m.label;
 }
 
 // cost fields: inputCostPer1M ($/1M input tokens), outputCostPer1M ($/1M output tokens),
 // or costPerImage (flat $/image) for image-only generation models.
-const IMAGE_MODEL_OPTIONS = [
+const IMAGE_MODEL_OPTIONS: ImageModelOption[] = [
   {
     value: "sourceful/riverflow-v2-fast",
     label: "Riverflow V2 Fast",
@@ -94,7 +96,7 @@ const IMAGE_MODEL_OPTIONS = [
   },
 ];
 
-const CLASSIFIER_MODEL_OPTIONS = [
+const CLASSIFIER_MODEL_OPTIONS: ModelOption[] = [
   {
     value: "bytedance-seed/seed-1.6-flash",
     label: "ByteDance Seed 1.6 Flash",
@@ -109,9 +111,9 @@ const CLASSIFIER_MODEL_OPTIONS = [
  * Returns the final result data, or throws on error.
  */
 
-async function fetchWithTextStream(url, options, onToken, onResult, onNudge) {
+async function fetchWithTextStream(url: string, options: RequestInit, onToken: (field: string, delta: string) => void, onResult: (data: unknown) => void, onNudge?: () => void): Promise<void> {
   const response = await fetch(url, options);
-  const reader = response.body.getReader();
+  const reader = response.body!.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let errorMsg = null;
@@ -121,7 +123,7 @@ async function fetchWithTextStream(url, options, onToken, onResult, onNudge) {
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split("\n");
-    buffer = lines.pop();
+    buffer = lines.pop()!;
     for (const line of lines) {
       if (!line.trim()) continue;
       try {
@@ -154,40 +156,54 @@ async function fetchWithTextStream(url, options, onToken, onResult, onNudge) {
 
 /** Map AI-generated URLs back onto photosToProcess order. */
 function mergeGeneratedImages(
-  photosToProcess,
-  aiGeneratedList,
-  { allowPartial } = {},
-) {
+  photosToProcess: unknown,
+  aiGeneratedList: string[] | null | undefined,
+  { allowPartial }: { allowPartial?: boolean } = {},
+): string[] {
   return (aiGeneratedList || []).filter(
     (url) => url !== undefined && url !== null,
   );
 }
 
+interface Toast { id: number; type: "success" | "error"; message: string; detail?: string }
+interface TokenInfo { user_token_set: boolean; application_token_set: boolean; user_token: string; application_token: string }
+interface TokenResult { ok: boolean; message: string }
+interface UploadResult { listingId?: string; href?: string; ebayId?: string }
+interface ListingData {
+  sku?: string; filename?: string; fileSku?: string;
+  inventoryItem?: { product?: { title?: string; description?: string; imageUrls?: string[] } };
+  offer?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+type TabName = "create" | "upload" | "logs" | "test-workflow" | "testing" | "settings"
+type ImageModelOption = ModelOption & { defaultSize?: string }
+type AutoSaveStatus = { title: "idle" | "saving" | "saved"; description: "idle" | "saving" | "saved" }
+
 function App() {
-  const [photos, setPhotos] = useState([]);
-  const [categories, setCategories] = useState({});
-  const [editableCategories, setEditableCategories] = useState({});
-  const [listing, setListing] = useState(null);
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [categories, setCategories] = useState<Record<string, string>>({});
+  const [editableCategories, setEditableCategories] = useState<Record<string, string>>({});
+  const [listing, setListing] = useState<Listing | null>(null);
   const [loading, setLoading] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
-  const [generatedImages, setGeneratedImages] = useState([]);
+  const [generatedImages, setGeneratedImages] = useState<string[]>([]);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isCreatingListing, setIsCreatingListing] = useState(false);
   const [isGeneratingText, setIsGeneratingText] = useState(false);
   const [textGenStatus, setTextGenStatus] = useState("writing");
   const [textGenComplete, setTextGenComplete] = useState(false);
-  const textGenControllerRef = useRef(null);
-  const testTextGenTimerRef = useRef(null);
-  const bgRemovalAbortControllerRef = useRef(null);
-  const [listingData, setListingData] = useState(null);
+  const textGenControllerRef = useRef<AbortController | null>(null);
+  const testTextGenTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const bgRemovalAbortControllerRef = useRef<AbortController | null>(null);
+  const [listingData, setListingData] = useState<ListingData | null>(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [uploadResult, setUploadResult] = useState(null);
-  const [toasts, setToasts] = useState([]);
-  const addToast = (type, message, detail) => {
+  const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const addToast = (type: "success" | "error", message: string, detail?: string): void => {
     const id = Date.now() + Math.random();
     setToasts((prev) => [...prev, { id, type, message, detail }]);
   };
-  const removeToast = useCallback((id) => {
+  const removeToast = useCallback((id: number): void => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
   const location = useLocation();
@@ -202,13 +218,13 @@ function App() {
     settings: "/settings",
   };
 
-  const normalizePathname = (pathname) => {
+  const normalizePathname = (pathname: string): string => {
     if (!pathname) return "/";
     if (pathname === "/") return "/";
     return pathname.replace(/\/+$/, "");
   };
 
-  const activeTab = (() => {
+  const activeTab: TabName = ((): TabName => {
     const p = normalizePathname(location.pathname);
     if (p === "/" || p === tabPaths.create) return "create";
     if (p === tabPaths.upload) return "upload";
@@ -217,7 +233,7 @@ function App() {
     if (p === tabPaths.testing) return "testing";
     if (p === tabPaths.settings) return "settings";
     return "create";
-  })(); // 'create' | 'upload' | 'test-workflow' | 'testing' | 'settings'
+  })();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
       return localStorage.getItem("axisSidebarCollapsed") === "true";
@@ -243,7 +259,7 @@ function App() {
       return "deepseek/deepseek-v4-flash";
     }
   });
-  const [textModelOptions, setTextModelOptions] = useState([]);
+  const [textModelOptions, setTextModelOptions] = useState<ModelOption[]>([]);
   const [imageModel, setImageModel] = useState(() => {
     try {
       return (
@@ -299,7 +315,7 @@ function App() {
   const [imagePromptOptions, setImagePromptOptions] = useState([]);
   const [promptModalOpen, setPromptModalOpen] = useState(false);
   const [promptModalType, setPromptModalType] = useState("title");
-  const [promptModalSlot, setPromptModalSlot] = useState(null);
+  const [promptModalSlot, setPromptModalSlot] = useState<string | null>(null);
   const [promptModalName, setPromptModalName] = useState("");
   const [promptModalContent, setPromptModalContent] = useState("");
   const [promptModalError, setPromptModalError] = useState("");
@@ -321,21 +337,21 @@ function App() {
   });
   const [autoPromoteEnabled, setAutoPromoteEnabled] = useState(true);
   const [promotedListingAdRate, setPromotedListingAdRate] = useState(7.0);
-  const [bgRemovedPhotos, setBgRemovedPhotos] = useState({});
-  const [bgRemovalProgress, setBgRemovalProgress] = useState({
+  const [bgRemovedPhotos, setBgRemovedPhotos] = useState<Record<string, string>>({});
+  const [bgRemovalProgress, setBgRemovalProgress] = useState<ProgressState>({
     isActive: false,
     currentStep: null,
     completedSteps: [],
     totalSteps: [],
   });
-  const [testingResult, setTestingResult] = useState(null);
+  const [testingResult, setTestingResult] = useState<unknown>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [testingId, setTestingId] = useState("");
-  const [appTokenResult, setAppTokenResult] = useState(null);
+  const [appTokenResult, setAppTokenResult] = useState<TokenResult | null>(null);
   const [isTestingAppToken, setIsTestingAppToken] = useState(false);
-  const [userTokenResult, setUserTokenResult] = useState(null);
+  const [userTokenResult, setUserTokenResult] = useState<TokenResult | null>(null);
   const [isTestingUserToken, setIsTestingUserToken] = useState(false);
-  const [allListings, setAllListings] = useState([]);
+  const [allListings, setAllListings] = useState<Listing[]>([]);
   const [uploadListingsSearch, setUploadListingsSearch] = useState("");
   const [uploadListingsShowIncomplete, setUploadListingsShowIncomplete] =
     useState(false);
@@ -346,47 +362,47 @@ function App() {
   const [uploadListingsDateFrom, setUploadListingsDateFrom] = useState("");
   const [uploadListingsDateTo, setUploadListingsDateTo] = useState("");
   const [loadingListings, setLoadingListings] = useState(false);
-  const [uploadingSkus, setUploadingSkus] = useState(new Set());
-  const [uploadResults, setUploadResults] = useState({});
-  const [selectedListing, setSelectedListing] = useState(null);
-  const [listingDetailData, setListingDetailData] = useState(null);
+  const [uploadingSkus, setUploadingSkus] = useState<Set<string>>(new Set());
+  const [uploadResults, setUploadResults] = useState<Record<string, UploadResult>>({});
+  const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
+  const [listingDetailData, setListingDetailData] = useState<unknown>(null);
   const [loadingListingDetail, setLoadingListingDetail] = useState(false);
   const [historyPage, setHistoryPage] = useState(0);
   const [historyPageSize, setHistoryPageSize] = useState(10);
-  const [historyViewMode, setHistoryViewMode] = useState(() => {
+  const [historyViewMode, setHistoryViewMode] = useState<"compact" | "detailed">(() => {
     const stored = localStorage.getItem("axisHistoryViewMode");
     return stored === "detailed" ? "detailed" : "compact";
   });
-  const [listingQuantities, setListingQuantities] = useState({});
+  const [listingQuantities, setListingQuantities] = useState<Record<string, number>>({});
   const [loadingQuantities, setLoadingQuantities] = useState(false);
-  const quantitiesFetchedRef = useRef(false);
+  const quantitiesFetchedRef = useRef<boolean>(false);
   const [autoRestockEnabled, setAutoRestockEnabled] = useState(false);
   const [autoRestockQuantity, setAutoRestockQuantity] = useState(15);
   const [minimumImagesPerListing, setMinimumImagesPerListing] = useState(10);
-  const [autoRestockConfirm, setAutoRestockConfirm] = useState(null);
+  const [autoRestockConfirm, setAutoRestockConfirm] = useState<{ nextEnabled: boolean; nextQuantity: number } | null>(null);
   const [isRestocking, setIsRestocking] = useState(false);
-  const [historySelectMode, setHistorySelectMode] = useState(false);
-  const [historySelectedSkus, setHistorySelectedSkus] = useState(new Set());
+  const [historySelectMode, setHistorySelectMode] = useState<boolean>(false);
+  const [historySelectedSkus, setHistorySelectedSkus] = useState<Set<string>>(new Set());
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
-  const autoRestockRanRef = useRef(false);
+  const autoRestockRanRef = useRef<boolean>(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [listingId, setListingId] = useState("");
   const [listingLinkSubmitted, setListingLinkSubmitted] = useState(false);
   const [testListingLinkSubmitted, setTestListingLinkSubmitted] =
     useState(false);
-  const [currentSku, setCurrentSku] = useState(null);
-  const [skippedPhotos, setSkippedPhotos] = useState(new Set());
+  const [currentSku, setCurrentSku] = useState<string | null>(null);
+  const [skippedPhotos, setSkippedPhotos] = useState<Set<string>>(new Set());
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [editableTitle, setEditableTitle] = useState("");
   const [isTrimmingTitle, setIsTrimmingTitle] = useState(false);
   const [editableDescription, setEditableDescription] = useState("");
-  const [autoSaveStatus, setAutoSaveStatus] = useState({
+  const [autoSaveStatus, setAutoSaveStatus] = useState<AutoSaveStatus>({
     title: "idle",
     description: "idle",
   });
-  const persistedTitleRef = useRef("");
-  const persistedDescriptionRef = useRef("");
+  const persistedTitleRef = useRef<string>("");
+  const persistedDescriptionRef = useRef<string>("");
   const [isRegeneratingTitle, setIsRegeneratingTitle] = useState(false);
   const [isRegeneratingDescription, setIsRegeneratingDescription] = useState(false);
   const [isRegeneratingMetadata, setIsRegeneratingMetadata] = useState(false);
@@ -394,32 +410,32 @@ function App() {
   const [pendingPhotoPrompt, setPendingPhotoPrompt] = useState("");
   const [pendingImagePromptModifier, setPendingImagePromptModifier] = useState("");
   const [customPrompt, setCustomPrompt] = useState("");
-  const [selectedImagesForRegen, setSelectedImagesForRegen] = useState([]);
+  const [selectedImagesForRegen, setSelectedImagesForRegen] = useState<number[]>([]);
   const [isTrimming, setIsTrimming] = useState(false);
   const [isAddingNewVersions, setIsAddingNewVersions] = useState(false);
   const [promptModifier, setPromptModifier] = useState("");
 
   // Progress tracking states
-  const [fetchProgress, setFetchProgress] = useState({
+  const [fetchProgress, setFetchProgress] = useState<ProgressState>({
     isActive: false,
     currentStep: null,
     completedSteps: [],
     totalSteps: [],
   });
-  const [imageGenProgress, setImageGenProgress] = useState({
+  const [imageGenProgress, setImageGenProgress] = useState<ImageGenProgress>({
     isActive: false,
     taskId: null,
     total: 0,
     completed: 0,
     currentGenerating: [],
   });
-  const [createListingProgress, setCreateListingProgress] = useState({
+  const [createListingProgress, setCreateListingProgress] = useState<ProgressState>({
     isActive: false,
     currentStep: null,
     completedSteps: [],
     totalSteps: [],
   });
-  const [uploadProgress, setUploadProgress] = useState({
+  const [uploadProgress, setUploadProgress] = useState<ProgressState>({
     isActive: false,
     currentStep: null,
     completedSteps: [],
@@ -428,19 +444,19 @@ function App() {
 
   // Token refresh panel state
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [tokenMessage, setTokenMessage] = useState(null);
+  const [tokenMessage, setTokenMessage] = useState<{ type: string; text: string } | null>(null);
   const [isRefreshingListings, setIsRefreshingListings] = useState(false);
-  const [tokenInfo, setTokenInfo] = useState({
+  const [tokenInfo, setTokenInfo] = useState<TokenInfo>({
     user_token_set: false,
     application_token_set: false,
     user_token: "",
     application_token: "",
   });
-  const [tokenLastUpdated, setTokenLastUpdated] = useState(() => {
+  const [tokenLastUpdated, setTokenLastUpdated] = useState<number | null>(() => {
     const saved = localStorage.getItem("tokenLastUpdated");
     return saved ? parseInt(saved, 10) : null;
   });
-  const [, setTickCounter] = useState(0);
+  const [, setTickCounter] = useState<number>(0);
 
   // Re-render every 60s so the "ago" label and stale status stay current
   useEffect(() => {
@@ -497,7 +513,7 @@ function App() {
   useEffect(() => {
     const modelOption = IMAGE_MODEL_OPTIONS.find((m) => m.value === imageModel);
     if (!modelOption?.defaultSize) return;
-    const pixels = (s) => { const [w, h] = s.toLowerCase().split("x"); return parseInt(w) * parseInt(h); };
+    const pixels = (s: string) => { const [w, h] = s.toLowerCase().split("x"); return parseInt(w) * parseInt(h); };
     if (pixels(imageResolution) < pixels(modelOption.defaultSize)) {
       setImageResolution(modelOption.defaultSize);
     }
@@ -560,7 +576,7 @@ function App() {
     ? Date.now() - tokenLastUpdated > TOKEN_STALE_MS
     : true;
 
-  const formatTimeAgo = (timestamp) => {
+  const formatTimeAgo = (timestamp: number | null): string => {
     if (!timestamp) return "never";
     const diff = Date.now() - timestamp;
     const minutes = Math.floor(diff / 60000);
@@ -573,7 +589,7 @@ function App() {
   };
 
   /** Merges localStorage and server .env mtime so CLI/manual refreshes skip auto-refresh on launch. */
-  const fetchTokenInfo = async () => {
+  const fetchTokenInfo = async (): Promise<number | null> => {
     const savedRaw = localStorage.getItem("tokenLastUpdated");
     const saved = savedRaw ? parseInt(savedRaw, 10) : null;
     let merged = saved != null && Number.isFinite(saved) ? saved : null;
@@ -606,7 +622,7 @@ function App() {
               ? Math.max(merged, data.token_last_updated_ms)
               : data.token_last_updated_ms;
           setTokenLastUpdated(merged);
-          localStorage.setItem("tokenLastUpdated", merged.toString());
+          localStorage.setItem("tokenLastUpdated", merged!.toString());
         }
       }
     } catch (e) {
@@ -615,7 +631,7 @@ function App() {
     return merged;
   };
 
-  const handleRefreshTokens = async () => {
+  const handleRefreshTokens = async (): Promise<void> => {
     setIsRefreshing(true);
     setTokenMessage(null);
     const ac = new AbortController();
@@ -645,16 +661,17 @@ function App() {
       fetchTokenInfo();
     } catch (err) {
       clearTimeout(timer);
+      const e = err as Error;
       setTokenMessage({
         type: "error",
-        text: err.name === "AbortError" ? "Refresh timed out — check server logs" : (err.message || "Failed to refresh tokens"),
+        text: e.name === "AbortError" ? "Refresh timed out — check server logs" : (e.message || "Failed to refresh tokens"),
       });
     } finally {
       setIsRefreshing(false);
     }
   };
 
-  async function importListingsFromEbay() {
+  async function importListingsFromEbay(): Promise<void> {
     try {
       await fetch('/api/import-listings', { method: 'POST' });
     } catch (e) {
@@ -662,7 +679,7 @@ function App() {
     }
   }
 
-  async function handleRefreshListings() {
+  async function handleRefreshListings(): Promise<void> {
     setIsRefreshingListings(true);
     try {
       await fetch('/api/import-listings', { method: 'POST' });
@@ -677,7 +694,7 @@ function App() {
 
   // Auto-refresh tokens on every launch so eBay API calls never start with an expired token.
   // Same function as the manual Refresh button — no separate code path.
-  const hasAutoRefreshed = useRef(false);
+  const hasAutoRefreshed = useRef<boolean>(false);
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -693,7 +710,7 @@ function App() {
     };
   }, []);
 
-  const handleOpenEbayAuth = () => {
+  const handleOpenEbayAuth = (): void => {
     window.open(
       "https://developer.ebay.com/my/auth/?env=production&index=0",
       "_blank",
@@ -704,12 +721,15 @@ function App() {
   const [testRealUploadEnabled, setTestRealUploadEnabled] = useState(() => {
     try { return localStorage.getItem("testRealUploadEnabled") === "true"; } catch { return false; }
   });
-  const [testWf, setTestWf] = useState(createTestWorkflowState);
-  const setTestKey = (key) => (valOrFn) =>
-    setTestWf((w) => ({
-      ...w,
-      [key]: typeof valOrFn === "function" ? valOrFn(w[key]) : valOrFn,
-    }));
+  const [testWf, setTestWf] = useState<TestWorkflowState>(createTestWorkflowState);
+  const setTestKey = <K extends keyof TestWorkflowState>(key: K) =>
+    (valOrFn: TestWorkflowState[K] | ((prev: TestWorkflowState[K]) => TestWorkflowState[K])) =>
+      setTestWf((w) => ({
+        ...w,
+        [key]: typeof valOrFn === "function"
+          ? (valOrFn as (prev: TestWorkflowState[K]) => TestWorkflowState[K])(w[key])
+          : valOrFn,
+      }));
   const setTestListingId = setTestKey("listingId");
   const setTestPhotos = setTestKey("photos");
   const setTestCategories = setTestKey("categories");
@@ -791,7 +811,6 @@ function App() {
     bgRemovedPhotos: testBgRemovedPhotos,
     bgRemovalProgress: testBgRemovalProgress,
   } = testWf;
-
   const filteredUploadListings = useMemo(() => {
     const order = new Map(allListings.map((l, i) => [l.sku, i]));
     const q = uploadListingsSearch.trim().toLowerCase();
@@ -801,7 +820,7 @@ function App() {
       if (!uploadListingsShowManual && l.isManualListing) return false;
       if (q && !(l.title || "").toLowerCase().includes(q)) return false;
       if (uploadListingsDateFrom || uploadListingsDateTo) {
-        const raw = l.createdDateTime;
+        const raw = l.createdDateTime as string | undefined;
         const listingDate = raw ? new Date(raw) : null;
         if (!listingDate || Number.isNaN(listingDate.getTime())) {
           return false;
@@ -911,11 +930,9 @@ function App() {
       textGenControllerRef.current?.abort();
     };
   }, []);
-
-  const triggerAutoBackgroundRemoval = async (photoUrls, sku) => {
+  const triggerAutoBackgroundRemoval = async (photoUrls: string[], sku: string): Promise<void> => {
     const controller = new AbortController();
     bgRemovalAbortControllerRef.current = controller;
-
     setBgRemovalProgress({
       isActive: true,
       currentStep: null,
@@ -932,18 +949,19 @@ function App() {
           signal: controller.signal,
         },
         (event) => {
+          const step = event.step as string | undefined;
           setBgRemovalProgress((prev) => {
             if (event.status === "completed") {
               return {
                 ...prev,
-                completedSteps: [...prev.completedSteps, event.step ?? prev.currentStep],
+                completedSteps: [...prev.completedSteps, (step ?? prev.currentStep) as string],
                 currentStep: null,
               };
             }
-            return { ...prev, currentStep: event.step ?? null };
+            return { ...prev, currentStep: step ?? null };
           });
         },
-      );
+      ) as { bgRemovedPhotos?: Record<string, string> };
       if (!controller.signal.aborted) {
         setBgRemovedPhotos(data.bgRemovedPhotos || {});
       }
@@ -956,7 +974,7 @@ function App() {
     }
   };
 
-  const testTriggerAutoBackgroundRemoval = (photoUrls) => {
+  const testTriggerAutoBackgroundRemoval = (photoUrls: string[]): void => {
     const totalSteps = photoUrls.map((_, i) => `Image ${i + 1}`);
     setTestBgRemovalProgress({
       isActive: true,
@@ -964,7 +982,6 @@ function App() {
       completedSteps: [],
       totalSteps,
     });
-
     photoUrls.forEach((url, idx) => {
       setTimeout(() => {
         const stepLabel = `Image ${idx + 1}`;
@@ -981,12 +998,11 @@ function App() {
     });
   };
 
-  const fetchListingPhotos = async () => {
+  const fetchListingPhotos = async (): Promise<void> => {
     if (!listingId.trim()) {
       addToast("error", "Please enter an eBay listing ID or URL");
       return;
     }
-
     setLoading(true);
     setPhotos([]);
     setCategories({});
@@ -1001,100 +1017,53 @@ function App() {
     bgRemovalAbortControllerRef.current?.abort();
     bgRemovalAbortControllerRef.current = null;
     setBgRemovedPhotos({});
-    setBgRemovalProgress({
-      isActive: false,
-      currentStep: null,
-      completedSteps: [],
-      totalSteps: [],
-    });
-
-    // Initialize progress tracking
+    setBgRemovalProgress({ isActive: false, currentStep: null, completedSteps: [], totalSteps: [] });
     const steps = classifyImagesEnabled
-      ? [
-          "Fetching listing from eBay",
-          "Creating initial JSON file",
-          "Categorizing images",
-        ]
+      ? ["Fetching listing from eBay", "Creating initial JSON file", "Categorizing images"]
       : ["Fetching listing from eBay", "Creating initial JSON file"];
-    setFetchProgress({
-      isActive: true,
-      currentStep: null,
-      completedSteps: [],
-      totalSteps: steps,
-    });
-
+    setFetchProgress({ isActive: true, currentStep: null, completedSteps: [], totalSteps: steps });
     try {
-      // Stream progress from backend as each step actually completes
       const photosUrl = classifyImagesEnabled
         ? `/api/photos/${encodeURIComponent(listingId.trim())}?classifier_model=${encodeURIComponent(classifierModel)}`
         : `/api/photos/${encodeURIComponent(listingId.trim())}?classify=false`;
       const data = await fetchWithProgress(
-        photosUrl,
-        {},
+        photosUrl, {},
         (event) => {
+          const step = event.step as string;
           setFetchProgress((prev) => {
             const completed = [...prev.completedSteps];
-            if (
-              event.status === "completed" &&
-              !completed.includes(event.step)
-            ) {
-              completed.push(event.step);
-            }
-            return {
-              ...prev,
-              completedSteps: completed,
-              currentStep:
-                event.status === "in_progress" ? event.step : prev.currentStep,
-            };
+            if (event.status === "completed" && !completed.includes(step)) { completed.push(step); }
+            return { ...prev, completedSteps: completed, currentStep: event.status === "in_progress" ? step : prev.currentStep };
           });
         },
-      );
-
+      ) as { photos?: string[]; categories?: Record<string, string>; listing?: Listing | null; sku?: string | null };
       setListingLinkSubmitted(true);
       setListingId("");
       setPhotos(data.photos || []);
       const initialCategories = classifyImagesEnabled
         ? data.categories || {}
-        : (data.photos || []).reduce((acc, url) => {
-            acc[url] = "bad_image";
-            return acc;
-          }, {});
+        : (data.photos || []).reduce((acc: Record<string, string>, url: string) => { acc[url] = "bad_image"; return acc; }, {});
       setCategories(initialCategories);
       setEditableCategories({ ...initialCategories });
       setListing(data.listing || null);
       setCurrentSku(data.sku || null);
       setGeneratedImages([]);
       if (data.listing?.title) {
-        startTextGeneration(
-          data.listing.title,
-          data.listing.description || "",
-        );
+        startTextGeneration(data.listing.title, data.listing.description || "");
       }
-
-      // Auto-skip images categorized as real_world_image or edited_image
-      // (only when classification is enabled; otherwise nothing is auto-skipped)
-      const autoSkip = new Set();
+      const autoSkip = new Set<string>();
       if (classifyImagesEnabled) {
         for (const [url, cat] of Object.entries(initialCategories)) {
-          if (cat === "real_world_image" || cat === "edited_image") {
-            autoSkip.add(url);
-          }
+          if (cat === "real_world_image" || cat === "edited_image") { autoSkip.add(url); }
         }
       }
       setSkippedPhotos(autoSkip);
       if (autoBackgroundRemovalEnabled && data.photos?.length && data.sku) {
         triggerAutoBackgroundRemoval(data.photos, data.sku);
       }
-
-      // All steps complete
-      setFetchProgress({
-        isActive: false,
-        currentStep: null,
-        completedSteps: steps,
-        totalSteps: steps,
-      });
+      setFetchProgress({ isActive: false, currentStep: null, completedSteps: steps, totalSteps: steps });
     } catch (err) {
-      addToast("error", err.message || "An error occurred while fetching the listing");
+      addToast("error", (err as Error).message || "An error occurred while fetching the listing");
       setListingLinkSubmitted(false);
       setPhotos([]);
       setCategories({});
@@ -1107,18 +1076,12 @@ function App() {
       setTextGenComplete(false);
       setEditableTitle("");
       setEditableDescription("");
-      setFetchProgress({
-        isActive: false,
-        currentStep: null,
-        completedSteps: [],
-        totalSteps: [],
-      });
+      setFetchProgress({ isActive: false, currentStep: null, completedSteps: [], totalSteps: [] });
     } finally {
       setLoading(false);
     }
   };
-
-  const startTextGeneration = async (title, description) => {
+  const startTextGeneration = async (title: string, description: string): Promise<void> => {
     if (textGenControllerRef.current) {
       textGenControllerRef.current.abort();
     }
@@ -1153,12 +1116,11 @@ function App() {
             }
           },
           (data) => {
-            // Snap to final clean values; textGenComplete set after stream fully resolves
-            setEditableTitle(data.edited_title || "");
-            setEditableDescription(data.edited_description || "");
+            const d = data as { edited_title?: string; edited_description?: string };
+            setEditableTitle(d.edited_title || "");
+            setEditableDescription(d.edited_description || "");
           },
           () => {
-            // Nudge fired — clear title so the incoming token stream restarts visually
             setEditableTitle("");
             setTextGenStatus("nudging");
           },
@@ -1166,7 +1128,7 @@ function App() {
         succeeded = true;
         break;
       } catch (err) {
-        if (err.name === "AbortError") break;
+        if ((err as Error).name === "AbortError") break;
         console.error(`Text generation error (attempt ${attempt}/${MAX_ATTEMPTS}):`, err);
         if (attempt < MAX_ATTEMPTS) {
           setEditableTitle("");
@@ -1179,7 +1141,6 @@ function App() {
       console.error("Text generation failed after", MAX_ATTEMPTS, "attempts — displaying partial result");
     }
 
-    // Mark complete only after the full stream finishes (including all nudge passes)
     if (!controller.signal.aborted) {
       setTextGenComplete(true);
     }
@@ -1187,7 +1148,7 @@ function App() {
     setIsGeneratingText(false);
   };
 
-  const cancelTextGeneration = () => {
+  const cancelTextGeneration = (): void => {
     if (textGenControllerRef.current) {
       textGenControllerRef.current.abort();
       textGenControllerRef.current = null;
@@ -1197,12 +1158,12 @@ function App() {
     setTextGenComplete(false);
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = (e: React.FormEvent): void => {
     e.preventDefault();
     fetchListingPhotos();
   };
 
-  const handleChatSubmit = (prompt, context) => {
+  const handleChatSubmit = (prompt: string, context: string): void => {
     if (context === "title") regenerateTitle(prompt);
     else if (context === "description") regenerateDescription(prompt);
     else if (context === "photos") {
@@ -1214,7 +1175,7 @@ function App() {
     } else if (context === "metadata") regenerateMetadata(prompt);
   };
 
-  const regenerateTitle = async (prompt) => {
+  const regenerateTitle = async (prompt: string): Promise<void> => {
     if (!currentSku || !editableTitle) return;
     setIsRegeneratingTitle(true);
     try {
@@ -1236,12 +1197,13 @@ function App() {
       setEditableTitle(data.title);
       if (data.listing_data) setListingData(data.listing_data);
     } catch (err) {
-      addToast("error", err.message || "Failed to regenerate title");
+      addToast("error", (err as Error).message || "Failed to regenerate title");
     } finally {
       setIsRegeneratingTitle(false);
     }
   };
-  const regenerateDescription = async (prompt) => {
+
+  const regenerateDescription = async (prompt: string): Promise<void> => {
     if (!currentSku || !editableDescription) return;
     setIsRegeneratingDescription(true);
     try {
@@ -1263,32 +1225,33 @@ function App() {
       setEditableDescription(data.description);
       if (data.listing_data) setListingData(data.listing_data);
     } catch (err) {
-      addToast("error", err.message || "Failed to regenerate description");
+      addToast("error", (err as Error).message || "Failed to regenerate description");
     } finally {
       setIsRegeneratingDescription(false);
     }
   };
-  const enterPhotoSelectionMode = (prompt) => {
+
+  const enterPhotoSelectionMode = (prompt: string): void => {
     if (!generatedImages || generatedImages.length === 0) return;
     setPendingPhotoPrompt(prompt);
     setPhotoSelectionActive(true);
     setSelectedImagesForRegen(generatedImages.map((_, i) => i));
   };
 
-  const handleConfirmPhotoRegeneration = () => {
+  const handleConfirmPhotoRegeneration = (): void => {
     const prompt = pendingPhotoPrompt;
     setPhotoSelectionActive(false);
     setPendingPhotoPrompt("");
     handleRegenerateImages(prompt);
   };
 
-  const handleCancelPhotoRegeneration = () => {
+  const handleCancelPhotoRegeneration = (): void => {
     setPhotoSelectionActive(false);
     setPendingPhotoPrompt("");
     setSelectedImagesForRegen([]);
   };
 
-  const regenerateMetadata = async (prompt) => {
+  const regenerateMetadata = async (prompt: string): Promise<void> => {
     if (!currentSku) return;
     setIsRegeneratingMetadata(true);
     try {
@@ -1308,22 +1271,22 @@ function App() {
       }
       if (data.listing_data) setListingData(data.listing_data);
     } catch (err) {
-      addToast("error", err.message || "Failed to regenerate metadata");
+      addToast("error", (err as Error).message || "Failed to regenerate metadata");
     } finally {
       setIsRegeneratingMetadata(false);
     }
   };
 
-  const openLightbox = (index) => {
+  const openLightbox = (index: number): void => {
     setLightboxIndex(index);
     setLightboxOpen(true);
   };
 
-  const closeLightbox = () => {
+  const closeLightbox = (): void => {
     setLightboxOpen(false);
   };
 
-  const navigateLightbox = (direction) => {
+  const navigateLightbox = (direction: "next" | "prev"): void => {
     if (direction === "next") {
       setLightboxIndex((prev) => (prev + 1) % photos.length);
     } else {
@@ -1331,14 +1294,14 @@ function App() {
     }
   };
 
-  const handleCategoryChange = (photoUrl, newCategory) => {
+  const handleCategoryChange = (photoUrl: string, newCategory: string): void => {
     setEditableCategories((prev) => ({
       ...prev,
       [photoUrl]: newCategory,
     }));
   };
 
-  const handleAddToOriginalPhotos = (newUrls) => {
+  const handleAddToOriginalPhotos = (newUrls: string[]): void => {
     if (!newUrls?.length) return;
     setPhotos((prev) => [...prev, ...newUrls]);
     setEditableCategories((prev) => {
@@ -1350,7 +1313,7 @@ function App() {
     });
   };
 
-  const handleSkipPhoto = (photoUrl) => {
+  const handleSkipPhoto = (photoUrl: string): void => {
     setSkippedPhotos((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(photoUrl)) {
@@ -1361,8 +1324,7 @@ function App() {
       return newSet;
     });
   };
-
-  const handleConfirmCategories = async () => {
+  const handleConfirmCategories = async (): Promise<void> => {
     console.log("Confirm categories button clicked");
     console.log("Photos:", photos);
     console.log("Editable categories:", editableCategories);
@@ -1388,7 +1350,7 @@ function App() {
         return;
       }
 
-      const categoriesToProcess = {};
+      const categoriesToProcess: Record<string, string> = {};
       photos
         .filter((photoUrl) => !skippedPhotos.has(photoUrl))
         .forEach((originalUrl) => {
@@ -1433,7 +1395,6 @@ function App() {
         throw new Error(data.error);
       }
 
-      // Get task ID for progress tracking
       const taskId = data.task_id;
       const totalImages = data.total_images || 0;
 
@@ -1441,7 +1402,6 @@ function App() {
         throw new Error("No task ID returned from server");
       }
 
-      // Initialize progress tracking
       setImageGenProgress({
         isActive: true,
         taskId: taskId,
@@ -1452,7 +1412,6 @@ function App() {
 
       setPendingImagePromptModifier("");
 
-      // Poll for progress updates
       const pollInterval = setInterval(async () => {
         try {
           const statusResponse = await fetch(
@@ -1481,7 +1440,6 @@ function App() {
               setSelectedImagesForRegen([]);
               setCustomPrompt("");
 
-              // Sync generated images to the listing JSON on disk so Upload to eBay works
               if (currentSku && mergedImages.length > 0) {
                 fetch("/api/update-listing-images", {
                   method: "POST",
@@ -1503,14 +1461,12 @@ function App() {
                 currentGenerating: [],
               });
             } else {
-              // Failed - show errors but return partial results if any
               const aiGeneratedList = statusData.generated_images || [];
               const partialImages = mergeGeneratedImages(photosToProcess, aiGeneratedList, {
                 allowPartial: true,
               });
               setGeneratedImages(partialImages);
 
-              // Sync partial images to disk too
               if (currentSku && partialImages.length > 0) {
                 fetch("/api/update-listing-images", {
                   method: "POST",
@@ -1541,7 +1497,6 @@ function App() {
 
             setIsConfirming(false);
           } else {
-            // Update progress
             setImageGenProgress((prev) => ({
               ...prev,
               completed: statusData.completed || 0,
@@ -1560,13 +1515,10 @@ function App() {
             currentGenerating: [],
           });
         }
-      }, 500); // Poll every 500ms
-
-      // Store interval ID for cleanup if component unmounts
-      // Note: In a real app, you'd use useEffect cleanup, but for now we rely on completion/error handling
+      }, 500);
     } catch (err) {
       console.error("Error generating images:", err);
-      addToast("error", err.message || "An error occurred while generating images");
+      addToast("error", (err as Error).message || "An error occurred while generating images");
       setIsConfirming(false);
       setImageGenProgress({
         isActive: false,
@@ -1577,8 +1529,7 @@ function App() {
       });
     }
   };
-
-  const handleAddToListing = useCallback((ebayUrl) => {
+  const handleAddToListing = useCallback((ebayUrl: string): void => {
     setGeneratedImages((prev) => {
       const updated = [...prev, ebayUrl];
       if (currentSku && updated.length > 0) {
@@ -1597,7 +1548,7 @@ function App() {
     });
   }, [currentSku]);
 
-  const handleRemoveFromListing = useCallback((index) => {
+  const handleRemoveFromListing = useCallback((index: number): void => {
     setGeneratedImages((prev) => {
       const updated = prev.filter((_, i) => i !== index);
       if (currentSku && updated.length > 0) {
@@ -1619,7 +1570,7 @@ function App() {
     );
   }, [currentSku]);
 
-  const handleDeleteOriginalPhotos = useCallback((indices) => {
+  const handleDeleteOriginalPhotos = useCallback((indices: number[]): void => {
     const indexSet = new Set(indices);
     setPhotos((prev) => {
       const removed = prev.filter((_, i) => indexSet.has(i));
@@ -1637,7 +1588,7 @@ function App() {
     });
   }, []);
 
-  const handleRemoveBackgroundOriginal = useCallback(async (photoUrls) => {
+  const handleRemoveBackgroundOriginal = useCallback(async (photoUrls: string[]): Promise<void> => {
     for (const url of photoUrls) {
       try {
         const imgResp = await fetch(url);
@@ -1647,9 +1598,9 @@ function App() {
         const resp = await fetch("/api/remove-background", { method: "POST", body: formData });
         if (!resp.ok) continue;
         const resultBlob = await resp.blob();
-        const dataUrl = await new Promise((resolve) => {
+        const dataUrl = await new Promise<string>((resolve) => {
           const reader = new FileReader();
-          reader.onload = (ev) => resolve(ev.target.result);
+          reader.onload = (ev) => resolve(ev.target!.result as string);
           reader.readAsDataURL(resultBlob);
         });
         setPhotos((prev) => prev.map((u) => (u === url ? dataUrl : u)));
@@ -1673,14 +1624,14 @@ function App() {
     }
   }, []);
 
-  const toggleHistorySelectMode = () => {
+  const toggleHistorySelectMode = (): void => {
     setHistorySelectMode((prev) => {
       if (prev) setHistorySelectedSkus(new Set());
       return !prev;
     });
   };
 
-  const toggleHistorySkuSelection = (sku) => {
+  const toggleHistorySkuSelection = (sku: string): void => {
     setHistorySelectedSkus((prev) => {
       const next = new Set(prev);
       if (next.has(sku)) next.delete(sku);
@@ -1689,7 +1640,7 @@ function App() {
     });
   };
 
-  const handleBulkDeleteListings = async () => {
+  const handleBulkDeleteListings = async (): Promise<void> => {
     const skus = Array.from(historySelectedSkus);
     if (skus.length === 0) return;
     setIsBulkDeleting(true);
@@ -1709,13 +1660,13 @@ function App() {
       await fetchAllListings();
     } catch (err) {
       console.error('[History] bulk delete failed:', err);
-      addToast('error', err.message || 'Bulk delete failed');
+      addToast('error', (err as Error).message || 'Bulk delete failed');
     } finally {
       setIsBulkDeleting(false);
     }
   };
 
-  const handleDeleteGeneratedImages = useCallback((indices) => {
+  const handleDeleteGeneratedImages = useCallback((indices: number[]): void => {
     const sorted = [...indices].sort((a, b) => b - a);
     setGeneratedImages((prev) => {
       const updated = prev.filter((_, i) => !indices.includes(i));
@@ -1735,7 +1686,7 @@ function App() {
     void sorted;
   }, [currentSku]);
 
-  const handleRemoveBackgroundGenerated = useCallback(async (imageUrls) => {
+  const handleRemoveBackgroundGenerated = useCallback(async (imageUrls: string[]): Promise<void> => {
     for (const url of imageUrls) {
       try {
         const imgResp = await fetch(url);
@@ -1745,9 +1696,9 @@ function App() {
         const resp = await fetch("/api/remove-background", { method: "POST", body: formData });
         if (!resp.ok) continue;
         const resultBlob = await resp.blob();
-        const dataUrl = await new Promise((resolve) => {
+        const dataUrl = await new Promise<string>((resolve) => {
           const reader = new FileReader();
-          reader.onload = (ev) => resolve(ev.target.result);
+          reader.onload = (ev) => resolve(ev.target!.result as string);
           reader.readAsDataURL(resultBlob);
         });
         setGeneratedImages((prev) => {
@@ -1770,7 +1721,7 @@ function App() {
     }
   }, [currentSku]);
 
-  const handleDragEnd = useCallback((result) => {
+  const handleDragEnd = useCallback((result: DropResult): void => {
     if (!result.destination) return;
     const srcIdx = result.source.index;
     const destIdx = result.destination.index;
@@ -1780,7 +1731,6 @@ function App() {
       const [moved] = updated.splice(srcIdx, 1);
       updated.splice(destIdx, 0, moved);
 
-      // Sync reordered images to disk
       if (currentSku && updated.length > 0) {
         fetch("/api/update-listing-images", {
           method: "POST",
@@ -1796,11 +1746,10 @@ function App() {
 
       return updated;
     });
-    // Clear selection since indices changed
     setSelectedImagesForRegen([]);
   }, [currentSku]);
 
-  const handleImageSelection = (index) => {
+  const handleImageSelection = (index: number): void => {
     setSelectedImagesForRegen((prev) => {
       if (prev.includes(index)) {
         return prev.filter((i) => i !== index);
@@ -1810,17 +1759,16 @@ function App() {
     });
   };
 
-  const handleSelectAllImages = () => {
+  const handleSelectAllImages = (): void => {
     if (generatedImages?.length > 0) {
       setSelectedImagesForRegen(generatedImages.map((_, i) => i));
     }
   };
 
-  const handleClearImageSelection = () => {
+  const handleClearImageSelection = (): void => {
     setSelectedImagesForRegen([]);
   };
-
-  const handleRegenerateImages = async (promptOverride) => {
+  const handleRegenerateImages = async (promptOverride?: string): Promise<void> => {
     const promptToUse = (promptOverride ?? customPrompt)?.trim();
     if (!promptToUse) {
       addToast("error", "Please enter a prompt to guide the regeneration");
@@ -1869,7 +1817,6 @@ function App() {
       const regeneratedUrls = data.generated_images || [];
       console.log("Regenerated images:", regeneratedUrls);
 
-      // Replace selected images with regenerated ones
       const newImages = [...generatedImages];
       indices.forEach((originalIndex, regenIndex) => {
         if (regenIndex < regeneratedUrls.length) {
@@ -1881,7 +1828,6 @@ function App() {
       setSelectedImagesForRegen([]);
       setCustomPrompt("");
 
-      // Sync updated images to disk
       if (currentSku && newImages.length > 0) {
         fetch("/api/update-listing-images", {
           method: "POST",
@@ -1896,13 +1842,13 @@ function App() {
       }
     } catch (err) {
       console.error("Error regenerating images:", err);
-      addToast("error", err.message || "An error occurred while regenerating images");
+      addToast("error", (err as Error).message || "An error occurred while regenerating images");
     } finally {
       setIsRegenerating(false);
     }
   };
 
-  const handleTrimSelected = async () => {
+  const handleTrimSelected = async (): Promise<void> => {
     const indices =
       selectedImagesForRegen.length > 0
         ? selectedImagesForRegen
@@ -1917,9 +1863,9 @@ function App() {
         const url = generatedImages[index];
         const resp = await fetch(url);
         const blob = await resp.blob();
-        const dataUrl = await new Promise((resolve) => {
+        const dataUrl = await new Promise<string>((resolve) => {
           const reader = new FileReader();
-          reader.onload = (ev) => resolve(ev.target.result);
+          reader.onload = (ev) => resolve(ev.target!.result as string);
           reader.readAsDataURL(blob);
         });
         const trimmedUrl = await trimTransparentPadding(dataUrl);
@@ -1937,7 +1883,6 @@ function App() {
       }
       setGeneratedImages(newImages);
 
-      // Sync trimmed images to disk
       if (currentSku && newImages.length > 0) {
         fetch("/api/update-listing-images", {
           method: "POST",
@@ -1952,13 +1897,13 @@ function App() {
       }
     } catch (err) {
       console.error("Error trimming images:", err);
-      addToast("error", err.message || "An error occurred while trimming images");
+      addToast("error", (err as Error).message || "An error occurred while trimming images");
     } finally {
       setIsTrimming(false);
     }
   };
 
-  const handleAddNewVersions = async () => {
+  const handleAddNewVersions = async (): Promise<void> => {
     if (!customPrompt?.trim()) {
       addToast("error", "Please enter a prompt to guide the new version");
       return;
@@ -2023,16 +1968,15 @@ function App() {
         );
       }
 
-      await handleUploadToEbay(currentSku, syncData.listing_data);
+      await handleUploadToEbay(currentSku, syncData.listing_data as ListingData | null);
     } catch (err) {
       console.error("Error in add new version:", err);
-      addToast("error", err.message || "An error occurred while adding new version");
+      addToast("error", (err as Error).message || "An error occurred while adding new version");
     } finally {
       setIsAddingNewVersions(false);
     }
   };
-
-  const handleCreateListing = async () => {
+  const handleCreateListing = async (): Promise<void> => {
     if (!listing) {
       addToast("error", "Original listing data is required");
       return;
@@ -2044,7 +1988,6 @@ function App() {
 
     setIsCreatingListing(true);
 
-    // Initialize progress tracking
     const steps = [
       "Updating images",
       "Generating optimized text",
@@ -2063,7 +2006,6 @@ function App() {
       console.log("Listing data:", listing);
       console.log("SKU:", currentSku);
 
-      // Stream progress from backend as each step actually completes
       const data = await fetchWithProgress(
         "/api/create-listing",
         {
@@ -2090,27 +2032,27 @@ function App() {
           }),
         },
         (event) => {
+          const step = event.step as string;
           setCreateListingProgress((prev) => {
             const completed = [...prev.completedSteps];
             if (
               event.status === "completed" &&
-              !completed.includes(event.step)
+              !completed.includes(step)
             ) {
-              completed.push(event.step);
+              completed.push(step);
             }
             return {
               ...prev,
               completedSteps: completed,
               currentStep:
-                event.status === "in_progress" ? event.step : prev.currentStep,
+                event.status === "in_progress" ? step : prev.currentStep,
             };
           });
         },
-      );
+      ) as { listing_data?: ListingData };
 
       console.log("Create listing response:", data);
 
-      // All steps complete
       setCreateListingProgress({
         isActive: false,
         currentStep: null,
@@ -2118,20 +2060,19 @@ function App() {
         totalSteps: steps,
       });
 
-      setListingData(data.listing_data);
+      setListingData(data.listing_data ?? null);
       setEditableTitle(data.listing_data?.inventoryItem?.product?.title || "");
       setEditableDescription(
         data.listing_data?.inventoryItem?.product?.description || "",
       );
-      setUploadResult(null); // Reset upload result when new listing is created
+      setUploadResult(null);
 
-      // Refresh listings if we're on the upload tab
       if (activeTab === "upload") {
         fetchAllListings();
       }
     } catch (err) {
       console.error("Error creating listing:", err);
-      addToast("error", err.message || "An error occurred while creating listing");
+      addToast("error", (err as Error).message || "An error occurred while creating listing");
       setCreateListingProgress({
         isActive: false,
         currentStep: null,
@@ -2143,7 +2084,7 @@ function App() {
     }
   };
 
-  const handleTrimTitle = async () => {
+  const handleTrimTitle = async (): Promise<void> => {
     if (!editableTitle || !currentSku) return;
     setIsTrimmingTitle(true);
     try {
@@ -2160,7 +2101,6 @@ function App() {
       if (!response.ok) throw new Error(data.error || "Failed to trim title");
       if (data.trimmed_title) {
         setEditableTitle(data.trimmed_title);
-        // Update listingData in-place so the display stays in sync
         setListingData((prev) => {
           if (!prev) return prev;
           const updated = JSON.parse(JSON.stringify(prev));
@@ -2172,13 +2112,13 @@ function App() {
       }
     } catch (err) {
       console.error("Error trimming title:", err);
-      addToast("error", err.message || "Failed to trim title");
+      addToast("error", (err as Error).message || "Failed to trim title");
     } finally {
       setIsTrimmingTitle(false);
     }
   };
 
-  const handleSaveTitle = async (titleToSave) => {
+  const handleSaveTitle = async (titleToSave: string): Promise<void> => {
     const sku = currentSku;
     if (!titleToSave || !sku) return;
     setAutoSaveStatus((prev) => ({ ...prev, title: "saving" }));
@@ -2206,12 +2146,12 @@ function App() {
       );
     } catch (err) {
       console.error("Error saving title:", err);
-      addToast("error", err.message || "Failed to save title");
+      addToast("error", (err as Error).message || "Failed to save title");
       setAutoSaveStatus((prev) => ({ ...prev, title: "idle" }));
     }
   };
 
-  const handleSaveDescription = async (descToSave) => {
+  const handleSaveDescription = async (descToSave: string): Promise<void> => {
     const sku = currentSku || listingData?.sku;
     if (!sku || !listingData) return;
     setAutoSaveStatus((prev) => ({ ...prev, description: "saving" }));
@@ -2242,17 +2182,17 @@ function App() {
       );
     } catch (err) {
       console.error("Error saving description:", err);
-      addToast("error", err.message || "Failed to save description");
+      addToast("error", (err as Error).message || "Failed to save description");
       setAutoSaveStatus((prev) => ({ ...prev, description: "idle" }));
     }
   };
 
-  const fetchAllListings = async () => {
+  const fetchAllListings = async (): Promise<void> => {
     setLoadingListings(true);
 
     try {
       const response = await fetch("/api/listings");
-      const data = await response.json();
+      const data = await response.json() as { error?: string; listings?: Listing[] };
 
       if (!response.ok) {
         throw new Error(data.error || "Failed to fetch listings");
@@ -2271,13 +2211,13 @@ function App() {
       }
     } catch (err) {
       console.error("Error fetching listings:", err);
-      addToast("error", err.message || "An error occurred while fetching listings");
+      addToast("error", (err as Error).message || "An error occurred while fetching listings");
     } finally {
       setLoadingListings(false);
     }
   };
 
-  const fetchQuantitiesForPage = async (listings) => {
+  const fetchQuantitiesForPage = async (listings: Listing[]): Promise<void> => {
     const skus = listings
       .filter((l) => String(l.ebayListingId ?? "").trim())
       .map((l) => l.sku);
@@ -2294,20 +2234,19 @@ function App() {
       const data = await res.json();
       setListingQuantities((prev) => ({ ...prev, ...data }));
     } catch {
-      // silently ignore — quantities are non-critical
+      // silently ignore
     } finally {
       setLoadingQuantities(false);
     }
   };
-
-  const performRestock = async (targetQty, source = "manual") => {
+  const performRestock = async (targetQty: number | string, source = "manual"): Promise<void> => {
     const qty = Number(targetQty);
     if (!Number.isFinite(qty) || qty < 0) return;
 
     const skus = allListings
-      .filter((l) => l.sku.startsWith("MANUAL_") || isUploaded(l))
+      .filter((l) => l.sku!.startsWith("MANUAL_") || isUploaded(l))
       .filter((l) => !l.isVariationListing)
-      .filter((l) => listingQuantities[l.sku] !== qty)
+      .filter((l) => listingQuantities[l.sku!] !== qty)
       .map((l) => l.sku);
     if (!skus.length) return;
 
@@ -2324,7 +2263,7 @@ function App() {
       if (data.updated?.length) {
         setListingQuantities((prev) => {
           const next = { ...prev };
-          data.updated.forEach((sku) => {
+          data.updated.forEach((sku: string) => {
             next[sku] = qty;
           });
           return next;
@@ -2333,10 +2272,10 @@ function App() {
       if (data.failed?.length) {
         const failedErrors = data.failed_errors || {};
         const skuToListing = Object.fromEntries(allListings.map((l) => [l.sku, l]));
-        data.failed.forEach((sku) => {
+        data.failed.forEach((sku: string) => {
           const l = skuToListing[sku];
           const raw = l?.title || sku;
-          const title = raw.length > 50 ? raw.slice(0, 50) + "…" : raw;
+          const title = raw.length > 50 ? raw.slice(0, 50) + "\u2026" : raw;
           addToast("error", `Failed to restock "${title}"`);
           const ebayId = l?.ebayListingId || sku;
           const url = ebayId && !sku.startsWith("MANUAL_")
@@ -2348,13 +2287,13 @@ function App() {
       }
     } catch (err) {
       console.error("Error restocking listings:", err);
-      addToast("error", err.message || "Failed to restock listings");
+      addToast("error", (err as Error).message || "Failed to restock listings");
     } finally {
       setIsRestocking(false);
     }
   };
 
-  const handleAutoRestockEnabledChange = (checked) => {
+  const handleAutoRestockEnabledChange = (checked: boolean): void => {
     if (checked) {
       setAutoRestockConfirm({ nextEnabled: true, nextQuantity: autoRestockQuantity });
     } else {
@@ -2367,7 +2306,7 @@ function App() {
     }
   };
 
-  const handleAutoRestockQuantityChange = (qty) => {
+  const handleAutoRestockQuantityChange = (qty: number): void => {
     if (autoRestockEnabled) {
       setAutoRestockConfirm({ nextEnabled: true, nextQuantity: qty });
     } else {
@@ -2380,7 +2319,7 @@ function App() {
     }
   };
 
-  const handleMinimumImagesChange = (value) => {
+  const handleMinimumImagesChange = (value: string): void => {
     const parsed = parseInt(value, 10);
     if (isNaN(parsed) || parsed < 1) return;
     setMinimumImagesPerListing(parsed);
@@ -2391,7 +2330,7 @@ function App() {
     }).catch(() => {});
   };
 
-  const saveAutoPromoteEnabled = (val) => {
+  const saveAutoPromoteEnabled = (val: boolean): void => {
     setAutoPromoteEnabled(val);
     fetch("/api/settings/promoted-listings", {
       method: "POST",
@@ -2400,7 +2339,7 @@ function App() {
     }).catch(() => {});
   };
 
-  const savePromotedListingAdRate = (val) => {
+  const savePromotedListingAdRate = (val: number): void => {
     if (isNaN(val) || val < 1) return;
     setPromotedListingAdRate(val);
     fetch("/api/settings/promoted-listings", {
@@ -2410,7 +2349,7 @@ function App() {
     }).catch(() => {});
   };
 
-  const confirmAutoRestock = async () => {
+  const confirmAutoRestock = async (): Promise<void> => {
     if (!autoRestockConfirm) return;
     const { nextEnabled, nextQuantity } = autoRestockConfirm;
     setAutoRestockConfirm(null);
@@ -2428,11 +2367,11 @@ function App() {
     performRestock(nextQuantity, "auto");
   };
 
-  const cancelAutoRestock = () => {
+  const cancelAutoRestock = (): void => {
     setAutoRestockConfirm(null);
   };
 
-  const handleUploadToEbay = async (sku, listingData = null) => {
+  const handleUploadToEbay = async (sku: string, listingData: ListingData | null = null): Promise<void> => {
     if (!sku) {
       addToast("error", "No SKU provided");
       return;
@@ -2440,7 +2379,6 @@ function App() {
 
     setUploadingSkus((prev) => new Set(prev).add(sku));
 
-    // Initialize progress tracking - steps match what the backend actually reports
     const steps = ["Preparing listing data", "Uploading to eBay"];
     setUploadProgress({
       isActive: true,
@@ -2453,7 +2391,6 @@ function App() {
       console.log("Uploading listing to eBay with SKU:", sku);
       console.log("Listing data:", listingData);
 
-      // Stream progress from backend as each step actually completes
       const data = await fetchWithProgress(
         "/api/upload-listing",
         {
@@ -2469,23 +2406,24 @@ function App() {
           }),
         },
         (event) => {
+          const step = event.step as string;
           setUploadProgress((prev) => {
             const completed = [...prev.completedSteps];
             if (
               event.status === "completed" &&
-              !completed.includes(event.step)
+              !completed.includes(step)
             ) {
-              completed.push(event.step);
+              completed.push(step);
             }
             return {
               ...prev,
               completedSteps: completed,
               currentStep:
-                event.status === "in_progress" ? event.step : prev.currentStep,
+                event.status === "in_progress" ? step : prev.currentStep,
             };
           });
         },
-      );
+      ) as { upload_result?: UploadResult };
 
       console.log("Upload response:", data);
 
@@ -2494,7 +2432,6 @@ function App() {
         throw new Error("Upload completed but no result returned");
       }
 
-      // All steps complete
       setUploadProgress({
         isActive: false,
         currentStep: null,
@@ -2502,15 +2439,13 @@ function App() {
         totalSteps: steps,
       });
 
-      // Store result for this specific SKU
       setUploadResults((prev) => ({
         ...prev,
-        [sku]: data.upload_result,
+        [sku]: data.upload_result!,
       }));
 
-      // If uploading from the create tab, also update the main upload result
       if (sku === listingData?.sku) {
-        setUploadResult(data.upload_result);
+        setUploadResult(data.upload_result ?? null);
       }
 
       addToast(
@@ -2526,7 +2461,7 @@ function App() {
       console.log("Upload successful:", data.upload_result);
     } catch (err) {
       console.error("Error uploading listing:", err);
-      addToast("error", err.message || "An error occurred while uploading listing");
+      addToast("error", (err as Error).message || "An error occurred while uploading listing");
       setUploadProgress({
         isActive: false,
         currentStep: null,
@@ -2542,17 +2477,14 @@ function App() {
     }
   };
 
-  const handleHistoryViewModeChange = (mode) => {
+  const handleHistoryViewModeChange = (mode: "compact" | "detailed"): void => {
     setHistoryViewMode(mode);
     localStorage.setItem("axisHistoryViewMode", mode);
   };
 
-  // Fetch listings when upload tab is activated
-  const handleTabChange = (tab) => {
+  const handleTabChange = (tab: TabName): void => {
     navigate(tabPaths[tab] ?? tabPaths.create);
   };
-
-  // Tab entry side-effects (also covers back/forward navigation).
   useEffect(() => {
     if (activeTab === "upload") {
       fetchAllListings();
@@ -2567,9 +2499,8 @@ function App() {
       setHistorySelectMode(false);
       setHistorySelectedSkus(new Set());
     }
-  }, [activeTab]);
+  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-restock: run once per History tab load, after listings + quantities are in.
   useEffect(() => {
     if (
       activeTab === "upload" &&
@@ -2586,6 +2517,7 @@ function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, autoRestockEnabled, allListings, listingQuantities]);
+
   useEffect(() => {
     if (activeTab === "settings") {
       fetchTokenInfo();
@@ -2606,14 +2538,12 @@ function App() {
         })
         .catch(() => {});
     }
-  }, [activeTab]);
+  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Reset to page 0 when filters change.
   useEffect(() => {
     setHistoryPage(0);
   }, [uploadListingsSearch, uploadListingsDateFrom, uploadListingsDateTo, uploadListingsShowIncomplete, uploadListingsShowUnuploaded, uploadListingsShowManual]);
 
-  // Re-fetch quantities when navigating to a new page.
   useEffect(() => {
     if (paginatedListings.length > 0) {
       fetchQuantitiesForPage(paginatedListings);
@@ -2621,7 +2551,7 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [historyPage, historyPageSize]);
 
-  const fetchTextModels = useCallback(async () => {
+  const fetchTextModels = useCallback(async (): Promise<void> => {
     try {
       const res = await fetch("/api/text-models");
       const data = await res.json();
@@ -2643,7 +2573,7 @@ function App() {
     if (activeTab === "settings") fetchTextModels();
   }, [activeTab, fetchTextModels]);
 
-  const fetchPromptOptions = useCallback(async () => {
+  const fetchPromptOptions = useCallback(async (): Promise<void> => {
     try {
       const [titleRes, descRes, imgRes] = await Promise.all([
         fetch("/api/prompts/title"),
@@ -2667,7 +2597,7 @@ function App() {
     if (activeTab === "settings") fetchPromptOptions();
   }, [activeTab, fetchPromptOptions]);
 
-  const openPromptModal = useCallback((type, slot = null) => {
+  const openPromptModal = useCallback((type: string, slot: string | null = null): void => {
     setPromptModalType(type);
     setPromptModalSlot(slot);
     setPromptModalName("");
@@ -2677,7 +2607,7 @@ function App() {
     setPromptModalOpen(true);
   }, []);
 
-  const handleSavePrompt = useCallback(async () => {
+  const handleSavePrompt = useCallback(async (): Promise<void> => {
     const name = promptModalName.trim();
     const content = promptModalContent.trim();
     if (!name) { setPromptModalError("Name is required."); return; }
@@ -2704,15 +2634,13 @@ function App() {
     } catch { setPromptModalError("Network error."); setPromptModalSaving(false); }
   }, [promptModalType, promptModalSlot, promptModalName, promptModalContent, fetchPromptOptions]);
 
-  // If the persisted text model isn't in the available list (e.g. user
-  // removed the Bedrock key), fall back to the first available option.
   useEffect(() => {
     if (textModelOptions.length === 0) return;
     const isValid = textModelOptions.some((o) => o.value === textModel);
     if (!isValid) setTextModel(textModelOptions[0].value);
   }, [textModelOptions, textModel]);
 
-  const navItemClass = (tab, collapsed) =>
+  const navItemClass = (tab: TabName, collapsed: boolean): string =>
     `flex w-full items-center rounded-lg py-2 text-left text-sm transition-colors ${
       collapsed ? "justify-center px-2" : "gap-3 px-3"
     } ${
@@ -2721,7 +2649,7 @@ function App() {
         : "font-medium text-text-muted hover:bg-surface-hover hover:text-text-primary"
     }`;
 
-  const handleTestAppToken = async () => {
+  const handleTestAppToken = async (): Promise<void> => {
     setIsTestingAppToken(true);
     setAppTokenResult(null);
     try {
@@ -2732,13 +2660,13 @@ function App() {
       if (!response.ok) throw new Error(data.error || "Test failed");
       setAppTokenResult(data.result);
     } catch (err) {
-      setAppTokenResult({ ok: false, message: err.message });
+      setAppTokenResult({ ok: false, message: (err as Error).message });
     } finally {
       setIsTestingAppToken(false);
     }
   };
 
-  const handleTestUserToken = async () => {
+  const handleTestUserToken = async (): Promise<void> => {
     setIsTestingUserToken(true);
     setUserTokenResult(null);
     try {
@@ -2747,13 +2675,13 @@ function App() {
       if (!response.ok) throw new Error(data.error || "Test failed");
       setUserTokenResult(data.result);
     } catch (err) {
-      setUserTokenResult({ ok: false, message: err.message });
+      setUserTokenResult({ ok: false, message: (err as Error).message });
     } finally {
       setIsTestingUserToken(false);
     }
   };
 
-  const handleTestingFunction = async () => {
+  const handleTestingFunction = async (): Promise<void> => {
     setIsTesting(true);
     setTestingResult(null);
 
@@ -2785,13 +2713,13 @@ function App() {
       console.log("Testing function completed:", data.result);
     } catch (err) {
       console.error("Error running testing function:", err);
-      addToast("error", err.message || "An error occurred while running testing function");
+      addToast("error", (err as Error).message || "An error occurred while running testing function");
     } finally {
       setIsTesting(false);
     }
   };
 
-  const handleListingClick = async (listing) => {
+  const handleListingClick = async (listing: Listing): Promise<void> => {
     setSelectedListing(listing);
     setLoadingListingDetail(true);
 
@@ -2810,19 +2738,17 @@ function App() {
       setListingDetailData(data.listing_data);
     } catch (err) {
       console.error("Error fetching listing details:", err);
-      addToast("error", err.message || "An error occurred while fetching listing details");
+      addToast("error", (err as Error).message || "An error occurred while fetching listing details");
     } finally {
       setLoadingListingDetail(false);
     }
   };
 
-  const closeListingDetail = () => {
+  const closeListingDetail = (): void => {
     setSelectedListing(null);
     setListingDetailData(null);
   };
-
-  // Streams mock title+description character by character, mirroring startTextGeneration
-  const startTestTextGeneration = (title, description) => {
+  const startTestTextGeneration = (title: string, description: string): void => {
     if (testTextGenTimerRef.current) {
       clearInterval(testTextGenTimerRef.current);
       testTextGenTimerRef.current = null;
@@ -2840,7 +2766,6 @@ function App() {
       ...fullDesc.split("").map((ch) => ({ field: "desc", ch })),
     ];
     let idx = 0;
-    // Stream ~8 characters per tick at 16ms to finish in ~500ms
     testTextGenTimerRef.current = setInterval(() => {
       const batch = combined.slice(idx, idx + 8);
       idx += 8;
@@ -2849,7 +2774,7 @@ function App() {
       if (titleChars) setTestEditableTitle((prev) => prev + titleChars);
       if (descChars) setTestEditableDescription((prev) => prev + descChars);
       if (idx >= combined.length) {
-        clearInterval(testTextGenTimerRef.current);
+        clearInterval(testTextGenTimerRef.current!);
         testTextGenTimerRef.current = null;
         setTestEditableTitle(fullTitle);
         setTestEditableDescription(fullDesc);
@@ -2857,9 +2782,11 @@ function App() {
         setTestTextGenComplete(true);
       }
     }, 16);
+    void title;
+    void description;
   };
 
-  const cancelTestTextGeneration = () => {
+  const cancelTestTextGeneration = (): void => {
     if (testTextGenTimerRef.current) {
       clearInterval(testTextGenTimerRef.current);
       testTextGenTimerRef.current = null;
@@ -2869,8 +2796,7 @@ function App() {
     setTestTextGenComplete(false);
   };
 
-  // Mirrors handleCreateListing — runs after images + text are both done
-  const testHandleCreateListing = () => {
+  const testHandleCreateListing = (): void => {
     setTestIsCreatingListing(true);
     setTestError(null);
     const steps = [
@@ -2907,7 +2833,7 @@ function App() {
             },
           },
         };
-        setTestListingData(listingData);
+        setTestListingData(listingData as unknown as Listing);
         setTestUploadResult(null);
         setTestCreateListingProgress({
           isActive: false,
@@ -2920,8 +2846,7 @@ function App() {
     }, 400);
   };
 
-  // Test workflow mock handlers (no API calls)
-  const testHandleSubmit = (e) => {
+  const testHandleSubmit = (e: React.FormEvent): void => {
     e.preventDefault();
     if (!testListingId.trim()) {
       setTestError(
@@ -2966,7 +2891,7 @@ function App() {
       setTestPhotos(MOCK_DATA.photos);
       const initialCategories = classifyImagesEnabled
         ? MOCK_DATA.categories
-        : MOCK_DATA.photos.reduce((acc, url) => {
+        : MOCK_DATA.photos.reduce((acc: Record<string, string>, url: string) => {
             acc[url] = "bad_image";
             return acc;
           }, {});
@@ -2976,7 +2901,7 @@ function App() {
       setTestCurrentSku(MOCK_DATA.sku);
       setTestGeneratedImages([]);
       startTestTextGeneration(MOCK_DATA.listing.title, MOCK_DATA.listing.description);
-      const autoSkip = new Set();
+      const autoSkip = new Set<string>();
       if (classifyImagesEnabled) {
         for (const [url, cat] of Object.entries(MOCK_DATA.categories)) {
           if (cat === "real_world_image" || cat === "edited_image")
@@ -2997,7 +2922,7 @@ function App() {
     }, 1500);
   };
 
-  const testHandleConfirmCategories = () => {
+  const testHandleConfirmCategories = (): void => {
     const hasBgRemoved =
       autoBackgroundRemovalEnabled &&
       Object.keys(testBgRemovedPhotos).length > 0;
@@ -3044,11 +2969,9 @@ function App() {
       }
     }, 500);
   };
-
-  const testHandleUploadToEbay = async (sku, listingData) => {
+  const testHandleUploadToEbay = async (sku: string, listingData?: unknown): Promise<void> => {
     console.log("[TEST-UPLOAD] testHandleUploadToEbay called", { sku, listingData });
     if (testRealUploadEnabled) {
-      // Real upload mode: hit the dedicated test endpoint which uses real credentials
       setTestUploadingSkus((prev) => new Set(prev).add(sku));
       setTestError(null);
       const steps = ["Preparing listing data", "Uploading to eBay"];
@@ -3064,19 +2987,20 @@ function App() {
           "/api/upload-test-listing",
           { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
           (event) => {
+            const step = event.step as string;
             setTestUploadProgress((prev) => {
               const completed = [...prev.completedSteps];
-              if (event.status === "completed" && !completed.includes(event.step)) {
-                completed.push(event.step);
+              if (event.status === "completed" && !completed.includes(step)) {
+                completed.push(step);
               }
               return {
                 ...prev,
                 completedSteps: completed,
-                currentStep: event.status === "in_progress" ? event.step : prev.currentStep,
+                currentStep: event.status === "in_progress" ? step : prev.currentStep,
               };
             });
           }
-        );
+        ) as { upload_result?: UploadResult };
         console.log("[TEST-UPLOAD] Response:", data);
         if (!data?.upload_result) {
           throw new Error("Upload completed but no result returned");
@@ -3091,7 +3015,7 @@ function App() {
         });
       } catch (err) {
         console.error("[TEST-UPLOAD] Error:", err);
-        setTestError(err.message || "Real upload failed");
+        setTestError((err as Error).message || "Real upload failed");
         setTestUploadProgress({ isActive: false, currentStep: null, completedSteps: [], totalSteps: steps });
       } finally {
         setTestUploadingSkus((prev) => {
@@ -3103,7 +3027,6 @@ function App() {
       return;
     }
 
-    // Mock mode
     console.log("[TEST-UPLOAD] Running in mock mode");
     setTestUploadingSkus((prev) => new Set(prev).add(sku));
     setTestError(null);
@@ -3137,7 +3060,7 @@ function App() {
     }, 1000);
   };
 
-  const testHandleRegenerateImages = () => {
+  const testHandleRegenerateImages = (): void => {
     if (!testCustomPrompt.trim() || testSelectedImagesForRegen.length === 0) {
       setTestError("Please enter a prompt and select at least one image");
       return;
@@ -3160,7 +3083,7 @@ function App() {
     }, 800);
   };
 
-  const testHandleAddNewVersions = () => {
+  const testHandleAddNewVersions = (): void => {
     if (!testCustomPrompt?.trim()) {
       setTestError("Please enter a prompt");
       return;
@@ -3192,7 +3115,7 @@ function App() {
             },
           },
         };
-        setTestListingData(listingData);
+        setTestListingData(listingData as unknown as Listing);
         setTestEditableTitle(listingData.inventoryItem?.product?.title || "");
         setTestEditableDescription(
           listingData.inventoryItem?.product?.description || "",
@@ -3207,7 +3130,7 @@ function App() {
     }, 600);
   };
 
-  const testHandleChatSubmit = (prompt, context) => {
+  const testHandleChatSubmit = (prompt: string, context: string): void => {
     console.log("[Test] chat submit:", context, prompt);
     if (context === "title") {
       setTimeout(() => {
@@ -3226,7 +3149,7 @@ function App() {
     }
   };
 
-  const testHandleTrimSelected = async () => {
+  const testHandleTrimSelected = async (): Promise<void> => {
     const indices =
       testSelectedImagesForRegen.length > 0
         ? testSelectedImagesForRegen
@@ -3240,9 +3163,9 @@ function App() {
         const url = testGeneratedImages[index];
         const resp = await fetch(url);
         const blob = await resp.blob();
-        const dataUrl = await new Promise((resolve) => {
+        const dataUrl = await new Promise<string>((resolve) => {
           const reader = new FileReader();
-          reader.onload = (ev) => resolve(ev.target.result);
+          reader.onload = (ev) => resolve(ev.target!.result as string);
           reader.readAsDataURL(blob);
         });
         const trimmedUrl = await trimTransparentPadding(dataUrl);
@@ -3251,12 +3174,11 @@ function App() {
       setTestGeneratedImages(newImages);
     } catch (err) {
       console.error("Error trimming test images:", err);
-      setTestError(err.message || "An error occurred while trimming images");
+      setTestError((err as Error).message || "An error occurred while trimming images");
     } finally {
       setTestIsTrimming(false);
     }
   };
-
   return (
     <div className="flex min-h-screen bg-surface-app text-text-primary">
       <ToastContainer toasts={toasts} onRemove={removeToast} />
@@ -3353,8 +3275,8 @@ function App() {
               onClick={() => handleTabChange("settings")}
               title={
                 sidebarCollapsed
-                  ? `Settings – eBay tokens, last updated: ${formatTimeAgo(tokenLastUpdated)}`
-                  : `eBay tokens – last updated: ${formatTimeAgo(tokenLastUpdated)}`
+                  ? `Settings \u2013 eBay tokens, last updated: ${formatTimeAgo(tokenLastUpdated)}`
+                  : `eBay tokens \u2013 last updated: ${formatTimeAgo(tokenLastUpdated)}`
               }
             >
               <Settings size={20} strokeWidth={1.75} className="shrink-0" />
@@ -3438,7 +3360,7 @@ function App() {
               listingData={testListingData}
               editableTitle={testEditableTitle}
               editableDescription={testEditableDescription}
-              uploadResult={testUploadResult}
+              uploadResult={testUploadResult as UploadResult | null}
               isEditorOpen={testIsEditorOpen}
               fetchProgress={testFetchProgress}
               imageGenProgress={testImageGenProgress}
@@ -3487,7 +3409,7 @@ function App() {
               onTrimSelected={testHandleTrimSelected}
               onAddNewVersions={testHandleAddNewVersions}
               onCustomPromptChange={setTestCustomPrompt}
-              onDragEnd={(result) => {
+              onDragEnd={(result: DropResult) => {
                 if (!result.destination) return;
                 const src = result.source.index,
                   dest = result.destination.index;
@@ -3556,7 +3478,6 @@ function App() {
               onError={(msg) => addToast("error", msg)}
             />
           )}
-
           {activeTab === "logs" && (
             <LogsTab
               onNavigateToSku={(sku) => {
@@ -3593,7 +3514,6 @@ function App() {
                 onViewModeChange={handleHistoryViewModeChange}
               />
 
-              {/* Select / bulk-action controls */}
               <div className="mb-3 flex items-center gap-3">
                 <button
                   type="button"
@@ -3642,39 +3562,38 @@ function App() {
                     {paginatedListings.map((listing) =>
                       historyViewMode === "compact" ? (
                         <CompactListingRow
-                          key={listing.sku}
+                          key={listing.sku!}
                           listing={listing}
                           onCardClick={handleListingClick}
-                          onUpload={(l) => handleUploadToEbay(l.sku, l)}
-                          isUploading={uploadingSkus.has(listing.sku)}
-                          uploadResult={uploadResults[listing.sku]}
-                          quantity={listingQuantities[listing.sku]}
+                          onUpload={(l) => handleUploadToEbay(l.sku!, l)}
+                          isUploading={uploadingSkus.has(listing.sku!)}
+                          uploadResult={uploadResults[listing.sku!]}
+                          quantity={listingQuantities[listing.sku!]}
                           loadingQuantity={loadingQuantities}
                           isManual={!!listing.isManualListing}
                           isSelectMode={historySelectMode}
-                          isSelected={historySelectedSkus.has(listing.sku)}
-                          onToggleSelect={() => toggleHistorySkuSelection(listing.sku)}
+                          isSelected={historySelectedSkus.has(listing.sku!)}
+                          onToggleSelect={() => toggleHistorySkuSelection(listing.sku!)}
                         />
                       ) : (
                         <GeneratedListingCard
-                          key={listing.sku}
+                          key={listing.sku!}
                           listing={listing}
                           onCardClick={handleListingClick}
-                          onUpload={(l) => handleUploadToEbay(l.sku, l)}
-                          isUploading={uploadingSkus.has(listing.sku)}
-                          uploadResult={uploadResults[listing.sku]}
-                          quantity={listingQuantities[listing.sku]}
+                          onUpload={(l) => handleUploadToEbay(l.sku!, l)}
+                          isUploading={uploadingSkus.has(listing.sku!)}
+                          uploadResult={uploadResults[listing.sku!]}
+                          quantity={listingQuantities[listing.sku!]}
                           loadingQuantity={loadingQuantities}
                           isManual={!!listing.isManualListing}
                           isSelectMode={historySelectMode}
-                          isSelected={historySelectedSkus.has(listing.sku)}
-                          onToggleSelect={() => toggleHistorySkuSelection(listing.sku)}
+                          isSelected={historySelectedSkus.has(listing.sku!)}
+                          onToggleSelect={() => toggleHistorySkuSelection(listing.sku!)}
                         />
                       )
                     )}
                   </div>
 
-                  {/* Pagination controls */}
                   <div className="mt-6 flex flex-wrap items-center justify-between gap-4">
                     <div className="flex items-center gap-2">
                       <button
@@ -3684,7 +3603,7 @@ function App() {
                         onClick={() => setHistoryPage((p) => p - 1)}
                         className="flex h-9 w-9 items-center justify-center rounded-lg border border-border-default bg-surface-panel text-text-primary shadow-sm transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
                       >
-                        ‹
+                        &#8249;
                       </button>
                       <span className="min-w-28 text-center text-sm text-text-muted">
                         Page {historyPage + 1} of {totalHistoryPages}
@@ -3696,7 +3615,7 @@ function App() {
                         onClick={() => setHistoryPage((p) => p + 1)}
                         className="flex h-9 w-9 items-center justify-center rounded-lg border border-border-default bg-surface-panel text-text-primary shadow-sm transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-40"
                       >
-                        ›
+                        &#8250;
                       </button>
                     </div>
 
@@ -3720,8 +3639,6 @@ function App() {
               )}
             </div>
           )}
-
-          {/* Auto-restock confirmation modal */}
           {autoRestockConfirm && (
             <div
               className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4"
@@ -3761,7 +3678,6 @@ function App() {
             </div>
           )}
 
-          {/* Listing Detail Modal */}
           {selectedListing && (
             <div
               className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4"
@@ -3779,7 +3695,7 @@ function App() {
                     className="flex h-10 w-10 items-center justify-center rounded-full border-none bg-surface-muted text-2xl text-text-muted transition-all hover:rotate-90 hover:bg-surface-hover hover:text-text-primary"
                     onClick={closeListingDetail}
                   >
-                    ×
+                    &times;
                   </button>
                 </div>
 
@@ -3840,7 +3756,7 @@ function App() {
                 >
                   {isTesting ? "Running..." : "Run Testing Function"}
                 </button>
-                {testingResult && (
+                {!!testingResult && (
                   <div className="rounded-lg border border-border-default bg-surface-muted p-4">
                     <h3 className="mb-2 font-semibold text-text-primary">
                       Result:
@@ -3853,11 +3769,10 @@ function App() {
                   </div>
                 )}
                 <hr className="border-border-default" />
-                <ThreeDFileFinder addToast={addToast} />
+                <ThreeDFileFinder addToast={addToast as (type: string, message: string) => void} />
               </div>
             </div>
           )}
-
           {activeTab === "settings" && (
             <div className="animate-token-slide-down rounded-xl border border-border-default bg-surface-panel p-6 shadow-sm md:p-8">
               <div className="mb-6 flex flex-wrap items-center justify-between gap-2">
@@ -4043,7 +3958,7 @@ function App() {
                       onChange={(e) => setTextModel(e.target.value)}
                     >
                       {Object.entries(
-                        textModelOptions.reduce((acc, option) => {
+                        textModelOptions.reduce<Record<string, ModelOption[]>>((acc, option) => {
                           const key = option.provider || "openrouter";
                           (acc[key] = acc[key] || []).push(option);
                           return acc;
@@ -4070,7 +3985,7 @@ function App() {
                       onChange={(e) => setImageModel(e.target.value)}
                     >
                       {Object.entries(
-                        IMAGE_MODEL_OPTIONS.reduce((acc, option) => {
+                        IMAGE_MODEL_OPTIONS.reduce<Record<string, ImageModelOption[]>>((acc, option) => {
                           const key = option.provider || "openrouter";
                           (acc[key] = acc[key] || []).push(option);
                           return acc;
@@ -4176,12 +4091,14 @@ function App() {
                 <div>
                   <p className="mb-2 text-sm font-semibold text-text-primary">Image</p>
                   <div className="grid gap-3">
-                    {[
-                      { label: "Real World", slot: "real_world", value: imagePromptRealWorld, setter: setImagePromptRealWorld },
-                      { label: "Professional", slot: "professional", value: imagePromptProfessional, setter: setImagePromptProfessional },
-                      { label: "Angle Variant", slot: "angle_variant", value: imagePromptAngleVariant, setter: setImagePromptAngleVariant },
-                      { label: "Experimental", slot: "experimental", value: imagePromptExperimental, setter: setImagePromptExperimental },
-                    ].map(({ label, slot, value, setter }) => (
+                    {(
+                      [
+                        { label: "Real World", slot: "real_world", value: imagePromptRealWorld, setter: setImagePromptRealWorld },
+                        { label: "Professional", slot: "professional", value: imagePromptProfessional, setter: setImagePromptProfessional },
+                        { label: "Angle Variant", slot: "angle_variant", value: imagePromptAngleVariant, setter: setImagePromptAngleVariant },
+                        { label: "Experimental", slot: "experimental", value: imagePromptExperimental, setter: setImagePromptExperimental },
+                      ] as Array<{ label: string; slot: string; value: string; setter: React.Dispatch<React.SetStateAction<string>> }>
+                    ).map(({ label, slot, value, setter }) => (
                       <div key={slot} className="flex items-center gap-2">
                         <span className="w-28 shrink-0 text-sm text-text-muted">{label}</span>
                         <select
@@ -4258,7 +4175,7 @@ function App() {
                 >
                   Last updated:{" "}
                   {tokenLastUpdated
-                    ? `${formatTimeAgo(tokenLastUpdated)}${isTokenStale ? " — tokens may be expired!" : ""}`
+                    ? `${formatTimeAgo(tokenLastUpdated)}${isTokenStale ? " \u2014 tokens may be expired!" : ""}`
                     : "never"}
                 </div>
 
@@ -4325,7 +4242,6 @@ function App() {
               </div>
             </div>
           )}
-
           {activeTab === "create" && (
             <CreateWorkflow
               listingId={listingId}

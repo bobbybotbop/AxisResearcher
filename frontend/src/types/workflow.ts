@@ -37,4 +37,9 @@ export interface TestWorkflowState {
   uploadingSkus: Set<string>;
   bgRemovedPhotos: Record<string, string>;
   bgRemovalProgress: ProgressState;
+  customPrompt: string;
+  selectedImagesForRegen: number[];
+  isTrimming: boolean;
+  isAddingNewVersions: boolean;
+  promptModifier: string;
 }
