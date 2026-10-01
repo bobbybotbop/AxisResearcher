@@ -40,6 +40,8 @@ from flask_cors import CORS
 from werkzeug.serving import WSGIRequestHandler
 from backend.copyScripts.CopyListingMain import copy_listing_main, testing_function
 from backend.serp import search_by_image, extract_top_links
+from backend.downloaders.thingiverse import extract_thing_id, stream_zip as tv_stream_zip
+from backend.downloaders.printables import extract_model_id as printables_model_id, build_zip as printables_build_zip
 from backend.copyScripts.create_image import (
     generate_image_from_urls,
     ImageType,
@@ -62,6 +64,7 @@ from backend.copyScripts.imageEditing import remove_background, compile_images, 
 from backend.copyScripts.upload_to_ebay import upload_complete_listing
 from backend.promoted_listings import promote_listing, PromotionError
 from backend.logger import log_event
+import re
 import requests
 from dotenv import load_dotenv
 
@@ -2577,6 +2580,60 @@ def serp_lens_search():
     except Exception as e:
         print(f"[API] SerpAPI lens error: {e}")
         return jsonify({"error": f"SerpAPI search failed: {str(e)}"}), 500
+
+
+@app.route('/api/download-3d-file', methods=['POST'])
+def download_3d_file():
+    """
+    Download a 3D file from a supported site and return it as a zip attachment.
+
+    Expects JSON: {"link": "https://..."}
+    Supported: thingiverse.com, printables.com
+    """
+    try:
+        data = request.get_json()
+        if not data or not data.get("link"):
+            return jsonify({"error": "link is required"}), 400
+
+        link = data["link"].strip()
+
+        # --- Thingiverse ---
+        if "thingiverse.com" in link:
+            thing_id = extract_thing_id(link)
+            print(f"[API] Downloading Thingiverse thing:{thing_id}")
+            filename, gen = tv_stream_zip(thing_id)
+            return Response(
+                stream_with_context(gen),
+                status=200,
+                mimetype="application/zip",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        # --- Printables ---
+        if "printables.com" in link:
+            model_id = printables_model_id(link)
+            print(f"[API] Downloading Printables model:{model_id}")
+            filename, zip_bytes = printables_build_zip(model_id)
+            return Response(
+                zip_bytes,
+                status=200,
+                mimetype="application/zip",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        return jsonify({"error": "Unsupported site — only Thingiverse and Printables are supported"}), 400
+
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except requests.exceptions.HTTPError as e:
+        print(f"[API] download-3d-file HTTP error: {e}")
+        return jsonify({"error": f"Upstream download failed: {e.response.status_code}"}), 502
+    except requests.exceptions.RequestException as e:
+        print(f"[API] download-3d-file request error: {e}")
+        return jsonify({"error": "Download request failed"}), 502
+    except Exception as e:
+        print(f"[API] download-3d-file error: {e}")
+        return jsonify({"error": f"Download failed: {str(e)}"}), 500
 
 
 @app.route('/api/remove-background', methods=['POST'])
