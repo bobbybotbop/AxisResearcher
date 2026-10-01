@@ -1,28 +1,7 @@
 import os
 from serpapi import GoogleSearch
 from urllib.parse import urlparse
-
-
-WHITELISTED_SITES = [
-    "makerworld.com",
-    "printables.com",
-    "yeggi.com",
-    "cults3d.com",
-    "thingiverse.com",
-    "myminifactory.com",
-    "thangs.com",
-]
-
-BLACKLISTED_SITES = [
-    "ebay.com",
-    "amazon.com",
-    "walmart.com",
-    "etsy.com",
-    "aliexpress.com",
-    "temu.com",
-    "mercari.com",
-    "poshmark.com",
-]
+from backend.constants.serp import WHITELISTED_SITES, BLACKLISTED_SITES
 
 
 def _classify_site(link: str) -> str:
