@@ -1,6 +1,6 @@
 import { useState } from "react";
 import MessageBarInput from "./MessageBarInput";
-import { btnPill } from "../styles/buttonPill";
+import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
 
 interface SearchResult {
@@ -34,8 +34,12 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
         body: JSON.stringify({ link }),
       });
       if (!res.ok) {
-        const err = await res.json() as { error?: string };
-        throw new Error(err.error || `Download failed (${res.status})`);
+        let errMsg = `Download failed (${res.status})`;
+        try {
+          const err = await res.json() as { error?: string };
+          if (err.error) errMsg = err.error;
+        } catch { /* ignore parse failure */ }
+        throw new Error(errMsg);
       }
       const disposition = res.headers.get("Content-Disposition") || "";
       const nameMatch = disposition.match(/filename="?([^"]+)"?/);
@@ -188,7 +192,6 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
           </p>
           <ol className="flex flex-col gap-2">
             {searchResults.map((r, i) => {
-              const isWhitelisted = r.site_type === "whitelisted";
               const hostname = (() => {
                 try { return new URL(r.link).hostname; } catch { return r.link; }
               })();
@@ -201,11 +204,7 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
               return (
                 <li
                   key={r.link}
-                  className={`flex items-center gap-3 rounded-lg border p-3 transition-colors ${
-                    isWhitelisted
-                      ? "border-green-500/40 bg-green-500/5"
-                      : "border-border-default bg-surface-muted"
-                  }`}
+                  className="flex items-center gap-3 rounded-lg border p-3 transition-colors border-green-500/40 bg-green-500/5"
                 >
                   <span className="shrink-0 text-sm font-bold text-text-muted w-5 text-right">
                     {i + 1}.
@@ -227,11 +226,9 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
                       >
                         {r.title || r.link}
                       </a>
-                      {isWhitelisted && (
-                        <span className="shrink-0 rounded-full bg-green-500/15 px-2 py-0.5 text-xs font-medium text-green-400">
-                          3D site
-                        </span>
-                      )}
+                      <span className="shrink-0 rounded-full bg-green-500/15 px-2 py-0.5 text-xs font-medium text-green-400">
+                        3D site
+                      </span>
                     </div>
                     <p className="truncate text-xs text-text-muted">
                       {r.source || hostname}
@@ -240,7 +237,7 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
                   {canDownload && (
                     <button
                       type="button"
-                      className={btnPill}
+                      className={btnPillSm}
                       onClick={() => handleDownload(r.link)}
                       disabled={isAnyDownloading}
                     >
