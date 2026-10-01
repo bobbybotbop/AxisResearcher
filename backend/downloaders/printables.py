@@ -63,6 +63,8 @@ def _list_files(model_id: str) -> tuple[str, list[dict]]:
     Only STL, GCode, and SLA files are included.
     """
     data = _gql(LIST_FILES_QUERY, {"id": model_id})["print"]
+    if data is None:
+        raise ValueError(f"Model {model_id} not found on Printables")
     model_name = data.get("name", f"printables_{model_id}")
     files = []
     for kind, file_type in [("stls", "stl"), ("gcodes", "gcode"), ("slas", "sla")]:
@@ -82,7 +84,11 @@ def _get_download_link(file_id: str, model_id: str, file_type: str) -> str:
     if not result.get("ok"):
         errors = result.get("errors", [])
         raise RuntimeError(f"getDownloadLink failed: {errors}")
-    return result["output"]["link"]
+    output = result.get("output") or {}
+    link = output.get("link")
+    if not link:
+        raise RuntimeError(f"getDownloadLink returned ok=True but no link for file {file_id}")
+    return link
 
 
 def build_zip(model_id: str) -> tuple[str, bytes]:
@@ -97,6 +103,7 @@ def build_zip(model_id: str) -> tuple[str, bytes]:
         raise ValueError(f"No downloadable files found for model {model_id}")
 
     buf = io.BytesIO()
+    succeeded = 0
     with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
         for f in files:
             try:
@@ -104,9 +111,12 @@ def build_zip(model_id: str) -> tuple[str, bytes]:
                 r = requests.get(url, timeout=30)
                 r.raise_for_status()
                 zf.writestr(f["name"], r.content)
+                succeeded += 1
             except Exception as e:
-                # Skip files that can't be downloaded rather than aborting the whole zip.
                 print(f"[printables] skipping {f['name']}: {e}")
+
+    if succeeded == 0:
+        raise RuntimeError(f"All {len(files)} files failed to download for model {model_id}")
 
     zip_bytes = buf.getvalue()
     safe_name = re.sub(r'[^\w\-.]', '_', model_name)
