@@ -70,7 +70,7 @@ from dotenv import load_dotenv
 
 app = Flask(__name__)
 # Enable CORS for all routes to allow React frontend to make requests
-CORS(app, origins=["http://localhost:3000", "http://localhost:5173", "http://localhost:5174"])
+CORS(app, origins=["http://localhost:3000", "http://localhost:5173", "http://localhost:5174"], expose_headers=["Content-Disposition"])
 
 # In-memory storage for image generation task progress
 # Structure: {task_id: {"status": "running|completed|failed", "total": N, "completed": M, "results": [], "errors": []}}
