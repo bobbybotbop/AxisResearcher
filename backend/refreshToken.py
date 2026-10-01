@@ -29,21 +29,7 @@ CLIENT_SECRET = os.getenv('client_secret')
 REDIRECT_URI = os.getenv('redirect_uri') or os.getenv('redirect_url')
 REFRESH_TOKEN = os.getenv('refresh_token')
 
-# OAuth endpoints (production only)
-AUTH_URL = "https://auth.ebay.com/oauth2/authorize"
-TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
-
-# Keys we can write via update_env (aligned with env_template)
-ENV_TOKEN_KEYS = ('application_token', 'user_token', 'refresh_token', 'auth_code')
-
-# Default scopes for user consent, exchange, and refresh (must match across all three)
-# User token is used for: Sell Inventory API, Trading API (UploadSiteHostedPictures)
-# Application token (separate) handles: Browse API, Commerce Taxonomy
-DEFAULT_USER_SCOPES = [
-    "https://api.ebay.com/oauth/api_scope",           # Trading API (image upload), legacy compatibility
-    "https://api.ebay.com/oauth/api_scope/sell.inventory",  # Inventory API (create listing, offer, publish, location)
-    "https://api.ebay.com/oauth/api_scope/sell.marketing",  # Marketing API (Promoted Listings)
-]
+from backend.constants.ebay import AUTH_URL, TOKEN_URL, ENV_TOKEN_KEYS, DEFAULT_USER_SCOPES
 
 
 def _env_path():
