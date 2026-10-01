@@ -30,7 +30,11 @@ def stream_zip(thing_id: str) -> tuple[str, Generator[bytes, None, None]]:
     """
     url = THINGIVERSE_ZIP.format(thing_id=thing_id)
     r = requests.get(url, headers=HEADERS, stream=True, timeout=60)
-    r.raise_for_status()
+    try:
+        r.raise_for_status()
+    except requests.exceptions.HTTPError:
+        r.close()
+        raise
 
     # Honour the server's filename if provided, else fall back.
     disp = r.headers.get("Content-Disposition", "")

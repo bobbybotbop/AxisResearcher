@@ -2625,6 +2625,9 @@ def download_3d_file():
 
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
+    except RuntimeError as e:
+        print(f"[API] download-3d-file upstream error: {e}")
+        return jsonify({"error": str(e)}), 502
     except requests.exceptions.HTTPError as e:
         print(f"[API] download-3d-file HTTP error: {e}")
         return jsonify({"error": f"Upstream download failed: {e.response.status_code}"}), 502
