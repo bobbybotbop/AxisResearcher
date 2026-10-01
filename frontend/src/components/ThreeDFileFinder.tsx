@@ -23,6 +23,36 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [downloadingLink, setDownloadingLink] = useState<string | null>(null);
+
+  const handleDownload = async (link: string) => {
+    setDownloadingLink(link);
+    try {
+      const res = await fetch("/api/download-3d-file", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ link }),
+      });
+      if (!res.ok) {
+        const err = await res.json() as { error?: string };
+        throw new Error(err.error || `Download failed (${res.status})`);
+      }
+      const disposition = res.headers.get("Content-Disposition") || "";
+      const nameMatch = disposition.match(/filename="?([^"]+)"?/);
+      const filename = nameMatch ? nameMatch[1] : "download.zip";
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      addToast?.("error", (err as Error).message || "Download failed");
+    } finally {
+      setDownloadingLink(null);
+    }
+  };
 
   const handleSubmitLink = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -73,8 +103,9 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
       if (!res.ok || data.error) {
         throw new Error(data.error || "Search failed");
       }
-      setSearchResults(data.results || []);
-      if (!data.results || data.results.length === 0) {
+      const filtered = (data.results || []).filter(r => r.site_type === "whitelisted");
+      setSearchResults(filtered);
+      if (filtered.length === 0) {
         addToast?.("info", "No 3D file results found for this image");
       }
     } catch (err) {
@@ -158,22 +189,25 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
           <ol className="flex flex-col gap-2">
             {searchResults.map((r, i) => {
               const isWhitelisted = r.site_type === "whitelisted";
-              const isBlacklisted = r.site_type === "blacklisted";
               const hostname = (() => {
                 try { return new URL(r.link).hostname; } catch { return r.link; }
               })();
+              const canDownload =
+                /thingiverse\.com\/thing[:/]\d+/.test(r.link) ||
+                /printables\.com\/model\/\d+/.test(r.link);
+              const isDownloading = downloadingLink === r.link;
+              const isAnyDownloading = downloadingLink !== null;
+
               return (
                 <li
                   key={r.link}
-                  className={`flex items-start gap-3 rounded-lg border p-3 transition-colors ${
+                  className={`flex items-center gap-3 rounded-lg border p-3 transition-colors ${
                     isWhitelisted
-                      ? "border-green-500/40 bg-green-500/5 hover:bg-green-500/10"
-                      : isBlacklisted
-                        ? "border-red-500/30 bg-red-500/5 hover:bg-red-500/10 opacity-60"
-                        : "border-border-default bg-surface-muted hover:bg-surface-hover"
+                      ? "border-green-500/40 bg-green-500/5"
+                      : "border-border-default bg-surface-muted"
                   }`}
                 >
-                  <span className="mt-0.5 shrink-0 text-sm font-bold text-text-muted">
+                  <span className="shrink-0 text-sm font-bold text-text-muted w-5 text-right">
                     {i + 1}.
                   </span>
                   {r.thumbnail && (
@@ -198,16 +232,21 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
                           3D site
                         </span>
                       )}
-                      {isBlacklisted && (
-                        <span className="shrink-0 rounded-full bg-red-500/15 px-2 py-0.5 text-xs font-medium text-red-400">
-                          marketplace
-                        </span>
-                      )}
                     </div>
                     <p className="truncate text-xs text-text-muted">
                       {r.source || hostname}
                     </p>
                   </div>
+                  {canDownload && (
+                    <button
+                      type="button"
+                      className={btnPill}
+                      onClick={() => handleDownload(r.link)}
+                      disabled={isAnyDownloading}
+                    >
+                      {isDownloading ? "Downloading..." : "Download"}
+                    </button>
+                  )}
                 </li>
               );
             })}
