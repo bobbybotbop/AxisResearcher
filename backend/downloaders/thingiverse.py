@@ -34,12 +34,21 @@ def stream_zip(thing_id: str) -> tuple[str, Generator[bytes, None, None]]:
 
     # Honour the server's filename if provided, else fall back.
     disp = r.headers.get("Content-Disposition", "")
-    name_match = re.search(r'filename="?([^"]+)"?', disp)
-    filename = name_match.group(1) if name_match else f"thing_{thing_id}.zip"
+    filename = f"thing_{thing_id}.zip"  # default
+    for part in disp.split(";"):
+        part = part.strip()
+        if part.lower().startswith("filename="):
+            candidate = part[9:].strip("\"' ")
+            if candidate:
+                filename = candidate
+            break
 
     def _gen() -> Generator[bytes, None, None]:
-        for chunk in r.iter_content(chunk_size=8192):
-            if chunk:
-                yield chunk
+        try:
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+        finally:
+            r.close()
 
     return filename, _gen()
