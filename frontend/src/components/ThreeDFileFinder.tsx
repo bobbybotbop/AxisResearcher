@@ -200,7 +200,95 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
           </div>
         )}
       </div>
-      {/* steps 2 and 3 go here — added in tasks 3–4 */}
+      {/* Step 2 — Reverse Image Search */}
+      <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
+        <p className="text-sm font-semibold text-text-primary">Step 2 — Reverse Image Search</p>
+        <div className="flex items-center gap-3">
+          <div className="flex-1">
+            <MessageBarInput
+              value={step2ImageUrl}
+              onChange={setStep2ImageUrl}
+              placeholder="Paste image URL..."
+              disabled={step2Loading}
+              loading={step2Loading}
+              aria-label="Image URL"
+              fullWidth
+            />
+          </div>
+          {step2ImageUrl && (
+            <img
+              src={step2ImageUrl}
+              alt=""
+              className="h-8 w-8 shrink-0 rounded object-cover"
+              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+              onLoad={(e) => { (e.target as HTMLImageElement).style.display = ""; }}
+            />
+          )}
+          <button
+            type="button"
+            className={btnPill}
+            onClick={handleStep2Search}
+            disabled={!step2ImageUrl.trim() || step2Loading}
+          >
+            {step2Loading ? "Searching..." : "Search"}
+          </button>
+        </div>
+        {step2Results.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs text-text-muted">Results ({step2Results.length})</p>
+            <ol className="flex flex-col gap-2">
+              {step2Results.map((r, i) => {
+                const hostname = (() => {
+                  try { return new URL(r.link).hostname; } catch { return r.link; }
+                })();
+                return (
+                  <li
+                    key={r.link}
+                    className="flex items-center gap-3 rounded-lg border border-green-500/40 bg-green-500/5 p-3"
+                  >
+                    <span className="w-5 shrink-0 text-right text-sm font-bold text-text-muted">
+                      {i + 1}.
+                    </span>
+                    {r.thumbnail && (
+                      <img
+                        src={r.thumbnail}
+                        alt=""
+                        className="h-10 w-10 shrink-0 rounded object-cover"
+                      />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={r.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm font-medium text-primary hover:underline"
+                        >
+                          {r.title || r.link}
+                        </a>
+                        <span className="shrink-0 rounded-full bg-green-500/15 px-2 py-0.5 text-xs font-medium text-green-400">
+                          3D site
+                        </span>
+                      </div>
+                      <p className="truncate text-xs text-text-muted">{r.source || hostname}</p>
+                    </div>
+                    {canForwardToStep3(r.link) && (
+                      <button
+                        type="button"
+                        className={btnPillSm}
+                        onClick={() => setStep3Url(r.link)}
+                      >
+                        Use →
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
+        )}
+      </div>
+      {/* step 3 goes here — added in task 4 */}
     </div>
   );
 }
