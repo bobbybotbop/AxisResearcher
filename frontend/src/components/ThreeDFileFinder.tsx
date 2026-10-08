@@ -1,7 +1,6 @@
 import { useState } from "react";
 import MessageBarInput from "./MessageBarInput";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
-import { fetchWithProgress } from "../utils/fetchWithProgress";
 
 interface SearchResult {
   site_type?: string;
@@ -16,17 +15,100 @@ interface ThreeDFileFinderProps {
 }
 
 function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
-  const [linkValue, setLinkValue] = useState("");
-  const [photos, setPhotos] = useState<string[]>([]);
-  const [listingTitle, setListingTitle] = useState("");
-  const [fetchingPhotos, setFetchingPhotos] = useState(false);
-  const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [downloadingLink, setDownloadingLink] = useState<string | null>(null);
+  // Step 1 — Fetch eBay Photos
+  const [step1Link, setStep1Link] = useState("");
+  const [step1Photos, setStep1Photos] = useState<string[]>([]);
+  const [step1Title, setStep1Title] = useState("");
+  const [step1Loading, setStep1Loading] = useState(false);
+  const [step1Selected, setStep1Selected] = useState<string | null>(null);
 
-  const handleDownload = async (link: string) => {
-    setDownloadingLink(link);
+  // Step 2 — Reverse Image Search
+  const [step2ImageUrl, setStep2ImageUrl] = useState("");
+  const [step2Results, setStep2Results] = useState<SearchResult[]>([]);
+  const [step2Loading, setStep2Loading] = useState(false);
+
+  // Step 3 — Download 3D File
+  const [step3Url, setStep3Url] = useState("");
+  const [step3Loading, setStep3Loading] = useState(false);
+  const [step3Result, setStep3Result] = useState<{ filename: string; bytes: number } | null>(null);
+  const [step3Error, setStep3Error] = useState<string | null>(null);
+
+  // True when step3Url is a supported downloadable pattern
+  const step3Supported =
+    /thingiverse\.com\/thing[:/]\d+/.test(step3Url.trim()) ||
+    /printables\.com\/model\/\d+/.test(step3Url.trim());
+
+  // True when a result link can be forwarded to Step 3
+  const canForwardToStep3 = (link: string) =>
+    /thingiverse\.com\/thing[:/]\d+/.test(link) ||
+    /printables\.com\/model\/\d+/.test(link);
+
+  const formatBytes = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const handleStep1Submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = step1Link.trim();
+    if (!trimmed) {
+      addToast?.("error", "Please enter an eBay listing ID or URL");
+      return;
+    }
+    setStep1Loading(true);
+    setStep1Photos([]);
+    setStep1Title("");
+    setStep1Selected(null);
+    try {
+      const res = await fetch(`/api/photos/${encodeURIComponent(trimmed)}?classify=false`);
+      const data = await res.json() as {
+        photos?: string[];
+        listing?: { title?: string };
+        error?: string;
+      };
+      if (!res.ok || data.error) throw new Error(data.error || "Failed to fetch photos");
+      const photos = data.photos || [];
+      setStep1Photos(photos);
+      setStep1Title(data.listing?.title || "");
+      if (photos.length > 0) setStep1Selected(photos[0]);
+    } catch (err) {
+      addToast?.("error", (err as Error).message || "Failed to fetch listing photos");
+    } finally {
+      setStep1Loading(false);
+      setStep1Link("");
+    }
+  };
+
+  const handleStep2Search = async () => {
+    const url = step2ImageUrl.trim();
+    if (!url) return;
+    setStep2Loading(true);
+    setStep2Results([]);
+    try {
+      const res = await fetch("/api/serp-lens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image_url: url }),
+      });
+      const data = await res.json() as { error?: string; results?: SearchResult[] };
+      if (!res.ok || data.error) throw new Error(data.error || "Search failed");
+      const filtered = (data.results || []).filter(r => r.site_type === "whitelisted");
+      setStep2Results(filtered);
+      if (filtered.length === 0) addToast?.("info", "No 3D file results found for this image");
+    } catch (err) {
+      addToast?.("error", (err as Error).message || "Search failed");
+    } finally {
+      setStep2Loading(false);
+    }
+  };
+
+  const handleStep3Download = async () => {
+    const link = step3Url.trim();
+    if (!link || !step3Supported) return;
+    setStep3Loading(true);
+    setStep3Result(null);
+    setStep3Error(null);
     try {
       const res = await fetch("/api/download-3d-file", {
         method: "POST",
@@ -45,211 +127,29 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
       const nameMatch = disposition.match(/filename="?([^"]+)"?/);
       const filename = nameMatch ? nameMatch[1] : "download.zip";
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const downloadUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
+      a.href = downloadUrl;
       a.download = filename;
       a.click();
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(downloadUrl);
+      setStep3Result({ filename, bytes: blob.size });
     } catch (err) {
-      addToast?.("error", (err as Error).message || "Download failed");
+      setStep3Error((err as Error).message || "Download failed");
     } finally {
-      setDownloadingLink(null);
-    }
-  };
-
-  const handleSubmitLink = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = linkValue.trim();
-    if (!trimmed) {
-      addToast?.("error", "Please enter an eBay listing ID or URL");
-      return;
-    }
-
-    setFetchingPhotos(true);
-    setPhotos([]);
-    setListingTitle("");
-    setSelectedPhoto(null);
-    setSearchResults([]);
-
-    try {
-      const data = await fetchWithProgress(
-        `/api/photos/${encodeURIComponent(trimmed)}?classify=false`,
-        {},
-        () => {},
-      ) as { photos?: string[]; listing?: { title?: string } };
-      setPhotos(data.photos || []);
-      setListingTitle(data.listing?.title || "");
-      if (data.photos && data.photos.length > 0) {
-        setSelectedPhoto(data.photos[0]);
-      }
-    } catch (err) {
-      addToast?.("error", (err as Error).message || "Failed to fetch listing photos");
-    } finally {
-      setFetchingPhotos(false);
-      setLinkValue("");
-    }
-  };
-
-  const handleSearch = async () => {
-    if (!selectedPhoto) return;
-
-    setSearching(true);
-    setSearchResults([]);
-
-    try {
-      const res = await fetch("/api/serp-lens", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image_url: selectedPhoto }),
-      });
-      const data = await res.json() as { error?: string; results?: SearchResult[] };
-      if (!res.ok || data.error) {
-        throw new Error(data.error || "Search failed");
-      }
-      const filtered = (data.results || []).filter(r => r.site_type === "whitelisted");
-      setSearchResults(filtered);
-      if (filtered.length === 0) {
-        addToast?.("info", "No 3D file results found for this image");
-      }
-    } catch (err) {
-      addToast?.("error", (err as Error).message || "Serper search failed");
-    } finally {
-      setSearching(false);
+      setStep3Loading(false);
     }
   };
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <div>
-        <h3 className="mb-1 text-lg font-semibold text-text-primary">
-          3D File Finder
-        </h3>
+        <h3 className="mb-1 text-lg font-semibold text-text-primary">3D File Finder</h3>
         <p className="text-sm text-text-muted">
-          Paste an eBay listing link to find the original 3D print file.
+          Test each step independently or run the full pipeline top to bottom.
         </p>
       </div>
-
-      <form onSubmit={handleSubmitLink} className="flex items-end gap-3">
-        <div className="flex-1">
-          <MessageBarInput
-            value={linkValue}
-            onChange={setLinkValue}
-            placeholder="Paste eBay listing URL or item ID..."
-            disabled={fetchingPhotos}
-            loading={fetchingPhotos}
-            aria-label="eBay listing URL"
-            fullWidth
-          />
-        </div>
-      </form>
-
-      {photos.length > 0 && (
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <p className="text-sm font-medium text-text-primary">
-              {listingTitle && (
-                <span className="text-text-muted">{listingTitle} &ndash; </span>
-              )}
-              Select a photo to search ({photos.length} found)
-            </p>
-            <button
-              type="button"
-              className={btnPill}
-              onClick={handleSearch}
-              disabled={!selectedPhoto || searching}
-            >
-              {searching ? "Searching..." : "Find 3D File"}
-            </button>
-          </div>
-          <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8">
-            {photos.map((url, i) => (
-              <button
-                key={url}
-                type="button"
-                onClick={() => setSelectedPhoto(url)}
-                className={`aspect-square overflow-hidden rounded-lg border-2 transition-all ${
-                  selectedPhoto === url
-                    ? "border-primary ring-2 ring-primary/30"
-                    : "border-border-default hover:border-primary/50"
-                }`}
-              >
-                <img
-                  src={url}
-                  alt={`Listing photo ${i + 1}`}
-                  className="h-full w-full object-cover"
-                />
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {searchResults.length > 0 && (
-        <div className="flex flex-col gap-3">
-          <p className="text-sm font-semibold text-text-primary">
-            Results ({searchResults.length})
-          </p>
-          <ol className="flex flex-col gap-2">
-            {searchResults.map((r, i) => {
-              const hostname = (() => {
-                try { return new URL(r.link).hostname; } catch { return r.link; }
-              })();
-              const canDownload =
-                /thingiverse\.com\/thing[:/]\d+/.test(r.link) ||
-                /printables\.com\/model\/\d+/.test(r.link);
-              const isDownloading = downloadingLink === r.link;
-              const isAnyDownloading = downloadingLink !== null;
-
-              return (
-                <li
-                  key={r.link}
-                  className="flex items-center gap-3 rounded-lg border p-3 transition-colors border-green-500/40 bg-green-500/5"
-                >
-                  <span className="shrink-0 text-sm font-bold text-text-muted w-5 text-right">
-                    {i + 1}.
-                  </span>
-                  {r.thumbnail && (
-                    <img
-                      src={r.thumbnail}
-                      alt=""
-                      className="h-10 w-10 shrink-0 rounded object-cover"
-                    />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <a
-                        href={r.link}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm font-medium text-primary hover:underline"
-                      >
-                        {r.title || r.link}
-                      </a>
-                      <span className="shrink-0 rounded-full bg-green-500/15 px-2 py-0.5 text-xs font-medium text-green-400">
-                        3D site
-                      </span>
-                    </div>
-                    <p className="truncate text-xs text-text-muted">
-                      {r.source || hostname}
-                    </p>
-                  </div>
-                  {canDownload && (
-                    <button
-                      type="button"
-                      className={btnPillSm}
-                      onClick={() => handleDownload(r.link)}
-                      disabled={isAnyDownloading}
-                    >
-                      {isDownloading ? "Downloading..." : "Download"}
-                    </button>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
-        </div>
-      )}
+      {/* panels go here — added in tasks 2–4 */}
     </div>
   );
 }
