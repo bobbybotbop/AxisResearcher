@@ -64,6 +64,13 @@ from backend.copyScripts.imageEditing import remove_background, compile_images, 
 from backend.copyScripts.upload_to_ebay import upload_complete_listing
 from backend.promoted_listings import promote_listing, PromotionError
 from backend.logger import log_event
+from backend.constants.models import DEFAULT_TEXT_MODEL, DEFAULT_IMAGE_MODEL, DEFAULT_CLASSIFIER_MODEL
+from backend.constants.listing import (
+    ANGLE_VARIANTS, PROMPT_TYPES, TITLE_MIN_LEN, TITLE_MAX_LEN,
+    TITLE_TARGET_LEN, TITLE_MAX_ATTEMPTS, SKIP_CATEGORIES,
+    CATEGORY_TO_IMAGE_TYPE, MANUAL_SKU_PREFIX,
+)
+from backend.constants.ebay import EBAY_MARKETPLACE_ID, EBAY_BROWSE_API_BASE
 import re
 import requests
 from dotenv import load_dotenv
@@ -76,20 +83,6 @@ CORS(app, origins=["http://localhost:3000", "http://localhost:5173", "http://loc
 # Structure: {task_id: {"status": "running|completed|failed", "total": N, "completed": M, "results": [], "errors": []}}
 image_generation_tasks = {}
 image_generation_lock = threading.Lock()
-
-DEFAULT_TEXT_MODEL = "deepseek/deepseek-v4-flash"
-DEFAULT_IMAGE_MODEL = "bytedance-seed/seedream-5-0-lite"
-DEFAULT_CLASSIFIER_MODEL = "bytedance-seed/seed-1.6-flash"
-
-ANGLE_VARIANTS = [
-    "45 degree left",
-    "45 degree right",
-    "90 degree left",
-    "90 degree right",
-    "top",
-]
-
-PROMPT_TYPES = {"title", "description", "image"}
 
 @app.route('/api/prompts/<prompt_type>', methods=['GET'])
 def list_prompts(prompt_type):
@@ -490,14 +483,8 @@ def generate_images():
                 "task_id": None
             }), 400
         
-        # Categories to skip
-        skip_categories = ['real_world_image', 'edited_image']
-        
-        # Map categories to ImageType
-        category_to_image_type = {
-            'bad_image': ImageType.REAL_WORLD,
-            'professional_image': ImageType.PROFESSIONAL
-        }
+        skip_categories = SKIP_CATEGORIES
+        category_to_image_type = CATEGORY_TO_IMAGE_TYPE
         
         image_prompt_map = {
             ImageType.REAL_WORLD: image_prompt_real_world,
@@ -979,12 +966,6 @@ def update_listing_images_endpoint():
         import traceback
         traceback.print_exc()
         return jsonify({"error": error_msg, "listing_data": None}), 500
-
-
-TITLE_MIN_LEN = 75
-TITLE_MAX_LEN = 80
-TITLE_TARGET_LEN = 80
-TITLE_MAX_ATTEMPTS = 3
 
 
 def _sanitize_title(text):
@@ -1693,7 +1674,7 @@ def api_import_listings():
     # Build set of eBay item IDs already claimed by non-MANUAL listings
     known_ids = set()
     for fpath in glob.glob(os.path.join(generated_listings_dir, '*.json')):
-        if os.path.basename(fpath).startswith('MANUAL_'):
+        if os.path.basename(fpath).startswith(MANUAL_SKU_PREFIX):
             continue
         try:
             with open(fpath, 'r', encoding='utf-8') as f:
@@ -1706,7 +1687,7 @@ def api_import_listings():
 
     existing_manual_skus = {
         os.path.basename(fp).replace('.json', '')
-        for fp in glob.glob(os.path.join(generated_listings_dir, 'MANUAL_*.json'))
+        for fp in glob.glob(os.path.join(generated_listings_dir, f'{MANUAL_SKU_PREFIX}*.json'))
     }
 
     imported = updated = skipped = 0
@@ -1715,7 +1696,7 @@ def api_import_listings():
         if item['item_id'] in known_ids:
             skipped += 1
             continue
-        sku = f'MANUAL_{item["item_id"]}'
+        sku = f'{MANUAL_SKU_PREFIX}{item["item_id"]}'
         is_new = sku not in existing_manual_skus
         written = write_manual_listing_json(item)
         if written:
@@ -1968,7 +1949,7 @@ def upload_test_listing():
             # --- Build test offer data ---
             from backend.copyScripts.combine_data import MERCHANT_LOCATION_KEY, get_listing_policies
             test_offer = {
-                "marketplaceId": "EBAY_US",
+                "marketplaceId": EBAY_MARKETPLACE_ID,
                 "format": "FIXED_PRICE",
                 "quantity": 1,
                 "pricingSummary": {
@@ -2076,10 +2057,10 @@ def _test_application_token():
     token = os.getenv('application_token')
     if not token or not token.strip():
         return {'ok': False, 'message': 'application_token is not set in .env'}
-    url = 'https://api.ebay.com/buy/browse/v1/item_summary/search'
+    url = f'{EBAY_BROWSE_API_BASE}/item_summary/search'
     headers = {
         'Authorization': f'Bearer {token.strip()}',
-        'X-EBAY-C-MARKETPLACE-ID': 'EBAY_US',
+        'X-EBAY-C-MARKETPLACE-ID': EBAY_MARKETPLACE_ID,
         'Content-Type': 'application/json'
     }
     params = {'q': 'test', 'limit': 1}
@@ -2156,7 +2137,7 @@ def api_listings_quantities():
 
     result = {}
     for sku in skus:
-        if sku.startswith('MANUAL_'):
+        if sku.startswith(MANUAL_SKU_PREFIX):
             base_dir = os.path.dirname(os.path.abspath(__file__))
             fpath = os.path.join(base_dir, 'Generated_Listings', f'{sku}.json')
             try:
@@ -2357,8 +2338,8 @@ def api_restock_listings():
         return jsonify({'updated': [], 'failed': [], 'quantity': quantity}), 200
 
     # Split into MANUAL_ (Trading API) and automated (Sell Inventory API) groups
-    manual_skus = [s for s in skus if s.startswith('MANUAL_')]
-    automated_skus = [s for s in skus if not s.startswith('MANUAL_')]
+    manual_skus = [s for s in skus if s.startswith(MANUAL_SKU_PREFIX)]
+    automated_skus = [s for s in skus if not s.startswith(MANUAL_SKU_PREFIX)]
 
     updated = []
     failed = []
@@ -2367,13 +2348,13 @@ def api_restock_listings():
     # --- MANUAL_ SKUs: route through ReviseInventoryStatus (Trading API) ---
     if manual_skus:
         manual_api_items = [
-            {'item_id': sku[len('MANUAL_'):], 'quantity': quantity}
+            {'item_id': sku[len(MANUAL_SKU_PREFIX):], 'quantity': quantity}
             for sku in manual_skus
         ]
         try:
             manual_results = revise_inventory_status_batch(manual_api_items)
             for result_item in manual_results:
-                sku = f"MANUAL_{result_item['item_id']}"
+                sku = f"{MANUAL_SKU_PREFIX}{result_item['item_id']}"
                 if result_item['ok']:
                     updated.append(sku)
                     update_local_listing_quantity(sku=sku, quantity=quantity)
@@ -2465,7 +2446,7 @@ def api_restock_listings():
                         failed_errors[sku] = [str(e)]
 
             for sku in updated:
-                if not sku.startswith('MANUAL_'):
+                if not sku.startswith(MANUAL_SKU_PREFIX):
                     update_local_listing_quantity(sku=sku, quantity=quantity)
 
     if failed:
