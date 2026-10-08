@@ -290,7 +290,50 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
           </div>
         )}
       </div>
-      {/* step 3 goes here — added in task 4 */}
+      {/* Step 3 — Download 3D File */}
+      <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
+        <p className="text-sm font-semibold text-text-primary">Step 3 — Download 3D File</p>
+        <div className="flex items-center gap-3">
+          <div className="flex-1">
+            <MessageBarInput
+              value={step3Url}
+              onChange={(val) => {
+                setStep3Url(val);
+                setStep3Result(null);
+                setStep3Error(null);
+              }}
+              placeholder="Paste printables.com or thingiverse.com URL..."
+              disabled={step3Loading}
+              loading={step3Loading}
+              aria-label="3D site URL"
+              fullWidth
+            />
+          </div>
+          <button
+            type="button"
+            className={btnPill}
+            onClick={handleStep3Download}
+            disabled={!step3Supported || step3Loading}
+          >
+            {step3Loading ? "Downloading..." : "Download"}
+          </button>
+        </div>
+        <p className="text-xs">
+          {step3Url.trim() && !step3Supported ? (
+            <span className="text-amber-400">Unsupported site</span>
+          ) : (
+            <span className="text-text-muted">Supported: printables.com, thingiverse.com</span>
+          )}
+        </p>
+        {step3Result && (
+          <p className="text-sm text-green-400">
+            Downloaded: {step3Result.filename} ({formatBytes(step3Result.bytes)})
+          </p>
+        )}
+        {step3Error && (
+          <p className="text-sm text-red-400">{step3Error}</p>
+        )}
+      </div>
     </div>
   );
 }
