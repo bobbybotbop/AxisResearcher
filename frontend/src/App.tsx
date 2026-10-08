@@ -25,27 +25,13 @@ import { trimTransparentPadding } from "./utils/trimImage";
 import { isIncomplete, isUploaded } from "./utils/listingStatus";
 import { btnPill, btnPillSm } from "./styles/buttonPill";
 import { fetchWithProgress } from "./utils/fetchWithProgress";
+import { DEFAULT_TEXT_MODEL_OPTIONS, IMAGE_MODEL_OPTIONS, CLASSIFIER_MODEL_OPTIONS, PROVIDER_LABELS } from "./constants/models";
+import type { ImageModelOption } from "./constants/models";
+import { TAB_PATHS } from "./constants/routes";
+import type { TabName } from "./constants/routes";
 import type { DropResult } from "@hello-pangea/dnd";
 import type { Listing, ModelOption, ProgressState, ImageGenProgress } from "./types/listing";
 import type { TestWorkflowState } from "./types/workflow";
-// Default text model options shown before /api/text-models responds. The
-// server is the source of truth and may add Bedrock models when the
-// bedrock_api_key is set.
-const DEFAULT_TEXT_MODEL_OPTIONS: ModelOption[] = [
-  {
-    value: "deepseek/deepseek-v4-flash",
-    label: "DeepSeek V4 Flash",
-    provider: "openrouter",
-    inputCostPer1M: 0.13,
-    outputCostPer1M: 0.4,
-  },
-];
-
-const PROVIDER_LABELS: Record<string, string> = {
-  openrouter: "OpenRouter",
-  bedrock: "Bedrock",
-};
-
 function modelCostLabel(m: ModelOption): string | null {
   if (m.costPerImage != null) return `$${m.costPerImage}/img`;
   if (m.inputCostPer1M != null && m.outputCostPer1M != null)
@@ -57,53 +43,6 @@ function modelOptionLabel(m: ModelOption): string {
   const cost = modelCostLabel(m);
   return cost ? `${m.label} — ${cost}` : m.label;
 }
-
-// cost fields: inputCostPer1M ($/1M input tokens), outputCostPer1M ($/1M output tokens),
-// or costPerImage (flat $/image) for image-only generation models.
-const IMAGE_MODEL_OPTIONS: ImageModelOption[] = [
-  {
-    value: "sourceful/riverflow-v2-fast",
-    label: "Riverflow V2 Fast",
-    costPerImage: 0.019,
-  },
-  {
-    value: "sourceful/riverflow-v2.5-fast",
-    label: "Riverflow V2.5 Fast",
-    costPerImage: 0.019,
-  },
-  {
-    value: "google/gemini-3.1-flash-image",
-    label: "Gemini 3.1 Flash Image",
-    inputCostPer1M: 0.5,
-    outputCostPer1M: 3.0,
-  },
-  {
-    value: "google/gemini-3.1-flash-lite-image",
-    label: "Gemini 3.1 Flash Lite Image",
-    inputCostPer1M: 0.25,
-    outputCostPer1M: 1.5,
-  },
-  {
-    value: "bytedance-seed/seedream-5-0-lite",
-    label: "Seedream 5.0 Lite",
-    costPerImage: 0.035,
-    defaultSize: "2048x2048",
-  },
-  {
-    value: "bytedance-seed/seedream-4.5",
-    label: "Seedream 4.5",
-    costPerImage: 0.04,
-  },
-];
-
-const CLASSIFIER_MODEL_OPTIONS: ModelOption[] = [
-  {
-    value: "bytedance-seed/seed-1.6-flash",
-    label: "ByteDance Seed 1.6 Flash",
-    inputCostPer1M: 0.1,
-    outputCostPer1M: 0.1,
-  },
-];
 
 /**
  * Fetch with streaming progress support.
@@ -175,8 +114,6 @@ interface ListingData {
   offer?: Record<string, unknown>;
   [key: string]: unknown;
 }
-type TabName = "create" | "upload" | "logs" | "test-workflow" | "testing" | "settings"
-type ImageModelOption = ModelOption & { defaultSize?: string }
 type AutoSaveStatus = { title: "idle" | "saving" | "saved"; description: "idle" | "saving" | "saved" }
 
 function App() {
@@ -209,15 +146,6 @@ function App() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const tabPaths = {
-    create: "/create",
-    upload: "/history",
-    logs: "/logs",
-    "test-workflow": "/test-workflow",
-    testing: "/testing",
-    settings: "/settings",
-  };
-
   const normalizePathname = (pathname: string): string => {
     if (!pathname) return "/";
     if (pathname === "/") return "/";
@@ -226,12 +154,12 @@ function App() {
 
   const activeTab: TabName = ((): TabName => {
     const p = normalizePathname(location.pathname);
-    if (p === "/" || p === tabPaths.create) return "create";
-    if (p === tabPaths.upload) return "upload";
-    if (p === tabPaths.logs) return "logs";
-    if (p === tabPaths["test-workflow"]) return "test-workflow";
-    if (p === tabPaths.testing) return "testing";
-    if (p === tabPaths.settings) return "settings";
+    if (p === "/" || p === TAB_PATHS.create) return "create";
+    if (p === TAB_PATHS.upload) return "upload";
+    if (p === TAB_PATHS.logs) return "logs";
+    if (p === TAB_PATHS["test-workflow"]) return "test-workflow";
+    if (p === TAB_PATHS.testing) return "testing";
+    if (p === TAB_PATHS.settings) return "settings";
     return "create";
   })();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -560,13 +488,13 @@ function App() {
   useEffect(() => {
     const p = normalizePathname(location.pathname);
     if (p === "/") {
-      navigate(tabPaths.create, { replace: true });
+      navigate(TAB_PATHS.create, { replace: true });
       return;
     }
 
-    const knownPaths = new Set(Object.values(tabPaths));
+    const knownPaths = new Set(Object.values(TAB_PATHS));
     if (!knownPaths.has(p)) {
-      navigate(tabPaths.create, { replace: true });
+      navigate(TAB_PATHS.create, { replace: true });
     }
   }, [location.pathname, navigate]);
 
@@ -702,7 +630,8 @@ function App() {
       if (!alive) return;
       if (hasAutoRefreshed.current) return;
       hasAutoRefreshed.current = true;
-      handleRefreshTokens();
+      await handleRefreshTokens();
+      if (!alive) return;
       importListingsFromEbay();
     })();
     return () => {
@@ -2483,7 +2412,7 @@ function App() {
   };
 
   const handleTabChange = (tab: TabName): void => {
-    navigate(tabPaths[tab] ?? tabPaths.create);
+    navigate(TAB_PATHS[tab] ?? TAB_PATHS.create);
   };
   useEffect(() => {
     if (activeTab === "upload") {
