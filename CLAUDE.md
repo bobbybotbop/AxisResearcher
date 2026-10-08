@@ -128,3 +128,13 @@ The user can type a prompt with the "Photos" chat context selected to modify ima
 - `handleConfirmPhotoRegeneration` → `handleRegenerateImages(prompt)` → `/api/regenerate-images` with `custom_prompt` which **replaces** the entire base prompt (uses `ImageType.EXPERIMENTAL`)
 
 Key distinction: Case 1 uses `prompt_modifier` (appended to base prompt), Case 2 uses `custom_prompt` (replaces base prompt entirely).
+
+## Constants discipline
+
+All magic strings, magic numbers, hardcoded lists, and configuration values must live in `backend/constants/<domain>.py` (backend) or `frontend/src/constants/<domain>.ts` (frontend). Never inline them at call sites. When adding a new value, find the most relevant existing constants file or create a new domain file.
+
+Backend domains: `ebay` (API URLs, OAuth config), `models` (AI model IDs, prompt filenames), `listing` (title rules, SKU prefixes, image category maps), `serp` (whitelisted/blacklisted sites), `paths` (filesystem paths and log limits).
+
+Frontend domains: `models` (model option arrays, provider labels), `routes` (tab paths and `TabName` type), `logs` (event labels, filter chips), `chatContextModes` (chat context config).
+
+What is NOT moved to constants: values loaded from `.env` or `listingPreferences.json` at runtime (these are config), the `ImageType` enum (it is a type, not a value), and one-off inline LLM prompt strings.
