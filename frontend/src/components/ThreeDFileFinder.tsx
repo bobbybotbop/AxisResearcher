@@ -33,15 +33,13 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
   const [step3Result, setStep3Result] = useState<{ filename: string; bytes: number } | null>(null);
   const [step3Error, setStep3Error] = useState<string | null>(null);
 
-  // True when step3Url is a supported downloadable pattern
-  const step3Supported =
-    /thingiverse\.com\/thing[:/]\d+/.test(step3Url.trim()) ||
-    /printables\.com\/model\/\d+/.test(step3Url.trim());
-
   // True when a result link can be forwarded to Step 3
   const canForwardToStep3 = (link: string) =>
     /thingiverse\.com\/thing[:/]\d+/.test(link) ||
     /printables\.com\/model\/\d+/.test(link);
+
+  // True when step3Url is a supported downloadable pattern
+  const step3Supported = canForwardToStep3(step3Url.trim());
 
   const formatBytes = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
