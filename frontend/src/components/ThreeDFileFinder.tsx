@@ -219,9 +219,10 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
             <img
               src={step2ImageUrl}
               alt=""
+              style={{ display: "none" }}
               className="h-8 w-8 shrink-0 rounded object-cover"
-              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
               onLoad={(e) => { (e.target as HTMLImageElement).style.display = ""; }}
+              onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
             />
           )}
           <button
@@ -275,6 +276,7 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
                     {canForwardToStep3(r.link) && (
                       <button
                         type="button"
+                        aria-label={`Use in Step 3: ${r.title || hostname}`}
                         className={btnPillSm}
                         onClick={() => setStep3Url(r.link)}
                       >
