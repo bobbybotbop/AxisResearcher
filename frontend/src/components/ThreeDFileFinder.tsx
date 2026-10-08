@@ -150,7 +150,7 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
       {/* Step 1 — Fetch eBay Photos */}
       <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
         <p className="text-sm font-semibold text-text-primary">Step 1 — Fetch eBay Photos</p>
-        <form onSubmit={handleStep1Submit} className="flex items-end gap-3">
+        <form onSubmit={handleStep1Submit} className="flex">
           <div className="flex-1">
             <MessageBarInput
               value={step1Link}
@@ -174,8 +174,9 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
                 <button
                   key={url}
                   type="button"
+                  aria-pressed={step1Selected === url}
                   onClick={() => setStep1Selected(url)}
-                  className={`aspect-square overflow-hidden rounded-lg border-2 transition-all ${
+                  className={`aspect-square overflow-hidden rounded-lg border-2 transition-colors ${
                     step1Selected === url
                       ? "border-primary ring-2 ring-primary/30"
                       : "border-border-default hover:border-primary/50"
