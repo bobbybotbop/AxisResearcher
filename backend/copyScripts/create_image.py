@@ -15,15 +15,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 from backend.helper_functions import helper_get_valid_token
 from backend.copyScripts.imageEditing import downscale_image_bytes
+from backend.constants.ebay import EBAY_TRADING_API_URL, TRADING_API_SITE_ID, TRADING_API_COMPATIBILITY_LEVEL
+from backend.constants.models import MODEL_DEFAULT_SIZES, DEFAULT_IMAGE_PROMPTS
+from backend.constants.paths import GENERATED_IMAGES_DIR
 
 # Load environment variables
 load_dotenv()
-
-# Per-model minimum output sizes. When the requested resolution is smaller than
-# a model's minimum, the model's default is used instead.
-MODEL_DEFAULT_SIZES = {
-    "bytedance-seed/seedream-5-0-lite": "2048x2048",
-}
 
 
 def _get_effective_resolution(model: str, requested: str | None) -> str | None:
@@ -342,7 +339,7 @@ def _process_single_image(image_data, image_url, is_base64, mime_type, image_typ
             ext = '.png'  # Default
         
         # Create output directory if it doesn't exist
-        output_dir = Path("generated-images")
+        output_dir = Path(GENERATED_IMAGES_DIR)
         output_dir.mkdir(exist_ok=True)
         
         # Generate filename with timestamp
@@ -432,14 +429,14 @@ def upload_image_bytes_to_ebay(image_bytes, mime_type, picture_name="Uploaded Im
     
     # Set headers for eBay Trading API
     headers = {
-        "X-EBAY-API-SITEID": "0",  # US Production
-        "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+        "X-EBAY-API-SITEID": TRADING_API_SITE_ID,
+        "X-EBAY-API-COMPATIBILITY-LEVEL": TRADING_API_COMPATIBILITY_LEVEL,
         "X-EBAY-API-CALL-NAME": "UploadSiteHostedPictures",
         "X-EBAY-API-RESPONSE-ENCODING": "XML"
     }
-    
+
     # eBay API endpoint
-    url = "https://api.ebay.com/ws/api.dll"
+    url = EBAY_TRADING_API_URL
     
     try:
         print(f"📤 Uploading image to eBay Picture Services...")
@@ -620,13 +617,7 @@ def generate_image_from_urls(
         # Resolve path relative to project root (same directory as this script's parent)
         script_dir = Path(__file__).parent.parent.parent
 
-        _DEFAULT_IMAGE_PROMPTS = {
-            ImageType.PROFESSIONAL: "generateImageFromProfessional.txt",
-            ImageType.REAL_WORLD: "generateImageFromWorld.txt",
-            ImageType.ANGLE_VARIANT: "generateImageAngleVariant.txt",
-            ImageType.EXPERIMENTAL: "experimental.txt",
-        }
-        filename = prompt_filename or _DEFAULT_IMAGE_PROMPTS.get(image_type, "generateImageFromWorld.txt")
+        filename = prompt_filename or DEFAULT_IMAGE_PROMPTS.get(image_type.value, "generateImageFromWorld.txt")
         prompt_file_path = script_dir / "prompts" / "image" / filename
         
         try:
@@ -662,7 +653,7 @@ def generate_image_from_urls(
         resolved_url = image_url
         if image_url.startswith("/api/bg-removed-image/"):
             filename = image_url.split("/api/bg-removed-image/", 1)[1]
-            filepath = project_root / "generated-images" / filename
+            filepath = project_root / GENERATED_IMAGES_DIR / filename
             try:
                 with open(filepath, "rb") as f:
                     raw = f.read()
@@ -717,7 +708,7 @@ def generate_image_from_urls(
 
         ebay_urls = []
         image_type_str = image_type.value.lower() if isinstance(image_type, ImageType) else "generated"
-        output_dir = Path(__file__).parent.parent.parent / "generated-images"
+        output_dir = Path(__file__).parent.parent.parent / GENERATED_IMAGES_DIR
         output_dir.mkdir(exist_ok=True)
 
         for idx, item in enumerate(image_items):
@@ -1071,7 +1062,7 @@ def decode_image_from_response():
         image_bytes, mime_type = parsed
         ext = _extension_from_mime(mime_type)
 
-        output_dir = Path("generated-images")
+        output_dir = Path(GENERATED_IMAGES_DIR)
         output_dir.mkdir(exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         json_filename = json_path.stem
