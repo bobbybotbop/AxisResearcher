@@ -147,7 +147,59 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
           Test each step independently or run the full pipeline top to bottom.
         </p>
       </div>
-      {/* panels go here — added in tasks 2–4 */}
+      {/* Step 1 — Fetch eBay Photos */}
+      <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
+        <p className="text-sm font-semibold text-text-primary">Step 1 — Fetch eBay Photos</p>
+        <form onSubmit={handleStep1Submit} className="flex items-end gap-3">
+          <div className="flex-1">
+            <MessageBarInput
+              value={step1Link}
+              onChange={setStep1Link}
+              placeholder="Paste eBay listing URL or item ID..."
+              disabled={step1Loading}
+              loading={step1Loading}
+              aria-label="eBay listing URL"
+              fullWidth
+            />
+          </div>
+        </form>
+        {step1Photos.length > 0 && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs text-text-muted">
+              {step1Title && <span>{step1Title} — </span>}
+              {step1Photos.length} photo{step1Photos.length !== 1 ? "s" : ""} found
+            </p>
+            <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8">
+              {step1Photos.map((url, i) => (
+                <button
+                  key={url}
+                  type="button"
+                  onClick={() => setStep1Selected(url)}
+                  className={`aspect-square overflow-hidden rounded-lg border-2 transition-all ${
+                    step1Selected === url
+                      ? "border-primary ring-2 ring-primary/30"
+                      : "border-border-default hover:border-primary/50"
+                  }`}
+                >
+                  <img src={url} alt={`Photo ${i + 1}`} className="h-full w-full object-cover" />
+                </button>
+              ))}
+            </div>
+            {step1Selected && (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  className={btnPillSm}
+                  onClick={() => setStep2ImageUrl(step1Selected!)}
+                >
+                  Use photo in Step 2 →
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      {/* steps 2 and 3 go here — added in tasks 3–4 */}
     </div>
   );
 }
