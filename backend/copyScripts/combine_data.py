@@ -7,6 +7,9 @@ import json
 import requests
 from dotenv import load_dotenv
 from datetime import datetime
+from backend.constants.ebay import EBAY_INVENTORY_API_BASE
+from backend.constants.paths import CONFIG_FILE, GENERATED_LISTINGS_DIR
+from backend.constants.listing import SKU_PREFIX, MANUAL_SKU_PREFIX
 
 # Load environment variables
 load_dotenv()
@@ -15,12 +18,6 @@ load_dotenv()
 FULFILLMENT_POLICY_ID = os.getenv('fulfillment_policy_id')
 PAYMENT_POLICY_ID = os.getenv('payment_policy_id')
 RETURN_POLICY_ID = os.getenv('return_policy_id')
-
-# eBay API base URL
-EBAY_INVENTORY_API_BASE = "https://api.ebay.com/sell/inventory/v1"
-
-# Config file path
-CONFIG_FILE = "listingPreferences.json"
 
 def load_config():
     """
@@ -109,8 +106,8 @@ def get_sku(return_counter=False):
     """
     config = load_config()
     counter = config["counter"]
-    sku = f"AXIS_{counter}"
-    
+    sku = f"{SKU_PREFIX}{counter}"
+
     # Increment the counter for next time using get_next_sku logic
     config["counter"] = config["counter"] + 1
     save_config(config)
@@ -139,8 +136,8 @@ def get_next_sku(return_counter=False):
     save_config(config)
     
     counter = config["counter"]
-    sku = f"AXIS_{counter}"
-    
+    sku = f"{SKU_PREFIX}{counter}"
+
     if return_counter:
         return counter, sku
     return sku
@@ -162,8 +159,8 @@ def get_current_sku(return_counter=False):
     """
     config = load_config()
     counter = config["counter"]
-    sku = f"AXIS_{counter}"
-    
+    sku = f"{SKU_PREFIX}{counter}"
+
     if return_counter:
         return counter, sku
     return sku
@@ -291,7 +288,7 @@ def create_listing_with_preferences(
     # Create Generated_Listings directory if it doesn't exist
     # Use absolute path to ensure we're saving in the right directory (project root)
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    output_dir = os.path.join(base_dir, "Generated_Listings")
+    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
     os.makedirs(output_dir, exist_ok=True)
     
     # Generate filename if not provided (simply use SKU)
@@ -331,8 +328,8 @@ def load_listing_data(sku=None, filename=None):
     """
     # Use absolute path to ensure we're looking in the right directory (project root)
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    output_dir = os.path.join(base_dir, "Generated_Listings")
-    
+    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
+
     # If specific filename provided, use it
     if filename:
         filepath = os.path.join(output_dir, filename)
@@ -379,7 +376,7 @@ def extract_metadata_for_llm(listing_data):
 
 def _get_generated_listings_dir():
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    return os.path.join(base_dir, "Generated_Listings")
+    return os.path.join(base_dir, GENERATED_LISTINGS_DIR)
 
 
 def resolve_listing_json_path(sku=None, filename=None):
@@ -650,7 +647,7 @@ def listing_file_exists(sku):
     """
     # Use absolute path to ensure we're looking in the right directory
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    output_dir = os.path.join(base_dir, "Generated_Listings")
+    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
     filepath = os.path.join(output_dir, f"{sku}.json")
     return os.path.exists(filepath)
 
@@ -708,14 +705,14 @@ def update_listing_title_description(sku, new_text):
     
     # Use absolute path to ensure we're looking in the right directory
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    output_dir = os.path.join(base_dir, "Generated_Listings")
+    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
     filepath = os.path.join(output_dir, f"{sku}.json")
-    
+
     try:
         # Load the existing listing data
         with open(filepath, 'r', encoding='utf-8') as f:
             listing_data = json.load(f)
-        
+
         # Update title and description
         listing_data["inventoryItem"]["product"]["title"] = new_title
         listing_data["inventoryItem"]["product"]["description"] = new_description
@@ -757,14 +754,14 @@ def update_listing_meta_data(sku, new_price, new_category_id):
     
     # Use absolute path to ensure we're looking in the right directory
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    output_dir = os.path.join(base_dir, "Generated_Listings")
+    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
     filepath = os.path.join(output_dir, f"{sku}.json")
-    
+
     try:
         # Load the existing listing data
         with open(filepath, 'r', encoding='utf-8') as f:
             listing_data = json.load(f)
-        
+
         # Update price and categoryId
         listing_data["offer"]["pricingSummary"]["price"]["value"] = new_price
         listing_data["offer"]["categoryId"] = new_category_id
@@ -809,14 +806,14 @@ def update_listing_images(sku, image_urls):
     
     # Use absolute path to ensure we're looking in the right directory
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    output_dir = os.path.join(base_dir, "Generated_Listings")
+    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
     filepath = os.path.join(output_dir, f"{sku}.json")
-    
+
     try:
         # Load the existing listing data
         with open(filepath, 'r', encoding='utf-8') as f:
             listing_data = json.load(f)
-        
+
         # Ensure product structure exists
         if "inventoryItem" not in listing_data:
             listing_data["inventoryItem"] = {}
@@ -1135,7 +1132,7 @@ def update_listing_with_aspects(sku, localizedAspects=None, pre_fetched_aspects=
     # Update the listing JSON file
     # Use absolute path to ensure we're looking in the right directory
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    output_dir = os.path.join(base_dir, "Generated_Listings")
+    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
     filepath = os.path.join(output_dir, f"{sku}.json")
     
     try:
@@ -1185,7 +1182,7 @@ def write_manual_listing_json(item):
     Only overwrites an existing file when quantity has changed (to avoid churn).
     Returns True if the file was written, False if unchanged and skipped.
     """
-    sku = f"MANUAL_{item['item_id']}"
+    sku = f"{MANUAL_SKU_PREFIX}{item['item_id']}"
     output_dir = _get_generated_listings_dir()
     os.makedirs(output_dir, exist_ok=True)
     path = os.path.join(output_dir, f"{sku}.json")
