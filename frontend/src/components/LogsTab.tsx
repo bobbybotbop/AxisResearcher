@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { RefreshCw, CheckCircle, XCircle } from "lucide-react";
+import { LOG_EVENT_LABELS, LOG_FILTER_CHIPS } from "../constants/logs";
+import type { FilterOption } from "../constants/logs";
 
 interface LogEntry {
   event: string;
@@ -18,31 +20,9 @@ interface LogEntry {
   [key: string]: unknown;
 }
 
-interface FilterOption {
-  key: string;
-  label: string;
-}
-
 interface LogsTabProps {
   onNavigateToSku?: (sku: string) => void;
 }
-
-const EVENT_LABELS: Record<string, string> = {
-  draft_created: "Draft Created",
-  draft_completed: "Draft Completed",
-  upload: "Upload",
-  restock: "Restock",
-  import: "Import",
-};
-
-const FILTERS: FilterOption[] = [
-  { key: "all", label: "All" },
-  { key: "upload", label: "Uploads" },
-  { key: "restock", label: "Restocks" },
-  { key: "draft_created", label: "Drafts Created" },
-  { key: "draft_completed", label: "Drafts Completed" },
-  { key: "import", label: "Imports" },
-];
 
 function formatTimestamp(iso: string) {
   const date = new Date(iso);
@@ -130,7 +110,7 @@ export default function LogsTab({ onNavigateToSku }: LogsTabProps) {
       </div>
 
       <div className="flex flex-wrap gap-2 mb-4">
-        {FILTERS.map((f) => (
+        {LOG_FILTER_CHIPS.map((f) => (
           <button
             key={f.key}
             onClick={() => setFilter(f.key)}
@@ -186,7 +166,7 @@ export default function LogsTab({ onNavigateToSku }: LogsTabProps) {
                     isError ? "text-danger" : "text-text-primary"
                   }`}
                 >
-                  {EVENT_LABELS[entry.event] ?? entry.event}
+                  {LOG_EVENT_LABELS[entry.event] ?? entry.event}
                   {entry.event === "restock" && entry.source === "auto" && (
                     <span className="ml-1.5 text-xs font-normal text-text-muted">
                       (auto)
