@@ -172,7 +172,7 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
             <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8">
               {step1Photos.map((url, i) => (
                 <button
-                  key={url}
+                  key={`${i}-${url}`}
                   type="button"
                   aria-pressed={step1Selected === url}
                   onClick={() => setStep1Selected(url)}
@@ -191,7 +191,7 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
                 <button
                   type="button"
                   className={btnPillSm}
-                  onClick={() => setStep2ImageUrl(step1Selected!)}
+                  onClick={() => { setStep2ImageUrl(step1Selected!); setStep2Results([]); }}
                 >
                   Use photo in Step 2 →
                 </button>
@@ -203,7 +203,10 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
       {/* Step 2 — Reverse Image Search */}
       <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
         <p className="text-sm font-semibold text-text-primary">Step 2 — Reverse Image Search</p>
-        <div className="flex items-center gap-3">
+        <form
+          onSubmit={(e) => { e.preventDefault(); handleStep2Search(); }}
+          className="flex items-center gap-3"
+        >
           <div className="flex-1">
             <MessageBarInput
               value={step2ImageUrl}
@@ -233,7 +236,7 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
           >
             {step2Loading ? "Searching..." : "Search"}
           </button>
-        </div>
+        </form>
         {step2Results.length > 0 && (
           <div className="flex flex-col gap-2">
             <p className="text-xs text-text-muted">Results ({step2Results.length})</p>
@@ -297,7 +300,10 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
       {/* Step 3 — Download 3D File */}
       <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
         <p className="text-sm font-semibold text-text-primary">Step 3 — Download 3D File</p>
-        <div className="flex items-center gap-3">
+        <form
+          onSubmit={(e) => { e.preventDefault(); handleStep3Download(); }}
+          className="flex items-center gap-3"
+        >
           <div className="flex-1">
             <MessageBarInput
               value={step3Url}
@@ -321,7 +327,7 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
           >
             {step3Loading ? "Downloading..." : "Download"}
           </button>
-        </div>
+        </form>
         <p className="text-xs">
           {step3Url.trim() && !step3Supported ? (
             <span className="text-amber-400">Unsupported site</span>
