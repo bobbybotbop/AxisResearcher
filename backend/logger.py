@@ -3,10 +3,12 @@ import os
 import threading
 from datetime import datetime, timezone
 
+from backend.constants.paths import LOG_FILE_NAME, MAX_LOG_ENTRIES
+
 _lock = threading.Lock()
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_LOG_FILE = os.path.join(_PROJECT_ROOT, "logs.ndjson")
-_MAX_ENTRIES = 1000
+_LOG_FILE = os.path.join(_PROJECT_ROOT, LOG_FILE_NAME)
+_MAX_ENTRIES = MAX_LOG_ENTRIES
 
 
 def log_event(event: str, status: str, **fields) -> None:
