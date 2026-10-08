@@ -278,7 +278,11 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
                         type="button"
                         aria-label={`Use in Step 3: ${r.title || hostname}`}
                         className={btnPillSm}
-                        onClick={() => setStep3Url(r.link)}
+                        onClick={() => {
+                          setStep3Url(r.link);
+                          setStep3Result(null);
+                          setStep3Error(null);
+                        }}
                       >
                         Use →
                       </button>
