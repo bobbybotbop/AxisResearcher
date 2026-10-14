@@ -2551,6 +2551,55 @@ def api_restock_listings():
     }), 200
 
 
+@app.route('/api/listings/sync-active', methods=['POST'])
+def api_sync_active_listings():
+    """
+    Compare all local listings against eBay and mark any that are no longer
+    active on eBay as ebay_status: "not_found".
+
+    Optionally accepts { "skus": [...] } to check a subset.
+    Returns { "checked": N, "not_found": [...] }
+    """
+    body = request.get_json(silent=True) or {}
+    requested_skus = body.get('skus')  # optional subset
+
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    output_dir = os.path.join(base_dir, 'Generated_Listings')
+
+    # Build the list of SKUs to check
+    if requested_skus:
+        skus_to_check = [str(s).strip() for s in requested_skus if str(s).strip()]
+    else:
+        skus_to_check = []
+        if os.path.exists(output_dir):
+            for fname in os.listdir(output_dir):
+                if fname.endswith('.json'):
+                    sku = fname[:-5]  # strip .json
+                    skus_to_check.append(sku)
+
+    if not skus_to_check:
+        return jsonify({'checked': 0, 'not_found': []}), 200
+
+    manual_skus = [s for s in skus_to_check if s.startswith(MANUAL_SKU_PREFIX)]
+    axis_skus = [s for s in skus_to_check if not s.startswith(MANUAL_SKU_PREFIX)]
+
+    try:
+        confirmed_not_found = _verify_failed_skus(manual_skus, axis_skus)
+    except Exception as e:
+        return jsonify({'error': f'eBay check failed: {e}'}), 500
+
+    newly_marked = []
+    for sku in confirmed_not_found:
+        if set_listing_ebay_status(sku, EBAY_STATUS_NOT_FOUND):
+            newly_marked.append(sku)
+            print(f"[sync-active] Marked not_found: {sku}")
+
+    return jsonify({
+        'checked': len(skus_to_check),
+        'not_found': newly_marked,
+    }), 200
+
+
 @app.route('/api/logs', methods=['GET'])
 def api_get_logs():
     log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs.ndjson')
