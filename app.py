@@ -70,7 +70,7 @@ from backend.constants.listing import (
     TITLE_TARGET_LEN, TITLE_MAX_ATTEMPTS, SKIP_CATEGORIES,
     CATEGORY_TO_IMAGE_TYPE, MANUAL_SKU_PREFIX,
 )
-from backend.constants.ebay import EBAY_MARKETPLACE_ID, EBAY_BROWSE_API_BASE
+from backend.constants.ebay import EBAY_MARKETPLACE_ID, EBAY_BROWSE_API_BASE, EBAY_INVENTORY_API_BASE
 import re
 import requests
 from dotenv import load_dotenv
@@ -88,8 +88,7 @@ image_generation_lock = threading.Lock()
 def _verify_failed_skus(
     failed_manual_skus: list,
     failed_axis_skus: list,
-    user_token: str,
-) -> set:
+) -> set[str]:
     """
     For each failed SKU, check eBay to determine if it truly no longer exists.
     Returns a set of SKUs confirmed to be gone from eBay.
@@ -106,7 +105,7 @@ def _verify_failed_skus(
     if failed_manual_skus:
         try:
             active_listings = get_seller_list()
-            if active_listings:  # Guard: if list is empty, skip (could be API issue)
+            if active_listings:  # Guard: skip if no active listings (prevents false-positive mass deactivation)
                 active_item_ids = {str(item['item_id']) for item in active_listings}
                 for sku in failed_manual_skus:
                     item_id = sku[len(MANUAL_SKU_PREFIX):]
@@ -116,6 +115,7 @@ def _verify_failed_skus(
             print(f"[verify_failed_skus] GetSellerList failed, skipping MANUAL check: {e}")
 
     # --- AXIS SKUs: check inventory_item endpoint per SKU ---
+    user_token = os.getenv('user_token', '').strip()
     if failed_axis_skus and user_token:
         headers = {
             'Authorization': f'Bearer {user_token}',
@@ -124,7 +124,7 @@ def _verify_failed_skus(
         for sku in failed_axis_skus:
             try:
                 r = requests.get(
-                    f'https://api.ebay.com/sell/inventory/v1/inventory_item/{sku}',
+                    f'{EBAY_INVENTORY_API_BASE}/inventory_item/{sku}',
                     headers=headers,
                     timeout=10,
                 )
