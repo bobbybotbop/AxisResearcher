@@ -323,6 +323,17 @@ export default function GeneratedListingCard({
                   )}
                 </>
               ) : null}
+              {(listing.ebay_status as string) === 'not_found' && (
+                <>
+                  <span className="text-text-muted">·</span>
+                  <span
+                    className="whitespace-nowrap rounded bg-danger/10 px-1.5 py-0.5 text-xs font-medium text-danger"
+                    title="This listing was deleted or renewed on eBay"
+                  >
+                    Not on eBay
+                  </span>
+                </>
+              )}
               {models && (
                 <>
                   {models.text_model && (
