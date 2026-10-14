@@ -42,13 +42,14 @@ from backend.copyScripts.CopyListingMain import copy_listing_main, testing_funct
 from backend.serp import search_by_image, extract_top_links
 from backend.downloaders.thingiverse import extract_thing_id, stream_zip as tv_stream_zip, probe as probe_thingiverse
 from backend.downloaders.printables import extract_model_id as printables_model_id, build_zip as printables_build_zip, probe as probe_printables
+from backend.downloaders.makerworld import extract_model_info as mw_extract_model_info, download_3mf as mw_download_3mf, probe as probe_makerworld
 from backend.copyScripts.create_image import (
     generate_image_from_urls,
     ImageType,
     categorize_images,
     _openrouter_response_dict_to_image_bytes_and_mime,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status
 from backend.helper_functions import remove_html_tags
 import os
 import json
@@ -68,7 +69,7 @@ from backend.constants.models import DEFAULT_TEXT_MODEL, DEFAULT_IMAGE_MODEL, DE
 from backend.constants.listing import (
     ANGLE_VARIANTS, PROMPT_TYPES, TITLE_MIN_LEN, TITLE_MAX_LEN,
     TITLE_TARGET_LEN, TITLE_MAX_ATTEMPTS, SKIP_CATEGORIES,
-    CATEGORY_TO_IMAGE_TYPE, MANUAL_SKU_PREFIX,
+    CATEGORY_TO_IMAGE_TYPE, MANUAL_SKU_PREFIX, EBAY_STATUS_NOT_FOUND,
 )
 from backend.constants.ebay import EBAY_MARKETPLACE_ID, EBAY_BROWSE_API_BASE, EBAY_INVENTORY_API_BASE
 import re
@@ -2501,23 +2502,53 @@ def api_restock_listings():
                 if not sku.startswith(MANUAL_SKU_PREFIX):
                     update_local_listing_quantity(sku=sku, quantity=quantity)
 
+    # --- Verify failed SKUs against eBay to separate "not found" from real errors ---
+    not_found_skus = []
+    if failed:
+        failed_manual = [s for s in failed if s.startswith(MANUAL_SKU_PREFIX)]
+        failed_axis = [s for s in failed if not s.startswith(MANUAL_SKU_PREFIX)]
+        try:
+            confirmed_not_found = _verify_failed_skus(failed_manual, failed_axis)
+        except Exception as e:
+            print(f"[restock] _verify_failed_skus raised unexpectedly: {e}")
+            confirmed_not_found = set()
+
+        for sku in list(confirmed_not_found):
+            set_listing_ebay_status(sku, EBAY_STATUS_NOT_FOUND)
+            not_found_skus.append(sku)
+            failed.remove(sku)
+            failed_errors.pop(sku, None)
+
     if failed:
         for sku in failed:
             errors = failed_errors.get(sku) or ['(no error details)']
             print(f"[restock] FAILED {sku}: {'; '.join(errors)}")
 
-    if updated or failed:
+    if not_found_skus:
+        for sku in not_found_skus:
+            print(f"[restock] NOT FOUND on eBay (deactivated): {sku}")
+
+    if updated or failed or not_found_skus:
         restock_status = "success" if updated else "error"
         restock_kwargs = {"source": source, "quantity": quantity}
         if updated:
             restock_kwargs["skus"] = updated
-        if failed:
-            restock_kwargs["failed_skus"] = failed
+        all_failed = failed + not_found_skus
+        if all_failed:
+            restock_kwargs["failed_skus"] = all_failed
         if not updated:
             restock_kwargs["error"] = f"{len(failed)} SKU(s) failed to restock"
+        if not_found_skus:
+            restock_kwargs["not_found_skus"] = not_found_skus
         log_event("restock", restock_status, **restock_kwargs)
 
-    return jsonify({'updated': updated, 'failed': failed, 'failed_errors': failed_errors, 'quantity': quantity}), 200
+    return jsonify({
+        'updated': updated,
+        'failed': failed,
+        'not_found': not_found_skus,
+        'failed_errors': failed_errors,
+        'quantity': quantity,
+    }), 200
 
 
 @app.route('/api/logs', methods=['GET'])
@@ -2619,7 +2650,7 @@ def serp_lens_search():
 def test_3d_sites():
     """Run quick connectivity probes for each supported 3D download site."""
     results = {}
-    for site, probe_fn in [("printables.com", probe_printables), ("thingiverse.com", probe_thingiverse)]:
+    for site, probe_fn in [("printables.com", probe_printables), ("thingiverse.com", probe_thingiverse), ("makerworld.com", probe_makerworld)]:
         try:
             ok, message = probe_fn()
             results[site] = {"ok": ok, "message": message}
@@ -2634,7 +2665,7 @@ def download_3d_file():
     Download a 3D file from a supported site and return it as a zip attachment.
 
     Expects JSON: {"link": "https://...", "file_download_delay": 1.0}
-    Supported: thingiverse.com, printables.com
+    Supported: thingiverse.com, printables.com, makerworld.com
     """
     try:
         data = request.get_json()
@@ -2668,7 +2699,19 @@ def download_3d_file():
                 headers={"Content-Disposition": f'attachment; filename="{filename}"'},
             )
 
-        return jsonify({"error": "Unsupported site — only Thingiverse and Printables are supported"}), 400
+        # --- MakerWorld ---
+        if "makerworld.com" in link:
+            slug, instance_id = mw_extract_model_info(link)
+            print(f"[API] Downloading MakerWorld model:{slug} instance:{instance_id}")
+            filename, file_bytes = mw_download_3mf(slug, instance_id)
+            return Response(
+                file_bytes,
+                status=200,
+                mimetype="application/octet-stream",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+        return jsonify({"error": "Unsupported site — supported: thingiverse.com, printables.com, makerworld.com"}), 400
 
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
