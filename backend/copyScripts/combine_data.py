@@ -605,6 +605,7 @@ def set_listing_ebay_status(sku: str, status: str) -> bool:
     """
     filepath = resolve_listing_json_path(sku=sku)
     if not filepath or not os.path.exists(filepath):
+        print(f"⚠️ set_listing_ebay_status: file not found for SKU {sku}")
         return False
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
@@ -614,7 +615,7 @@ def set_listing_ebay_status(sku: str, status: str) -> bool:
             json.dump(data, f, indent=2, ensure_ascii=False)
         return True
     except Exception as e:
-        print(f"[set_listing_ebay_status] Error updating {sku}: {e}")
+        print(f"❌ set_listing_ebay_status error for {sku}: {e}")
         return False
 
 
