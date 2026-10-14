@@ -263,6 +263,16 @@ function App() {
       return true;
     }
   });
+  const [threeDDownloadDelay, setThreeDDownloadDelay] = useState(() => {
+    try {
+      const stored = localStorage.getItem("axisThreeDDownloadDelay");
+      return stored !== null ? parseFloat(stored) : 1.0;
+    } catch {
+      return 1.0;
+    }
+  });
+  const [threeDSiteStatus, setThreeDSiteStatus] = useState<Record<string, { ok: boolean; message: string }> | null>(null);
+  const [threeDSiteTesting, setThreeDSiteTesting] = useState(false);
   const [autoPromoteEnabled, setAutoPromoteEnabled] = useState(true);
   const [promotedListingAdRate, setPromotedListingAdRate] = useState(7.0);
   const [bgRemovedPhotos, setBgRemovedPhotos] = useState<Record<string, string>>({});
@@ -2176,6 +2186,7 @@ function App() {
       .filter((l) => l.sku!.startsWith("MANUAL_") || isUploaded(l))
       .filter((l) => !l.isVariationListing)
       .filter((l) => listingQuantities[l.sku!] !== qty)
+      .filter((l) => (l.ebay_status as string | undefined) !== 'not_found')
       .map((l) => l.sku);
     if (!skus.length) return;
 
@@ -2189,6 +2200,10 @@ function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to restock listings");
 
+      const skuToListing = (data.failed?.length || data.not_found?.length)
+        ? Object.fromEntries(allListings.map((l) => [l.sku, l]))
+        : {};
+
       if (data.updated?.length) {
         setListingQuantities((prev) => {
           const next = { ...prev };
@@ -2200,7 +2215,6 @@ function App() {
       }
       if (data.failed?.length) {
         const failedErrors = data.failed_errors || {};
-        const skuToListing = Object.fromEntries(allListings.map((l) => [l.sku, l]));
         data.failed.forEach((sku: string) => {
           const l = skuToListing[sku];
           const raw = l?.title || sku;
@@ -2212,6 +2226,19 @@ function App() {
             : `(MANUAL item ${ebayId})`;
           const errors = failedErrors[sku]?.join("; ") || "(no error details)";
           console.warn(`SKU ${sku} | ${url} | ${errors}`);
+        });
+      }
+      if (data.not_found?.length) {
+        setAllListings((prev) =>
+          prev.map((l) =>
+            data.not_found.includes(l.sku) ? { ...l, ebay_status: 'not_found' } : l
+          )
+        );
+        data.not_found.forEach((sku: string) => {
+          const l = skuToListing[sku];
+          const raw = (l?.title as string) || sku;
+          const title = raw.length > 50 ? raw.slice(0, 50) + '…' : raw;
+          addToast('error', `"${title}" not found on eBay`);
         });
       }
     } catch (err) {
@@ -2266,6 +2293,30 @@ function App() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ auto_promote_enabled: val }),
     }).catch(() => {});
+  };
+
+  const handleThreeDDownloadDelayChange = (value: string): void => {
+    const parsed = parseFloat(value);
+    if (isNaN(parsed) || parsed < 0) return;
+    setThreeDDownloadDelay(parsed);
+    try { localStorage.setItem("axisThreeDDownloadDelay", String(parsed)); } catch { /* ignore */ }
+  };
+
+  const handleTest3dSites = async (): Promise<void> => {
+    setThreeDSiteTesting(true);
+    setThreeDSiteStatus(null);
+    try {
+      const res = await fetch("/api/test-3d-sites");
+      const data = await res.json() as { results: Record<string, { ok: boolean; message: string }> };
+      setThreeDSiteStatus(data.results);
+    } catch {
+      setThreeDSiteStatus({
+        "printables.com": { ok: false, message: "Request failed" },
+        "thingiverse.com": { ok: false, message: "Request failed" },
+      });
+    } finally {
+      setThreeDSiteTesting(false);
+    }
   };
 
   const savePromotedListingAdRate = (val: number): void => {
@@ -3698,7 +3749,7 @@ function App() {
                   </div>
                 )}
                 <hr className="border-border-default" />
-                <ThreeDFileFinder addToast={addToast as (type: string, message: string) => void} />
+                <ThreeDFileFinder addToast={addToast as (type: string, message: string) => void} fileDownloadDelay={threeDDownloadDelay} />
               </div>
             </div>
           )}
@@ -4047,6 +4098,79 @@ function App() {
                         </button>
                       </div>
                     ))}
+                  </div>
+                </div>
+              </div>
+              <div className="mb-5 rounded-xl border border-border-default bg-surface-muted p-5">
+                <div className="flex flex-col gap-4">
+                  <div>
+                    <h3 className="m-0 text-lg font-semibold text-text-primary">
+                      3D File Sites
+                    </h3>
+                    <p className="mt-1 text-sm text-text-muted">
+                      Sites available for 3D model search and download. Only sites marked "Download supported" can be used in the 3D File Finder.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {(
+                      [
+                        { site: "makerworld.com", supported: false },
+                        { site: "printables.com", supported: true },
+                        { site: "yeggi.com", supported: false },
+                        { site: "cults3d.com", supported: false },
+                        { site: "thingiverse.com", supported: true },
+                        { site: "thangs.com", supported: false },
+                      ] as { site: string; supported: boolean }[]
+                    ).map(({ site, supported }) => {
+                      const testResult = threeDSiteStatus?.[site];
+                      return (
+                        <div key={site} className="flex items-center justify-between gap-3 rounded-lg border border-border-default bg-surface-panel px-3 py-2">
+                          <span className="font-mono text-sm text-text-primary">{site}</span>
+                          <div className="flex items-center gap-2">
+                            {supported ? (
+                              testResult ? (
+                                <span className={`rounded px-2 py-0.5 text-xs font-semibold ${testResult.ok ? "bg-emerald-100 text-emerald-900" : "bg-red-100 text-red-900"}`}>
+                                  {testResult.ok ? "OK" : "Failed"}: {testResult.message}
+                                </span>
+                              ) : (
+                                <span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-900">Download supported</span>
+                              )
+                            ) : (
+                              <span className="rounded bg-surface-hover px-2 py-0.5 text-xs font-semibold text-text-muted">Search only</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      className="cursor-pointer rounded-lg border border-border-default bg-surface-panel px-4 py-2 text-sm font-semibold text-text-primary shadow-sm transition-all hover:-translate-y-0.5 hover:bg-surface-hover hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={handleTest3dSites}
+                      disabled={threeDSiteTesting}
+                    >
+                      {threeDSiteTesting ? "Testing..." : "Test Supported Sites"}
+                    </button>
+                    {threeDSiteStatus && !threeDSiteTesting && (
+                      <span className="text-xs text-text-muted">Done</span>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-sm text-text-secondary">
+                      Delay between file downloads (seconds)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.1}
+                      value={threeDDownloadDelay}
+                      onChange={(e) => handleThreeDDownloadDelayChange(e.target.value)}
+                      className="w-24 rounded border border-border-default bg-surface-panel px-2 py-1 text-sm text-text-primary"
+                    />
+                    <span className="text-xs text-text-tertiary">
+                      Pause between file downloads within a model. Reduces Cloudflare rate-limiting on multi-file models.
+                    </span>
                   </div>
                 </div>
               </div>

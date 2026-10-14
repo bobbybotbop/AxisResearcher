@@ -14,6 +14,7 @@ export interface Listing {
   imageModel?: string;
   textModel?: string;
   sourceUrl?: string;
+  ebay_status?: string;
   [key: string]: unknown;
 }
 
