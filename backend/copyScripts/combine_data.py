@@ -598,6 +598,26 @@ def update_local_listing_quantity(sku=None, quantity=None):
         return False
 
 
+def set_listing_ebay_status(sku: str, status: str) -> bool:
+    """
+    Write ebay_status to a listing's local JSON file.
+    Returns True if the file was updated, False if not found.
+    """
+    filepath = resolve_listing_json_path(sku=sku)
+    if not filepath or not os.path.exists(filepath):
+        return False
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        data['ebay_status'] = status
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+        return True
+    except Exception as e:
+        print(f"[set_listing_ebay_status] Error updating {sku}: {e}")
+        return False
+
+
 def backfill_ebay_listing_id_on_all_files():
     """
     Add ebayListingId: \"\" to each Generated_Listings/*.json that lacks the key.
