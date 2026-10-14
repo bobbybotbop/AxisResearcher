@@ -1680,6 +1680,7 @@ def list_all_listings():
                         'models': listing_data.get('models') or None,
                         'isManualListing': bool(listing_data.get('isManualListing', False)),
                         'isVariationListing': bool(listing_data.get('isVariationListing', False)),
+                        'ebay_status': listing_data.get('ebay_status', 'active'),
                     })
                 except Exception as e:
                     print(f"[API] Error reading {filename}: {e}")
