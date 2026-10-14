@@ -31,3 +31,5 @@ CATEGORY_TO_IMAGE_TYPE = {
     "bad_image": ImageType.REAL_WORLD,
     "professional_image": ImageType.PROFESSIONAL,
 }
+
+EBAY_STATUS_NOT_FOUND = "not_found"
