@@ -2537,7 +2537,7 @@ def api_restock_listings():
         if all_failed:
             restock_kwargs["failed_skus"] = all_failed
         if not updated:
-            restock_kwargs["error"] = f"{len(failed)} SKU(s) failed to restock"
+            restock_kwargs["error"] = f"{len(all_failed)} SKU(s) failed to restock"
         if not_found_skus:
             restock_kwargs["not_found_skus"] = not_found_skus
         log_event("restock", restock_status, **restock_kwargs)
