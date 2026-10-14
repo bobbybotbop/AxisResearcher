@@ -43,6 +43,7 @@ from backend.serp import search_by_image, extract_top_links
 from backend.downloaders.thingiverse import extract_thing_id, stream_zip as tv_stream_zip, probe as probe_thingiverse
 from backend.downloaders.printables import extract_model_id as printables_model_id, build_zip as printables_build_zip, probe as probe_printables
 from backend.downloaders.makerworld import extract_model_info as mw_extract_model_info, download_3mf as mw_download_3mf, probe as probe_makerworld
+from backend.downloaders.cults3d import extract_slug as cults3d_extract_slug, stream_zip as cults3d_stream_zip, probe as probe_cults3d, PaidModelError as Cults3DPaidModelError
 from backend.copyScripts.create_image import (
     generate_image_from_urls,
     ImageType,
@@ -72,6 +73,7 @@ from backend.constants.listing import (
     CATEGORY_TO_IMAGE_TYPE, MANUAL_SKU_PREFIX, EBAY_STATUS_NOT_FOUND,
 )
 from backend.constants.ebay import EBAY_MARKETPLACE_ID, EBAY_BROWSE_API_BASE, EBAY_INVENTORY_API_BASE
+from backend.constants.paths import GENERATED_LISTINGS_DIR
 import re
 import requests
 from dotenv import load_dotenv
@@ -1630,7 +1632,7 @@ def list_all_listings():
         print("[API] /api/listings endpoint called")
         # Use absolute path to ensure we're looking in the right directory
         base_dir = os.path.dirname(os.path.abspath(__file__))
-        output_dir = os.path.join(base_dir, "Generated_Listings")
+        output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
         
         if not os.path.exists(output_dir):
             print(f"[API] Generated_Listings directory does not exist at: {output_dir}")
@@ -1717,7 +1719,7 @@ def api_import_listings():
     """
     last_refreshed = get_manual_import_last_refreshed()
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    generated_listings_dir = os.path.join(base_dir, 'Generated_Listings')
+    generated_listings_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
     try:
         items = get_seller_list(mod_time_from=last_refreshed)
     except Exception as e:
@@ -2192,7 +2194,7 @@ def api_listings_quantities():
     for sku in skus:
         if sku.startswith(MANUAL_SKU_PREFIX):
             base_dir = os.path.dirname(os.path.abspath(__file__))
-            fpath = os.path.join(base_dir, 'Generated_Listings', f'{sku}.json')
+            fpath = os.path.join(base_dir, GENERATED_LISTINGS_DIR, f'{sku}.json')
             try:
                 with open(fpath, 'r', encoding='utf-8') as f:
                     d = json.load(f)
@@ -2564,7 +2566,7 @@ def api_sync_active_listings():
     requested_skus = body.get('skus')  # optional subset
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.join(base_dir, 'Generated_Listings')
+    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
 
     # Build the list of SKUs to check
     if requested_skus:
@@ -2580,11 +2582,11 @@ def api_sync_active_listings():
     if not skus_to_check:
         return jsonify({'checked': 0, 'not_found': []}), 200
 
-    manual_skus = [s for s in skus_to_check if s.startswith(MANUAL_SKU_PREFIX)]
-    axis_skus = [s for s in skus_to_check if not s.startswith(MANUAL_SKU_PREFIX)]
+    failed_manual = [s for s in skus_to_check if s.startswith(MANUAL_SKU_PREFIX)]
+    failed_axis = [s for s in skus_to_check if not s.startswith(MANUAL_SKU_PREFIX)]
 
     try:
-        confirmed_not_found = _verify_failed_skus(manual_skus, axis_skus)
+        confirmed_not_found = _verify_failed_skus(failed_manual, failed_axis)
     except Exception as e:
         return jsonify({'error': f'eBay check failed: {e}'}), 500
 
@@ -2699,7 +2701,7 @@ def serp_lens_search():
 def test_3d_sites():
     """Run quick connectivity probes for each supported 3D download site."""
     results = {}
-    for site, probe_fn in [("printables.com", probe_printables), ("thingiverse.com", probe_thingiverse), ("makerworld.com", probe_makerworld)]:
+    for site, probe_fn in [("printables.com", probe_printables), ("thingiverse.com", probe_thingiverse), ("makerworld.com", probe_makerworld), ("cults3d.com", probe_cults3d)]:
         try:
             ok, message = probe_fn()
             results[site] = {"ok": ok, "message": message}
@@ -2714,7 +2716,7 @@ def download_3d_file():
     Download a 3D file from a supported site and return it as a zip attachment.
 
     Expects JSON: {"link": "https://...", "file_download_delay": 1.0}
-    Supported: thingiverse.com, printables.com, makerworld.com
+    Supported: thingiverse.com, printables.com, makerworld.com, cults3d.com
     """
     try:
         data = request.get_json()
@@ -2760,8 +2762,25 @@ def download_3d_file():
                 headers={"Content-Disposition": f'attachment; filename="{filename}"'},
             )
 
-        return jsonify({"error": "Unsupported site — supported: thingiverse.com, printables.com, makerworld.com"}), 400
+        # --- Cults3D ---
+        if "cults3d.com" in link:
+            try:
+                slug = cults3d_extract_slug(link)
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+            print(f"[API] Downloading Cults3D creation:{slug}")
+            filename, zip_bytes = cults3d_stream_zip(link, file_download_delay=file_download_delay)
+            return Response(
+                zip_bytes,
+                status=200,
+                mimetype="application/zip",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
 
+        return jsonify({"error": "Unsupported site — supported: thingiverse.com, printables.com, makerworld.com, cults3d.com"}), 400
+
+    except Cults3DPaidModelError as e:
+        return jsonify({"error": str(e)}), 400
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except RuntimeError as e:
