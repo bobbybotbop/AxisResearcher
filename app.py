@@ -40,8 +40,8 @@ from flask_cors import CORS
 from werkzeug.serving import WSGIRequestHandler
 from backend.copyScripts.CopyListingMain import copy_listing_main, testing_function
 from backend.serp import search_by_image, extract_top_links
-from backend.downloaders.thingiverse import extract_thing_id, stream_zip as tv_stream_zip
-from backend.downloaders.printables import extract_model_id as printables_model_id, build_zip as printables_build_zip
+from backend.downloaders.thingiverse import extract_thing_id, stream_zip as tv_stream_zip, probe as probe_thingiverse
+from backend.downloaders.printables import extract_model_id as printables_model_id, build_zip as printables_build_zip, probe as probe_printables
 from backend.copyScripts.create_image import (
     generate_image_from_urls,
     ImageType,
@@ -83,6 +83,58 @@ CORS(app, origins=["http://localhost:3000", "http://localhost:5173", "http://loc
 # Structure: {task_id: {"status": "running|completed|failed", "total": N, "completed": M, "results": [], "errors": []}}
 image_generation_tasks = {}
 image_generation_lock = threading.Lock()
+
+
+def _verify_failed_skus(
+    failed_manual_skus: list,
+    failed_axis_skus: list,
+    user_token: str,
+) -> set:
+    """
+    For each failed SKU, check eBay to determine if it truly no longer exists.
+    Returns a set of SKUs confirmed to be gone from eBay.
+
+    - MANUAL SKUs: compared against GetSellerList (single call, all active item IDs).
+    - AXIS SKUs: checked individually via GET /sell/inventory/v1/inventory_item/{sku}.
+
+    Failures in the eBay check are silently skipped (logged) so a transient
+    network issue never incorrectly deactivates a listing.
+    """
+    confirmed_not_found = set()
+
+    # --- MANUAL SKUs: fetch all active item IDs once, check membership ---
+    if failed_manual_skus:
+        try:
+            active_listings = get_seller_list()
+            if active_listings:  # Guard: if list is empty, skip (could be API issue)
+                active_item_ids = {str(item['item_id']) for item in active_listings}
+                for sku in failed_manual_skus:
+                    item_id = sku[len(MANUAL_SKU_PREFIX):]
+                    if item_id not in active_item_ids:
+                        confirmed_not_found.add(sku)
+        except Exception as e:
+            print(f"[verify_failed_skus] GetSellerList failed, skipping MANUAL check: {e}")
+
+    # --- AXIS SKUs: check inventory_item endpoint per SKU ---
+    if failed_axis_skus and user_token:
+        headers = {
+            'Authorization': f'Bearer {user_token}',
+            'Content-Type': 'application/json',
+        }
+        for sku in failed_axis_skus:
+            try:
+                r = requests.get(
+                    f'https://api.ebay.com/sell/inventory/v1/inventory_item/{sku}',
+                    headers=headers,
+                    timeout=10,
+                )
+                if r.status_code == 404:
+                    confirmed_not_found.add(sku)
+            except Exception as e:
+                print(f"[verify_failed_skus] inventory_item check failed for {sku}: {e}")
+
+    return confirmed_not_found
+
 
 @app.route('/api/prompts/<prompt_type>', methods=['GET'])
 def list_prompts(prompt_type):
@@ -2563,12 +2615,25 @@ def serp_lens_search():
         return jsonify({"error": f"SerpAPI search failed: {str(e)}"}), 500
 
 
+@app.route('/api/test-3d-sites', methods=['GET'])
+def test_3d_sites():
+    """Run quick connectivity probes for each supported 3D download site."""
+    results = {}
+    for site, probe_fn in [("printables.com", probe_printables), ("thingiverse.com", probe_thingiverse)]:
+        try:
+            ok, message = probe_fn()
+            results[site] = {"ok": ok, "message": message}
+        except Exception as e:
+            results[site] = {"ok": False, "message": str(e)}
+    return jsonify({"results": results})
+
+
 @app.route('/api/download-3d-file', methods=['POST'])
 def download_3d_file():
     """
     Download a 3D file from a supported site and return it as a zip attachment.
 
-    Expects JSON: {"link": "https://..."}
+    Expects JSON: {"link": "https://...", "file_download_delay": 1.0}
     Supported: thingiverse.com, printables.com
     """
     try:
@@ -2577,14 +2642,15 @@ def download_3d_file():
             return jsonify({"error": "link is required"}), 400
 
         link = data["link"].strip()
+        file_download_delay = float(data.get("file_download_delay", 0.0))
 
         # --- Thingiverse ---
         if "thingiverse.com" in link:
             thing_id = extract_thing_id(link)
             print(f"[API] Downloading Thingiverse thing:{thing_id}")
-            filename, gen = tv_stream_zip(thing_id)
+            filename, zip_bytes = tv_stream_zip(thing_id, file_download_delay=file_download_delay)
             return Response(
-                stream_with_context(gen),
+                zip_bytes,
                 status=200,
                 mimetype="application/zip",
                 headers={"Content-Disposition": f'attachment; filename="{filename}"'},
@@ -2594,7 +2660,7 @@ def download_3d_file():
         if "printables.com" in link:
             model_id = printables_model_id(link)
             print(f"[API] Downloading Printables model:{model_id}")
-            filename, zip_bytes = printables_build_zip(model_id)
+            filename, zip_bytes = printables_build_zip(model_id, file_download_delay=file_download_delay)
             return Response(
                 zip_bytes,
                 status=200,
