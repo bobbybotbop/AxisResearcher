@@ -24,6 +24,8 @@ interface UploadListingsToolbarProps {
   onAutoRestockQuantityChange?: (quantity: number) => void;
   onManualRestock?: () => void;
   isRestocking?: boolean;
+  onSyncWithEbay?: () => void;
+  isSyncing?: boolean;
   viewMode: "compact" | "detailed";
   onViewModeChange: (mode: "compact" | "detailed") => void;
 }
@@ -49,6 +51,8 @@ export default function UploadListingsToolbar({
   onAutoRestockQuantityChange,
   onManualRestock,
   isRestocking,
+  onSyncWithEbay,
+  isSyncing,
   viewMode,
   onViewModeChange,
 }: UploadListingsToolbarProps) {
@@ -295,6 +299,17 @@ export default function UploadListingsToolbar({
             className="w-14 rounded border border-border-default bg-surface-muted px-2 py-1 text-sm text-text-primary"
           />
         </div>
+      )}
+
+      {onSyncWithEbay && (
+        <button
+          type="button"
+          onClick={onSyncWithEbay}
+          disabled={isSyncing}
+          className={btnPillSm}
+        >
+          {isSyncing ? 'Syncing…' : 'Sync with eBay'}
+        </button>
       )}
 
       <button

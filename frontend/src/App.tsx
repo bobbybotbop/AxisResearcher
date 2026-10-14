@@ -319,6 +319,7 @@ function App() {
   const [minimumImagesPerListing, setMinimumImagesPerListing] = useState(10);
   const [autoRestockConfirm, setAutoRestockConfirm] = useState<{ nextEnabled: boolean; nextQuantity: number } | null>(null);
   const [isRestocking, setIsRestocking] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [historySelectMode, setHistorySelectMode] = useState<boolean>(false);
   const [historySelectedSkus, setHistorySelectedSkus] = useState<Set<string>>(new Set());
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
@@ -2249,6 +2250,33 @@ function App() {
     }
   };
 
+  const handleSyncWithEbay = async (): Promise<void> => {
+    setIsSyncing(true);
+    try {
+      const res = await fetch('/api/listings/sync-active', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Sync failed');
+
+      if (data.not_found?.length) {
+        setAllListings((prev) =>
+          prev.map((l) =>
+            data.not_found.includes(l.sku) ? { ...l, ebay_status: 'not_found' } : l
+          )
+        );
+        addToast('error', `${data.not_found.length} listing(s) no longer on eBay`);
+      } else {
+        addToast('success', 'All listings verified on eBay');
+      }
+    } catch (err) {
+      addToast('error', (err as Error).message || 'Sync failed');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleAutoRestockEnabledChange = (checked: boolean): void => {
     if (checked) {
       setAutoRestockConfirm({ nextEnabled: true, nextQuantity: autoRestockQuantity });
@@ -3492,6 +3520,8 @@ function App() {
                 isRestocking={isRestocking}
                 viewMode={historyViewMode}
                 onViewModeChange={handleHistoryViewModeChange}
+                onSyncWithEbay={handleSyncWithEbay}
+                isSyncing={isSyncing}
               />
 
               <div className="mb-3 flex items-center gap-3">
