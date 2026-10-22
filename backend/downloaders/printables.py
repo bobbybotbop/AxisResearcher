@@ -1,13 +1,23 @@
 import io
 import re
+import time
 import zipfile
 import requests
 
 GRAPHQL_URL = "https://api.printables.com/graphql/"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
     "Content-Type": "application/json",
+}
+
+DOWNLOAD_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Accept": "*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Fetch-Site": "same-site",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Dest": "empty",
 }
 
 LIST_FILES_QUERY = """
@@ -91,7 +101,33 @@ def _get_download_link(file_id: str, model_id: str, file_type: str) -> str:
     return link
 
 
-def build_zip(model_id: str) -> tuple[str, bytes]:
+def probe() -> tuple[bool, str]:
+    """
+    Quick connectivity probe: list files for a known public model, get a
+    download link, then HEAD the CDN URL. Returns (ok, message).
+    """
+    probe_model_id = "68734"
+    try:
+        _, files = _list_files(probe_model_id)
+        if not files:
+            return False, "No files returned by GraphQL API"
+        f = files[0]
+        url = _get_download_link(f["id"], probe_model_id, f["file_type"])
+        referer = f"https://www.printables.com/model/{probe_model_id}"
+        r = requests.head(
+            url,
+            headers={**DOWNLOAD_HEADERS, "Referer": referer, "Origin": "https://www.printables.com"},
+            timeout=10,
+            allow_redirects=True,
+        )
+        if r.status_code == 200:
+            return True, f"GraphQL + CDN accessible ({f['name']})"
+        return False, f"CDN HEAD returned {r.status_code}"
+    except Exception as e:
+        return False, str(e)
+
+
+def build_zip(model_id: str, file_download_delay: float = 0.0) -> tuple[str, bytes]:
     """
     Download all STL/GCode/SLA files for a Printables model and bundle them
     into an in-memory zip.
@@ -105,10 +141,13 @@ def build_zip(model_id: str) -> tuple[str, bytes]:
     buf = io.BytesIO()
     succeeded = 0
     with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for f in files:
+        referer = f"https://www.printables.com/model/{model_id}"
+        for i, f in enumerate(files):
+            if i > 0 and file_download_delay > 0:
+                time.sleep(file_download_delay)
             try:
                 url = _get_download_link(f["id"], model_id, f["file_type"])
-                r = requests.get(url, timeout=30)
+                r = requests.get(url, headers={**DOWNLOAD_HEADERS, "Referer": referer, "Origin": "https://www.printables.com"}, timeout=30)
                 r.raise_for_status()
                 zf.writestr(f["name"], r.content)
                 succeeded += 1

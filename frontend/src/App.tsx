@@ -273,6 +273,7 @@ function App() {
   });
   const [threeDSiteStatus, setThreeDSiteStatus] = useState<Record<string, { ok: boolean; message: string }> | null>(null);
   const [threeDSiteTesting, setThreeDSiteTesting] = useState(false);
+  const [cults3dCredStatus, setCults3dCredStatus] = useState<{ has_credentials: boolean; email: string } | null>(null);
   const [autoPromoteEnabled, setAutoPromoteEnabled] = useState(true);
   const [promotedListingAdRate, setPromotedListingAdRate] = useState(7.0);
   const [bgRemovedPhotos, setBgRemovedPhotos] = useState<Record<string, string>>({});
@@ -2605,6 +2606,20 @@ function App() {
     if (activeTab === "settings") fetchPromptOptions();
   }, [activeTab, fetchPromptOptions]);
 
+  const fetchCults3dCredStatus = useCallback(async (): Promise<void> => {
+    try {
+      const res = await fetch("/api/cults3d-credential-status");
+      const data = await res.json() as { has_credentials: boolean; email: string };
+      setCults3dCredStatus(data);
+    } catch {
+      setCults3dCredStatus({ has_credentials: false, email: "" });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "settings") fetchCults3dCredStatus();
+  }, [activeTab, fetchCults3dCredStatus]);
+
   const openPromptModal = useCallback((type: string, slot: string | null = null): void => {
     setPromptModalType(type);
     setPromptModalSlot(slot);
@@ -4144,15 +4159,17 @@ function App() {
                   <div className="flex flex-col gap-2">
                     {(
                       [
-                        { site: "makerworld.com", supported: false },
+                        { site: "makerworld.com", supported: true },
                         { site: "printables.com", supported: true },
                         { site: "yeggi.com", supported: false },
-                        { site: "cults3d.com", supported: false },
+                        { site: "cults3d.com", supported: true, requiresAuth: true, signInUrl: "https://cults3d.com/en/log-in-choice" },
                         { site: "thingiverse.com", supported: true },
                         { site: "thangs.com", supported: false },
-                      ] as { site: string; supported: boolean }[]
-                    ).map(({ site, supported }) => {
+                      ] as { site: string; supported: boolean; requiresAuth?: boolean; signInUrl?: string }[]
+                    ).map(({ site, supported, requiresAuth, signInUrl }) => {
                       const testResult = threeDSiteStatus?.[site];
+                      const isCults3d = site === "cults3d.com";
+                      const credStatus = isCults3d ? cults3dCredStatus : null;
                       return (
                         <div key={site} className="flex items-center justify-between gap-3 rounded-lg border border-border-default bg-surface-panel px-3 py-2">
                           <span className="font-mono text-sm text-text-primary">{site}</span>
@@ -4167,6 +4184,20 @@ function App() {
                               )
                             ) : (
                               <span className="rounded bg-surface-hover px-2 py-0.5 text-xs font-semibold text-text-muted">Search only</span>
+                            )}
+                            {requiresAuth && credStatus !== null && (
+                              <span className={`rounded px-2 py-0.5 text-xs font-semibold ${credStatus.has_credentials ? "bg-emerald-100 text-emerald-900" : "bg-amber-100 text-amber-900"}`}>
+                                {credStatus.has_credentials ? `Logged in${credStatus.email ? `: ${credStatus.email}` : ""}` : "Not logged in"}
+                              </span>
+                            )}
+                            {requiresAuth && signInUrl && (
+                              <button
+                                type="button"
+                                className="cursor-pointer rounded px-2 py-0.5 text-xs font-semibold text-text-secondary underline-offset-2 hover:text-text-primary hover:underline"
+                                onClick={() => window.open(signInUrl, "_blank", "noopener,noreferrer")}
+                              >
+                                Sign in
+                              </button>
                             )}
                           </div>
                         </div>

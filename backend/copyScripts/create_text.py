@@ -109,16 +109,22 @@ def _find_closing_quote(s):
     return -1
 
 
-def _stream_field(prompt, field, model, out_queue):
+def _stream_field(prompt, field, model, out_queue, emit_field=None):
     """
     Run a streaming LLM call for a single-field JSON response and push events onto out_queue.
 
-    Pushes: {"type": "token", "field": field, "delta": "..."} events, then
+    `field` is the JSON key the LLM returns (e.g. "edited_title").
+    `emit_field` is the field name used in token events (defaults to `field`).
+
+    Pushes: {"type": "token", "field": emit_field, "delta": "..."} events, then
             {"type": "_done", "field": field, "data": {field: "..."}}
     On error pushes: {"type": "error", "error": "..."}
     """
     import re as _re
     from backend.ebay_cli import call_text_llm_stream
+
+    if emit_field is None:
+        emit_field = field
 
     accumulated = ""
     marker = f'"{field}"'
@@ -144,21 +150,21 @@ def _stream_field(prompt, field, model, out_queue):
                         if close_pos != -1:
                             content = content[:close_pos]
                             if content:
-                                out_queue.put({"type": "token", "field": field, "delta": content})
+                                out_queue.put({"type": "token", "field": emit_field, "delta": content})
                             state = "done"
                         else:
                             if content:
-                                out_queue.put({"type": "token", "field": field, "delta": content})
+                                out_queue.put({"type": "token", "field": emit_field, "delta": content})
                             state = "in_field"
 
         elif state == "in_field":
             if '"' in token:
                 parts = token.split('"', 1)
                 if parts[0]:
-                    out_queue.put({"type": "token", "field": field, "delta": parts[0]})
+                    out_queue.put({"type": "token", "field": emit_field, "delta": parts[0]})
                 state = "done"
             else:
-                out_queue.put({"type": "token", "field": field, "delta": token})
+                out_queue.put({"type": "token", "field": emit_field, "delta": token})
 
     # Parse final result
     result = None
@@ -230,14 +236,14 @@ def create_text_stream(
     lock = threading.Lock()
 
     def run_title():
-        _stream_field(title_prompt_text, "edited_title", model, event_queue)
+        _stream_field(title_prompt_text, "edited_title", model, event_queue, emit_field="title")
         with lock:
             done_count[0] += 1
         if done_count[0] == 2:
             event_queue.put(_SENTINEL)
 
     def run_description():
-        _stream_field(desc_prompt_text, "edited_description", model, event_queue)
+        _stream_field(desc_prompt_text, "edited_description", model, event_queue, emit_field="description")
         with lock:
             done_count[0] += 1
         if done_count[0] == 2:

@@ -2711,6 +2711,21 @@ def test_3d_sites():
     return jsonify({"results": results})
 
 
+@app.route('/api/cults3d-credential-status', methods=['GET'])
+def cults3d_credential_status():
+    """Return whether Cults3D credentials are configured in .env."""
+    email = os.environ.get("CULTS3D_EMAIL", "")
+    password = os.environ.get("CULTS3D_PASSWORD", "")
+    has_credentials = bool(email and password)
+    masked_email = ""
+    if email:
+        at = email.find("@")
+        local = email[:at] if at > 0 else email
+        domain = email[at:] if at > 0 else ""
+        masked_email = local[:2] + "*" * max(0, len(local) - 2) + domain
+    return jsonify({"has_credentials": has_credentials, "email": masked_email})
+
+
 @app.route('/api/download-3d-file', methods=['POST'])
 def download_3d_file():
     """

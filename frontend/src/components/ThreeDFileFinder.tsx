@@ -12,9 +12,10 @@ interface SearchResult {
 
 interface ThreeDFileFinderProps {
   addToast?: (type: string, message: string) => void;
+  fileDownloadDelay?: number;
 }
 
-function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
+function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderProps) {
   // Step 1 — Fetch eBay Photos
   const [step1Link, setStep1Link] = useState("");
   const [step1Photos, setStep1Photos] = useState<string[]>([]);
@@ -36,7 +37,9 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
   // True when a result link can be forwarded to Step 3
   const canForwardToStep3 = (link: string) =>
     /thingiverse\.com\/thing[:/]\d+/.test(link) ||
-    /printables\.com\/model\/\d+/.test(link);
+    /printables\.com\/model\/\d+/.test(link) ||
+    /makerworld\.com\/[^/]+\/models\/\d+/.test(link) ||
+    /cults3d\.com\/[^/]+\/3d-model\/[^/]+\/[^/?#]+/.test(link);
 
   // True when step3Url is a supported downloadable pattern
   const step3Supported = canForwardToStep3(step3Url.trim());
@@ -111,7 +114,7 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
       const res = await fetch("/api/download-3d-file", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ link }),
+        body: JSON.stringify({ link, file_download_delay: fileDownloadDelay }),
       });
       if (!res.ok) {
         let errMsg = `Download failed (${res.status})`;
@@ -312,7 +315,7 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
                 setStep3Result(null);
                 setStep3Error(null);
               }}
-              placeholder="Paste printables.com or thingiverse.com URL..."
+              placeholder="Paste printables.com, thingiverse.com, makerworld.com, or cults3d.com URL..."
               disabled={step3Loading}
               loading={step3Loading}
               aria-label="3D site URL"
@@ -332,7 +335,7 @@ function ThreeDFileFinder({ addToast }: ThreeDFileFinderProps) {
           {step3Url.trim() && !step3Supported ? (
             <span className="text-amber-400">Unsupported site</span>
           ) : (
-            <span className="text-text-muted">Supported: printables.com, thingiverse.com</span>
+            <span className="text-text-muted">Supported: printables.com, thingiverse.com, makerworld.com, cults3d.com (free only)</span>
           )}
         </p>
         {step3Result && (

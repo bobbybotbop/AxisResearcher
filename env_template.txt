@@ -19,6 +19,11 @@ bedrock_api_key=
 # SerpAPI (for reverse image search)
 serp_api_token=
 
+# MakerWorld session cookies (required for 3MF downloads)
+# Log in to makerworld.com, open DevTools > Network, select any request,
+# copy the full "Cookie:" header value and paste it here.
+MAKERWORLD_COOKIES=
+
 # eBay OAuth Tokens
 user_token=
 

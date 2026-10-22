@@ -4,7 +4,6 @@ WHITELISTED_SITES = [
     "yeggi.com",
     "cults3d.com",
     "thingiverse.com",
-    "myminifactory.com",
     "thangs.com",
 ]
 
