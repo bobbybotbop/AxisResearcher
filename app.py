@@ -43,7 +43,9 @@ from backend.serp import search_by_image, extract_top_links
 from backend.downloaders.thingiverse import extract_thing_id, stream_zip as tv_stream_zip, probe as probe_thingiverse
 from backend.downloaders.printables import extract_model_id as printables_model_id, build_zip as printables_build_zip, probe as probe_printables
 from backend.downloaders.makerworld import extract_model_info as mw_extract_model_info, download_3mf as mw_download_3mf, probe as probe_makerworld
-from backend.downloaders.cults3d import extract_slug as cults3d_extract_slug, stream_zip as cults3d_stream_zip, probe as probe_cults3d, PaidModelError as Cults3DPaidModelError
+from backend.downloaders.cults3d import extract_slug as cults3d_extract_slug, stream_zip as cults3d_stream_zip, probe as probe_cults3d, PaidModelError as Cults3DPaidModelError, load_cookies_from_browser as cults3d_load_cookies_from_browser
+from backend.downloaders.thangs import extract_model_id as thangs_extract_model_id, build_zip as thangs_build_zip, probe as probe_thangs, PaidModelError as ThangsPaidModelError
+from backend.downloaders.zip_utils import extract_best_3d_file
 from backend.copyScripts.create_image import (
     generate_image_from_urls,
     ImageType,
@@ -2702,37 +2704,192 @@ def serp_lens_search():
 def test_3d_sites():
     """Run quick connectivity probes for each supported 3D download site."""
     results = {}
-    for site, probe_fn in [("printables.com", probe_printables), ("thingiverse.com", probe_thingiverse), ("makerworld.com", probe_makerworld), ("cults3d.com", probe_cults3d)]:
+    for site, probe_fn in [("printables.com", probe_printables), ("thingiverse.com", probe_thingiverse), ("makerworld.com", probe_makerworld), ("cults3d.com", probe_cults3d), ("thangs.com", probe_thangs)]:
         try:
             ok, message = probe_fn()
             results[site] = {"ok": ok, "message": message}
+            if not ok:
+                print(f"[test-3d-sites] {site} FAILED: {message}")
         except Exception as e:
             results[site] = {"ok": False, "message": str(e)}
+            print(f"[test-3d-sites] {site} ERROR: {e}")
     return jsonify({"results": results})
 
 
 @app.route('/api/cults3d-credential-status', methods=['GET'])
 def cults3d_credential_status():
-    """Return whether Cults3D credentials are configured in .env."""
-    email = os.environ.get("CULTS3D_EMAIL", "")
-    password = os.environ.get("CULTS3D_PASSWORD", "")
-    has_credentials = bool(email and password)
+    """Return the auth state for Cults3D (email/password or cookies)."""
+    cookies = os.environ.get("CULTS3D_COOKIES", "").strip()
+    email = os.environ.get("CULTS3D_EMAIL", "").strip()
+    password = os.environ.get("CULTS3D_PASSWORD", "").strip()
+    has_credentials = bool(cookies or (email and password))
+    auth_type = "cookies" if cookies else ("email" if (email and password) else None)
     masked_email = ""
     if email:
         at = email.find("@")
         local = email[:at] if at > 0 else email
         domain = email[at:] if at > 0 else ""
         masked_email = local[:2] + "*" * max(0, len(local) - 2) + domain
-    return jsonify({"has_credentials": has_credentials, "email": masked_email})
+    return jsonify({
+        "has_credentials": has_credentials,
+        "auth_type": auth_type,
+        "email": masked_email,
+    })
+
+
+@app.route('/api/cults3d-credentials', methods=['POST'])
+def update_cults3d_credentials():
+    """Save CULTS3D_COOKIES to the .env file."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        cookies = str(data.get('cookies', '')).strip()
+
+        if not cookies:
+            return jsonify({"error": "Cookie string is required"}), 400
+
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+
+        try:
+            with open(env_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            lines = []
+
+        new_lines = []
+        found = False
+        for line in lines:
+            if line.strip().startswith('CULTS3D_COOKIES='):
+                new_lines.append(f'CULTS3D_COOKIES={cookies}\n')
+                found = True
+            else:
+                new_lines.append(line)
+
+        if not found:
+            if new_lines and not new_lines[-1].endswith('\n'):
+                new_lines.append('\n')
+            new_lines.append(f'CULTS3D_COOKIES={cookies}\n')
+
+        with open(env_path, 'w', encoding='utf-8') as f:
+            f.writelines(new_lines)
+
+        load_dotenv(env_path, override=True)
+        print("[API] Cults3D cookies updated in .env")
+        return jsonify({"success": True, "message": "Cults3D cookies saved."})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to save cookies: {str(e)}"}), 500
+
+
+@app.route('/api/cults3d-email-credentials', methods=['POST'])
+def update_cults3d_email_credentials():
+    """Save CULTS3D_EMAIL and CULTS3D_PASSWORD to the .env file."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        email = str(data.get('email', '')).strip()
+        password = str(data.get('password', '')).strip()
+
+        if not email or not password:
+            return jsonify({"error": "Email and password are required"}), 400
+
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+        updates = {'CULTS3D_EMAIL': email, 'CULTS3D_PASSWORD': password}
+
+        try:
+            with open(env_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            lines = []
+
+        new_lines = []
+        found = {name: False for name in updates}
+        for line in lines:
+            replaced = False
+            for name, value in updates.items():
+                if line.strip().startswith(name + '='):
+                    new_lines.append(f'{name}={value}\n')
+                    found[name] = True
+                    replaced = True
+                    break
+            if not replaced:
+                new_lines.append(line)
+
+        for name, was_found in found.items():
+            if not was_found:
+                if new_lines and not new_lines[-1].endswith('\n'):
+                    new_lines.append('\n')
+                new_lines.append(f'{name}={updates[name]}\n')
+
+        with open(env_path, 'w', encoding='utf-8') as f:
+            f.writelines(new_lines)
+
+        load_dotenv(env_path, override=True)
+        print("[API] Cults3D email credentials updated in .env")
+        return jsonify({"success": True, "message": "Email credentials saved."})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to save credentials: {str(e)}"}), 500
+
+
+@app.route('/api/cults3d-auto-load-cookies', methods=['POST'])
+def cults3d_auto_load_cookies():
+    """Read Cults3D cookies from the user's installed browser and save them to .env."""
+    try:
+        cookies = cults3d_load_cookies_from_browser()
+
+        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+
+        try:
+            with open(env_path, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+        except FileNotFoundError:
+            lines = []
+
+        new_lines = []
+        found = False
+        for line in lines:
+            if line.strip().startswith('CULTS3D_COOKIES='):
+                new_lines.append(f'CULTS3D_COOKIES={cookies}\n')
+                found = True
+            else:
+                new_lines.append(line)
+
+        if not found:
+            if new_lines and not new_lines[-1].endswith('\n'):
+                new_lines.append('\n')
+            new_lines.append(f'CULTS3D_COOKIES={cookies}\n')
+
+        with open(env_path, 'w', encoding='utf-8') as f:
+            f.writelines(new_lines)
+
+        load_dotenv(env_path, override=True)
+        print("[API] Cults3D cookies auto-loaded from browser")
+        return jsonify({"success": True, "message": "Cookies loaded from browser and saved."})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/download-3d-file', methods=['POST'])
 def download_3d_file():
     """
-    Download a 3D file from a supported site and return it as a zip attachment.
+    Download a 3D file from a supported site.
 
-    Expects JSON: {"link": "https://...", "file_download_delay": 1.0}
-    Supported: thingiverse.com, printables.com, makerworld.com, cults3d.com
+    Expects JSON: {
+      "link": "https://...",
+      "file_download_delay": 1.0,
+      "mode": "full_zip" | "single_file"   (default: "full_zip")
+    }
+    Supported: thingiverse.com, printables.com, makerworld.com, cults3d.com, thangs.com
     """
     try:
         data = request.get_json()
@@ -2741,61 +2898,77 @@ def download_3d_file():
 
         link = data["link"].strip()
         file_download_delay = float(data.get("file_download_delay", 0.0))
+        mode = data.get("mode", "full_zip")
+        if mode not in ("full_zip", "single_file"):
+            return jsonify({"error": "mode must be 'full_zip' or 'single_file'"}), 400
+
+        filename: str
+        raw_bytes: bytes
+        is_zip: bool
 
         # --- Thingiverse ---
         if "thingiverse.com" in link:
             thing_id = extract_thing_id(link)
             print(f"[API] Downloading Thingiverse thing:{thing_id}")
-            filename, zip_bytes = tv_stream_zip(thing_id, file_download_delay=file_download_delay)
-            return Response(
-                zip_bytes,
-                status=200,
-                mimetype="application/zip",
-                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-            )
+            filename, raw_bytes = tv_stream_zip(thing_id, file_download_delay=file_download_delay)
+            is_zip = True
 
         # --- Printables ---
-        if "printables.com" in link:
+        elif "printables.com" in link:
             model_id = printables_model_id(link)
             print(f"[API] Downloading Printables model:{model_id}")
-            filename, zip_bytes = printables_build_zip(model_id, file_download_delay=file_download_delay)
-            return Response(
-                zip_bytes,
-                status=200,
-                mimetype="application/zip",
-                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-            )
+            filename, raw_bytes = printables_build_zip(model_id, file_download_delay=file_download_delay)
+            is_zip = True
 
         # --- MakerWorld ---
-        if "makerworld.com" in link:
+        elif "makerworld.com" in link:
             slug, instance_id = mw_extract_model_info(link)
             print(f"[API] Downloading MakerWorld model:{slug} instance:{instance_id}")
-            filename, file_bytes = mw_download_3mf(slug, instance_id)
-            return Response(
-                file_bytes,
-                status=200,
-                mimetype="application/octet-stream",
-                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-            )
+            filename, raw_bytes = mw_download_3mf(slug, instance_id)
+            is_zip = False  # single .3mf — bypasses extraction in both modes; add any future single-file site the same way
 
         # --- Cults3D ---
-        if "cults3d.com" in link:
+        elif "cults3d.com" in link:
             try:
                 slug = cults3d_extract_slug(link)
             except ValueError as e:
                 return jsonify({"error": str(e)}), 400
             print(f"[API] Downloading Cults3D creation:{slug}")
-            filename, zip_bytes = cults3d_stream_zip(link, file_download_delay=file_download_delay)
+            filename, raw_bytes = cults3d_stream_zip(link, file_download_delay=file_download_delay)
+            is_zip = True
+
+        # --- Thangs ---
+        elif "thangs.com" in link:
+            try:
+                model_id = thangs_extract_model_id(link)
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+            print(f"[API] Downloading Thangs model:{model_id}")
+            filename, raw_bytes = thangs_build_zip(link, file_download_delay=file_download_delay)
+            is_zip = True
+
+        else:
+            return jsonify({"error": "Unsupported site — supported: thingiverse.com, printables.com, makerworld.com, cults3d.com, thangs.com"}), 400
+
+        # --- Apply mode ---
+        if mode == "single_file" and is_zip:
+            single_filename, single_bytes = extract_best_3d_file(raw_bytes)
             return Response(
-                zip_bytes,
+                single_bytes,
                 status=200,
-                mimetype="application/zip",
-                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+                mimetype="application/octet-stream",
+                headers={"Content-Disposition": f'attachment; filename="{single_filename}"'},
             )
 
-        return jsonify({"error": "Unsupported site — supported: thingiverse.com, printables.com, makerworld.com, cults3d.com"}), 400
+        mime = "application/zip" if is_zip else "application/octet-stream"
+        return Response(
+            raw_bytes,
+            status=200,
+            mimetype=mime,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
 
-    except Cults3DPaidModelError as e:
+    except (Cults3DPaidModelError, ThangsPaidModelError) as e:
         return jsonify({"error": str(e)}), 400
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
