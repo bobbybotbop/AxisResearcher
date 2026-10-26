@@ -30,7 +30,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderP
 
   // Step 3 — Download 3D File
   const [step3Url, setStep3Url] = useState("");
-  const [step3Loading, setStep3Loading] = useState(false);
+  const [step3LoadingMode, setStep3LoadingMode] = useState<"full_zip" | "single_file" | null>(null);
   const [step3Result, setStep3Result] = useState<{ filename: string; bytes: number } | null>(null);
   const [step3Error, setStep3Error] = useState<string | null>(null);
 
@@ -104,17 +104,17 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderP
     }
   };
 
-  const handleStep3Download = async () => {
+  const handleStep3Download = async (mode: "full_zip" | "single_file") => {
     const link = step3Url.trim();
     if (!link || !step3Supported) return;
-    setStep3Loading(true);
+    setStep3LoadingMode(mode);
     setStep3Result(null);
     setStep3Error(null);
     try {
       const res = await fetch("/api/download-3d-file", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ link, file_download_delay: fileDownloadDelay }),
+        body: JSON.stringify({ link, file_download_delay: fileDownloadDelay, mode }),
       });
       if (!res.ok) {
         let errMsg = `Download failed (${res.status})`;
@@ -126,7 +126,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderP
       }
       const disposition = res.headers.get("Content-Disposition") || "";
       const nameMatch = disposition.match(/filename="?([^"]+)"?/);
-      const filename = nameMatch ? nameMatch[1] : "download.zip";
+      const filename = nameMatch ? nameMatch[1] : (mode === "full_zip" ? "download.zip" : "download.3mf");
       const blob = await res.blob();
       const downloadUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -138,7 +138,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderP
     } catch (err) {
       setStep3Error((err as Error).message || "Download failed");
     } finally {
-      setStep3Loading(false);
+      setStep3LoadingMode(null);
     }
   };
 
@@ -304,7 +304,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderP
       <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
         <p className="text-sm font-semibold text-text-primary">Step 3 — Download 3D File</p>
         <form
-          onSubmit={(e) => { e.preventDefault(); handleStep3Download(); }}
+          onSubmit={(e) => { e.preventDefault(); handleStep3Download("full_zip"); }}
           className="flex items-center gap-3"
         >
           <div className="flex-1">
@@ -316,8 +316,8 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderP
                 setStep3Error(null);
               }}
               placeholder="Paste printables.com, thingiverse.com, makerworld.com, or cults3d.com URL..."
-              disabled={step3Loading}
-              loading={step3Loading}
+              disabled={step3LoadingMode !== null}
+              loading={step3LoadingMode !== null}
               aria-label="3D site URL"
               fullWidth
             />
@@ -325,10 +325,18 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderP
           <button
             type="button"
             className={btnPill}
-            onClick={handleStep3Download}
-            disabled={!step3Supported || step3Loading}
+            onClick={() => handleStep3Download("full_zip")}
+            disabled={!step3Supported || step3LoadingMode !== null}
           >
-            {step3Loading ? "Downloading..." : "Download"}
+            {step3LoadingMode === "full_zip" ? "Downloading..." : "Download Full Zip"}
+          </button>
+          <button
+            type="button"
+            className={btnPill}
+            onClick={() => handleStep3Download("single_file")}
+            disabled={!step3Supported || step3LoadingMode !== null}
+          >
+            {step3LoadingMode === "single_file" ? "Downloading..." : "Download Single File"}
           </button>
         </form>
         <p className="text-xs">
