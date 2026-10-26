@@ -20,6 +20,8 @@ def extract_best_3d_file(zip_bytes: bytes) -> tuple[str, bytes]:
             ext: [] for ext in PREFERRED_3D_EXTENSIONS
         }
         for info in infos:
+            if info.is_dir():
+                continue
             if "." not in info.filename:
                 continue
             ext = "." + info.filename.rsplit(".", 1)[-1].lower()
@@ -31,8 +33,9 @@ def extract_best_3d_file(zip_bytes: bytes) -> tuple[str, bytes]:
             if not matches:
                 continue
             best = max(matches, key=lambda i: i.file_size)
-            basename = best.filename.rsplit("/", 1)[-1] or best.filename
+            basename = best.filename.replace("\\", "/").rsplit("/", 1)[-1] or best.filename
             return basename, zf.read(best.filename)
 
+    # no supported file found in zip
     supported = ", ".join(e.lstrip(".").upper() for e in PREFERRED_3D_EXTENSIONS)
     raise ValueError(f"No supported 3D file found in zip (supported: {supported})")
