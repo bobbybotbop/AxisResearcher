@@ -45,6 +45,7 @@ from backend.downloaders.printables import extract_model_id as printables_model_
 from backend.downloaders.makerworld import extract_model_info as mw_extract_model_info, download_3mf as mw_download_3mf, probe as probe_makerworld
 from backend.downloaders.cults3d import extract_slug as cults3d_extract_slug, stream_zip as cults3d_stream_zip, probe as probe_cults3d, PaidModelError as Cults3DPaidModelError, load_cookies_from_browser as cults3d_load_cookies_from_browser
 from backend.downloaders.thangs import extract_model_id as thangs_extract_model_id, build_zip as thangs_build_zip, probe as probe_thangs, PaidModelError as ThangsPaidModelError
+from backend.constants.files_3d import DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, DOWNLOAD_MODES
 from backend.downloaders.zip_utils import extract_best_3d_file
 from backend.copyScripts.create_image import (
     generate_image_from_urls,
@@ -2898,9 +2899,9 @@ def download_3d_file():
 
         link = data["link"].strip()
         file_download_delay = float(data.get("file_download_delay", 0.0))
-        mode = data.get("mode", "full_zip")
-        if mode not in ("full_zip", "single_file"):
-            return jsonify({"error": "mode must be 'full_zip' or 'single_file'"}), 400
+        mode = data.get("mode", DOWNLOAD_MODE_FULL_ZIP)
+        if mode not in DOWNLOAD_MODES:
+            return jsonify({"error": f"mode must be one of: {', '.join(DOWNLOAD_MODES)}"}), 400
 
         filename: str
         raw_bytes: bytes
@@ -2951,7 +2952,7 @@ def download_3d_file():
             return jsonify({"error": "Unsupported site — supported: thingiverse.com, printables.com, makerworld.com, cults3d.com, thangs.com"}), 400
 
         # --- Apply mode ---
-        if mode == "single_file" and is_zip:
+        if mode == DOWNLOAD_MODE_SINGLE_FILE and is_zip:
             try:
                 single_filename, single_bytes = extract_best_3d_file(raw_bytes)
             except ValueError as e:

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import MessageBarInput from "./MessageBarInput";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
+import { DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, type DownloadMode } from "../constants/files3d";
 
 interface SearchResult {
   site_type?: string;
@@ -30,7 +31,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderP
 
   // Step 3 — Download 3D File
   const [step3Url, setStep3Url] = useState("");
-  const [step3LoadingMode, setStep3LoadingMode] = useState<"full_zip" | "single_file" | null>(null);
+  const [step3LoadingMode, setStep3LoadingMode] = useState<DownloadMode | null>(null);
   const [step3Result, setStep3Result] = useState<{ filename: string; bytes: number } | null>(null);
   const [step3Error, setStep3Error] = useState<string | null>(null);
 
@@ -104,7 +105,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderP
     }
   };
 
-  const handleStep3Download = async (mode: "full_zip" | "single_file") => {
+  const handleStep3Download = async (mode: DownloadMode) => {
     const link = step3Url.trim();
     if (!link || !step3Supported) return;
     setStep3LoadingMode(mode);
@@ -126,7 +127,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderP
       }
       const disposition = res.headers.get("Content-Disposition") || "";
       const nameMatch = disposition.match(/filename="?([^"]+)"?/);
-      const filename = nameMatch ? nameMatch[1] : (mode === "full_zip" ? "download.zip" : "download.3mf");
+      const filename = nameMatch ? nameMatch[1] : (mode === DOWNLOAD_MODE_FULL_ZIP ? "download.zip" : "download.3mf");
       const blob = await res.blob();
       const downloadUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -304,7 +305,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderP
       <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
         <p className="text-sm font-semibold text-text-primary">Step 3 — Download 3D File</p>
         <form
-          onSubmit={(e) => { e.preventDefault(); handleStep3Download("full_zip"); }}
+          onSubmit={(e) => { e.preventDefault(); handleStep3Download(DOWNLOAD_MODE_FULL_ZIP); }}
           className="flex items-center gap-3"
         >
           <div className="flex-1">
@@ -325,18 +326,18 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderP
           <button
             type="button"
             className={btnPill}
-            onClick={() => handleStep3Download("full_zip")}
+            onClick={() => handleStep3Download(DOWNLOAD_MODE_FULL_ZIP)}
             disabled={!step3Supported || step3LoadingMode !== null}
           >
-            {step3LoadingMode === "full_zip" ? "Downloading..." : "Download Full Zip"}
+            {step3LoadingMode === DOWNLOAD_MODE_FULL_ZIP ? "Downloading..." : "Download Full Zip"}
           </button>
           <button
             type="button"
             className={btnPill}
-            onClick={() => handleStep3Download("single_file")}
+            onClick={() => handleStep3Download(DOWNLOAD_MODE_SINGLE_FILE)}
             disabled={!step3Supported || step3LoadingMode !== null}
           >
-            {step3LoadingMode === "single_file" ? "Downloading..." : "Download Single File"}
+            {step3LoadingMode === DOWNLOAD_MODE_SINGLE_FILE ? "Downloading..." : "Download Single File"}
           </button>
         </form>
         <p className="text-xs">
