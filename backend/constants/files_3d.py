@@ -5,8 +5,8 @@ PREFERRED_3D_EXTENSIONS: list[str] = [
     ".stp",
     ".amf",
     ".obj",
-    ".ply",
     ".stl",
+    ".ply",
 ]
 
 DOWNLOAD_MODE_FULL_ZIP = "full_zip"
