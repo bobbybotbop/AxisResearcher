@@ -2952,7 +2952,10 @@ def download_3d_file():
 
         # --- Apply mode ---
         if mode == "single_file" and is_zip:
-            single_filename, single_bytes = extract_best_3d_file(raw_bytes)
+            try:
+                single_filename, single_bytes = extract_best_3d_file(raw_bytes)
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 500
             return Response(
                 single_bytes,
                 status=200,
