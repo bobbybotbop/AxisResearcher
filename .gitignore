@@ -15,3 +15,4 @@ frontend/dist
 frontend/dist/index.html
 docs/superpowers/
 logs.ndjson
+*.venv

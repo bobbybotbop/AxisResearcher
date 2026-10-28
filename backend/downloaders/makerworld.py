@@ -1,12 +1,20 @@
 import os
 import re
 import requests
+from curl_cffi import requests as cffi_requests
 
 MAKERWORLD_BASE = "https://makerworld.com"
 MAKERWORLD_API = "https://makerworld.com/api"
 
-_HEADERS = {
+# The public design-service API is not behind Cloudflare — plain requests works.
+_META_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Accept": "application/json",
+    "Referer": MAKERWORLD_BASE + "/",
+}
+
+# The download endpoint is behind Cloudflare and requires Chrome TLS impersonation.
+_CFFI_HEADERS = {
     "Accept": "application/json",
     "Referer": MAKERWORLD_BASE + "/",
     "Origin": MAKERWORLD_BASE,
@@ -30,12 +38,12 @@ def extract_model_info(link: str) -> tuple[str, str | None]:
 
 def _fetch_model_meta(design_id: str, instance_id: str | None) -> dict:
     """
-    Call the design-service API (no auth required) and return:
+    Call the design-service API (no auth, no Cloudflare) and return:
       {"design_id", "title", "instance_id", "dev_model_name"}
     """
     resp = requests.get(
         f"{MAKERWORLD_API}/v1/design-service/design/{design_id}",
-        headers=_HEADERS,
+        headers=_META_HEADERS,
         timeout=20,
     )
     resp.raise_for_status()
@@ -79,9 +87,8 @@ def _get_cookies() -> str:
     if not cookies:
         raise RuntimeError(
             "MAKERWORLD_COOKIES is not set. Log in to makerworld.com in your browser, "
-            "then copy the Cookie header value from any authenticated request in DevTools "
-            "(Network tab > select a request > Request Headers > Cookie) and add it to "
-            ".env as: MAKERWORLD_COOKIES=bbl_csrf_token=...; bbl_auth=...; ..."
+            "open DevTools > Network, select any request, copy the full Cookie header value, "
+            "and add it to .env as: MAKERWORLD_COOKIES=bbl_csrf_token=...; ..."
         )
     return cookies
 
@@ -89,8 +96,8 @@ def _get_cookies() -> str:
 def _get_download_url(instance_id: str, dev_model_name: str) -> tuple[str, str]:
     """
     Call the MakerWorld download API and return (signed_cdn_url, filename).
+    Uses curl_cffi to impersonate Chrome TLS and bypass Cloudflare.
     Requires MAKERWORLD_COOKIES to be set.
-    Endpoint: GET /api/v1/design-service/instance/{id}/f3mf?type=download&fileType=&devModelName=...
     """
     cookies = _get_cookies()
 
@@ -98,14 +105,23 @@ def _get_download_url(instance_id: str, dev_model_name: str) -> tuple[str, str]:
     if dev_model_name:
         params["devModelName"] = dev_model_name
 
-    resp = requests.get(
+    resp = cffi_requests.get(
         f"{MAKERWORLD_API}/v1/design-service/instance/{instance_id}/f3mf",
         params=params,
-        headers={**_HEADERS, "Cookie": cookies},
+        headers={**_CFFI_HEADERS, "Cookie": cookies},
+        impersonate="chrome130",
         timeout=20,
     )
 
     if resp.status_code == 403:
+        body = resp.text
+        # Cloudflare challenge page (not yet past bot detection)
+        if "<title>Just a moment" in body:
+            raise RuntimeError(
+                "Cloudflare blocked the download request. "
+                "Ensure MAKERWORLD_COOKIES includes a valid cf_clearance cookie copied "
+                "from your browser's DevTools Network tab."
+            )
         try:
             msg = resp.json().get("error", "")
             if "log in" in msg.lower():
@@ -130,14 +146,19 @@ def _get_download_url(instance_id: str, dev_model_name: str) -> tuple[str, str]:
 
 def probe() -> tuple[bool, str]:
     """
-    Quick connectivity probe: call the design API for a known public model.
-    Does NOT require MAKERWORLD_COOKIES. Returns (ok, message).
+    Probe both the public metadata API and cookie availability.
+    Returns (ok, message) — fails if MAKERWORLD_COOKIES is not set,
+    since the probe is meant to confirm downloads will work end-to-end.
     """
     try:
-        meta = _fetch_model_meta("2462393", None)
-        return True, f"Design API accessible: '{meta['title']}' (instance {meta['instance_id']})"
+        _fetch_model_meta("2462393", None)
     except Exception as e:
-        return False, str(e)
+        return False, f"Metadata API error: {e}"
+
+    if not os.environ.get("MAKERWORLD_COOKIES", "").strip():
+        return False, "MAKERWORLD_COOKIES not set in .env — downloads require a valid browser session cookie"
+
+    return True, "Metadata API OK, cookies configured"
 
 
 def download_3mf(design_id: str, instance_id: str | None) -> tuple[str, bytes]:
@@ -149,9 +170,10 @@ def download_3mf(design_id: str, instance_id: str | None) -> tuple[str, bytes]:
     meta = _fetch_model_meta(design_id, instance_id)
     cdn_url, raw_name = _get_download_url(meta["instance_id"], meta["dev_model_name"])
 
+    # CDN download — signed URL, no auth or Cloudflare on bblmw.com
     resp = requests.get(
         cdn_url,
-        headers={"User-Agent": _HEADERS["User-Agent"], "Referer": MAKERWORLD_BASE + "/"},
+        headers={"User-Agent": _META_HEADERS["User-Agent"], "Referer": MAKERWORLD_BASE + "/"},
         timeout=120,
         stream=True,
     )

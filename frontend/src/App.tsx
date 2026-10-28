@@ -273,7 +273,13 @@ function App() {
   });
   const [threeDSiteStatus, setThreeDSiteStatus] = useState<Record<string, { ok: boolean; message: string }> | null>(null);
   const [threeDSiteTesting, setThreeDSiteTesting] = useState(false);
-  const [cults3dCredStatus, setCults3dCredStatus] = useState<{ has_credentials: boolean; email: string } | null>(null);
+  const [cults3dCredStatus, setCults3dCredStatus] = useState<{ has_credentials: boolean; auth_type: string | null; email: string } | null>(null);
+  const [cults3dCredFormOpen, setCults3dCredFormOpen] = useState(false);
+  const [cults3dCookiesInput, setCults3dCookiesInput] = useState("");
+  const [cults3dEmailInput, setCults3dEmailInput] = useState("");
+  const [cults3dPasswordInput, setCults3dPasswordInput] = useState("");
+  const [cults3dCredSaving, setCults3dCredSaving] = useState(false);
+  const [cults3dCredMessage, setCults3dCredMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [autoPromoteEnabled, setAutoPromoteEnabled] = useState(true);
   const [promotedListingAdRate, setPromotedListingAdRate] = useState(7.0);
   const [bgRemovedPhotos, setBgRemovedPhotos] = useState<Record<string, string>>({});
@@ -2342,6 +2348,9 @@ function App() {
       setThreeDSiteStatus({
         "printables.com": { ok: false, message: "Request failed" },
         "thingiverse.com": { ok: false, message: "Request failed" },
+        "makerworld.com": { ok: false, message: "Request failed" },
+        "cults3d.com": { ok: false, message: "Request failed" },
+        "thangs.com": { ok: false, message: "Request failed" },
       });
     } finally {
       setThreeDSiteTesting(false);
@@ -2609,7 +2618,7 @@ function App() {
   const fetchCults3dCredStatus = useCallback(async (): Promise<void> => {
     try {
       const res = await fetch("/api/cults3d-credential-status");
-      const data = await res.json() as { has_credentials: boolean; email: string };
+      const data = await res.json() as { has_credentials: boolean; auth_type: string | null; email: string };
       setCults3dCredStatus(data);
     } catch {
       setCults3dCredStatus({ has_credentials: false, email: "" });
@@ -2619,6 +2628,81 @@ function App() {
   useEffect(() => {
     if (activeTab === "settings") fetchCults3dCredStatus();
   }, [activeTab, fetchCults3dCredStatus]);
+
+  const handleSaveCults3dCreds = useCallback(async (): Promise<void> => {
+    const cookies = cults3dCookiesInput.trim();
+    if (!cookies) {
+      setCults3dCredMessage({ type: "error", text: "Cookie string is required." });
+      return;
+    }
+    setCults3dCredSaving(true);
+    setCults3dCredMessage(null);
+    try {
+      const res = await fetch("/api/cults3d-credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cookies }),
+      });
+      const data = await res.json() as { error?: string };
+      if (!res.ok || data.error) throw new Error(data.error || "Failed to save cookies");
+      setCults3dCookiesInput("");
+      setCults3dCredFormOpen(false);
+      setCults3dCredMessage({ type: "success", text: "Cookies saved." });
+      await fetchCults3dCredStatus();
+    } catch (err) {
+      setCults3dCredMessage({ type: "error", text: (err as Error).message || "Failed to save cookies" });
+    } finally {
+      setCults3dCredSaving(false);
+    }
+  }, [cults3dCookiesInput, fetchCults3dCredStatus]);
+
+  const handleSaveCults3dEmailCreds = useCallback(async (): Promise<void> => {
+    const email = cults3dEmailInput.trim();
+    const password = cults3dPasswordInput.trim();
+    if (!email || !password) {
+      setCults3dCredMessage({ type: "error", text: "Email and password are required." });
+      return;
+    }
+    setCults3dCredSaving(true);
+    setCults3dCredMessage(null);
+    try {
+      const res = await fetch("/api/cults3d-email-credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json() as { error?: string };
+      if (!res.ok || data.error) throw new Error(data.error || "Failed to save credentials");
+      setCults3dEmailInput("");
+      setCults3dPasswordInput("");
+      setCults3dCredFormOpen(false);
+      setCults3dCredMessage({ type: "success", text: "Email credentials saved." });
+      await fetchCults3dCredStatus();
+    } catch (err) {
+      setCults3dCredMessage({ type: "error", text: (err as Error).message || "Failed to save credentials" });
+    } finally {
+      setCults3dCredSaving(false);
+    }
+  }, [cults3dEmailInput, cults3dPasswordInput, fetchCults3dCredStatus]);
+
+  const [cults3dAutoLoading, setCults3dAutoLoading] = useState(false);
+
+  const handleAutoLoadCults3dCookies = useCallback(async (): Promise<void> => {
+    setCults3dAutoLoading(true);
+    setCults3dCredMessage(null);
+    try {
+      const res = await fetch("/api/cults3d-auto-load-cookies", { method: "POST" });
+      const data = await res.json() as { error?: string; message?: string };
+      if (!res.ok || data.error) throw new Error(data.error || "Failed to auto-load cookies");
+      setCults3dCredFormOpen(false);
+      setCults3dCredMessage({ type: "success", text: data.message || "Cookies loaded from browser." });
+      await fetchCults3dCredStatus();
+    } catch (err) {
+      setCults3dCredMessage({ type: "error", text: (err as Error).message || "Auto-load failed" });
+    } finally {
+      setCults3dAutoLoading(false);
+    }
+  }, [fetchCults3dCredStatus]);
 
   const openPromptModal = useCallback((type: string, slot: string | null = null): void => {
     setPromptModalType(type);
@@ -4162,44 +4246,131 @@ function App() {
                         { site: "makerworld.com", supported: true },
                         { site: "printables.com", supported: true },
                         { site: "yeggi.com", supported: false },
-                        { site: "cults3d.com", supported: true, requiresAuth: true, signInUrl: "https://cults3d.com/en/log-in-choice" },
+                        { site: "cults3d.com", supported: true, requiresAuth: true },
                         { site: "thingiverse.com", supported: true },
-                        { site: "thangs.com", supported: false },
-                      ] as { site: string; supported: boolean; requiresAuth?: boolean; signInUrl?: string }[]
-                    ).map(({ site, supported, requiresAuth, signInUrl }) => {
+                        { site: "thangs.com", supported: true },
+                      ] as { site: string; supported: boolean; requiresAuth?: boolean }[]
+                    ).map(({ site, supported, requiresAuth }) => {
                       const testResult = threeDSiteStatus?.[site];
                       const isCults3d = site === "cults3d.com";
                       const credStatus = isCults3d ? cults3dCredStatus : null;
                       return (
-                        <div key={site} className="flex items-center justify-between gap-3 rounded-lg border border-border-default bg-surface-panel px-3 py-2">
-                          <span className="font-mono text-sm text-text-primary">{site}</span>
-                          <div className="flex items-center gap-2">
-                            {supported ? (
-                              testResult ? (
-                                <span className={`rounded px-2 py-0.5 text-xs font-semibold ${testResult.ok ? "bg-emerald-100 text-emerald-900" : "bg-red-100 text-red-900"}`}>
-                                  {testResult.ok ? "OK" : "Failed"}: {testResult.message}
-                                </span>
+                        <div key={site} className="flex flex-col gap-2 rounded-lg border border-border-default bg-surface-panel px-3 py-2">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className="font-mono text-sm text-text-primary">{site}</span>
+                            <div className="flex items-center gap-2">
+                              {supported ? (
+                                testResult ? (
+                                  <span className={`rounded px-2 py-0.5 text-xs font-semibold ${testResult.ok ? "bg-emerald-100 text-emerald-900" : "bg-red-100 text-red-900"}`}>
+                                    {testResult.ok ? "OK" : "Failed"}: {testResult.message}
+                                  </span>
+                                ) : (
+                                  <span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-900">Download supported</span>
+                                )
                               ) : (
-                                <span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-900">Download supported</span>
-                              )
-                            ) : (
-                              <span className="rounded bg-surface-hover px-2 py-0.5 text-xs font-semibold text-text-muted">Search only</span>
-                            )}
-                            {requiresAuth && credStatus !== null && (
-                              <span className={`rounded px-2 py-0.5 text-xs font-semibold ${credStatus.has_credentials ? "bg-emerald-100 text-emerald-900" : "bg-amber-100 text-amber-900"}`}>
-                                {credStatus.has_credentials ? `Logged in${credStatus.email ? `: ${credStatus.email}` : ""}` : "Not logged in"}
-                              </span>
-                            )}
-                            {requiresAuth && signInUrl && (
-                              <button
-                                type="button"
-                                className="cursor-pointer rounded px-2 py-0.5 text-xs font-semibold text-text-secondary underline-offset-2 hover:text-text-primary hover:underline"
-                                onClick={() => window.open(signInUrl, "_blank", "noopener,noreferrer")}
-                              >
-                                Sign in
-                              </button>
-                            )}
+                                <span className="rounded bg-surface-hover px-2 py-0.5 text-xs font-semibold text-text-muted">Search only</span>
+                              )}
+                              {requiresAuth && credStatus !== null && (
+                                <span className={`rounded px-2 py-0.5 text-xs font-semibold ${credStatus.has_credentials ? "bg-emerald-100 text-emerald-900" : "bg-amber-100 text-amber-900"}`}>
+                                  {credStatus.has_credentials
+                                    ? credStatus.auth_type === "email"
+                                      ? `Email: ${credStatus.email}`
+                                      : "Cookies set"
+                                    : "Not configured"}
+                                </span>
+                              )}
+                              {isCults3d && (
+                                <button
+                                  type="button"
+                                  className="cursor-pointer rounded px-2 py-0.5 text-xs font-semibold text-text-secondary underline-offset-2 hover:text-text-primary hover:underline"
+                                  onClick={() => {
+                                    setCults3dCredFormOpen((v) => !v);
+                                    setCults3dCredMessage(null);
+                                  }}
+                                >
+                                  {cults3dCredFormOpen ? "Cancel" : credStatus?.has_credentials ? "Update" : "Configure"}
+                                </button>
+                              )}
+                            </div>
                           </div>
+                          {isCults3d && cults3dCredFormOpen && (
+                            <div className="flex flex-col gap-4 border-t border-border-default pt-3">
+                              {/* Email / password — recommended */}
+                              <div className="flex flex-col gap-1.5">
+                                <p className="text-xs font-semibold text-text-primary">Email &amp; password <span className="font-normal text-text-muted">(recommended — stays working without any manual steps)</span></p>
+                                <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2">
+                                  <input
+                                    type="email"
+                                    placeholder="Email"
+                                    value={cults3dEmailInput}
+                                    onChange={(e) => setCults3dEmailInput(e.target.value)}
+                                    disabled={cults3dCredSaving || cults3dAutoLoading}
+                                    className="flex-1 rounded border border-border-default bg-surface-hover px-2 py-1 text-sm text-text-primary focus:border-primary focus:outline-none disabled:opacity-50"
+                                    autoComplete="username"
+                                  />
+                                  <input
+                                    type="password"
+                                    placeholder="Password"
+                                    value={cults3dPasswordInput}
+                                    onChange={(e) => setCults3dPasswordInput(e.target.value)}
+                                    disabled={cults3dCredSaving || cults3dAutoLoading}
+                                    className="flex-1 rounded border border-border-default bg-surface-hover px-2 py-1 text-sm text-text-primary focus:border-primary focus:outline-none disabled:opacity-50"
+                                    autoComplete="current-password"
+                                    onKeyDown={(e) => { if (e.key === "Enter") void handleSaveCults3dEmailCreds(); }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleSaveCults3dEmailCreds()}
+                                    disabled={cults3dCredSaving || cults3dAutoLoading}
+                                    className="cursor-pointer rounded bg-primary px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    {cults3dCredSaving ? "Saving..." : "Save"}
+                                  </button>
+                                </div>
+                              </div>
+                              {/* Cookie options */}
+                              <div className="flex flex-col gap-2">
+                                <p className="text-xs font-semibold text-text-primary">Browser cookies <span className="font-normal text-text-muted">(manual — must re-paste when session expires)</span></p>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleAutoLoadCults3dCookies()}
+                                    disabled={cults3dAutoLoading || cults3dCredSaving}
+                                    className="cursor-pointer rounded border border-border-default bg-surface-panel px-3 py-1 text-xs font-semibold text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    {cults3dAutoLoading ? "Loading..." : "Auto-load from browser"}
+                                  </button>
+                                  <span className="text-xs text-text-muted">Firefox only — Chrome 127+ requires admin</span>
+                                </div>
+                                <p className="text-xs text-text-muted">Or paste manually: DevTools (F12) &gt; Network &gt; any request &gt; <code>Cookie:</code> header</p>
+                                <textarea
+                                  placeholder="_cult_session=...; ..."
+                                  value={cults3dCookiesInput}
+                                  onChange={(e) => setCults3dCookiesInput(e.target.value)}
+                                  disabled={cults3dCredSaving || cults3dAutoLoading}
+                                  rows={2}
+                                  className="w-full rounded border border-border-default bg-surface-hover px-2 py-1 font-mono text-xs text-text-primary focus:border-primary focus:outline-none disabled:opacity-50"
+                                  spellCheck={false}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => void handleSaveCults3dCreds()}
+                                  disabled={cults3dCredSaving || cults3dAutoLoading}
+                                  className="self-start cursor-pointer rounded border border-border-default bg-surface-panel px-3 py-1 text-xs font-semibold text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {cults3dCredSaving ? "Saving..." : "Save cookies"}
+                                </button>
+                              </div>
+                              {cults3dCredMessage && (
+                                <span className={`text-xs font-medium ${cults3dCredMessage.type === "success" ? "text-emerald-600" : "text-red-600"}`}>
+                                  {cults3dCredMessage.text}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {isCults3d && !cults3dCredFormOpen && cults3dCredMessage?.type === "success" && (
+                            <span className="text-xs font-medium text-emerald-600">{cults3dCredMessage.text}</span>
+                          )}
                         </div>
                       );
                     })}
