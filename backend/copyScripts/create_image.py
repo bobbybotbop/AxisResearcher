@@ -8,14 +8,13 @@ import os
 import json
 import base64
 import requests
-import xml.etree.ElementTree as ET
 from enum import Enum
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 from backend.helper_functions import helper_get_valid_token
 from backend.copyScripts.imageEditing import downscale_image_bytes
-from backend.constants.ebay import EBAY_TRADING_API_URL, TRADING_API_SITE_ID, TRADING_API_COMPATIBILITY_LEVEL
+from backend.constants.ebay import EBAY_MEDIA_API_CREATE_IMAGE_FROM_FILE
 from backend.constants.models import MODEL_DEFAULT_SIZES, DEFAULT_IMAGE_PROMPTS
 from backend.constants.paths import GENERATED_IMAGES_DIR
 
@@ -397,10 +396,10 @@ def upload_image_bytes_to_ebay(image_bytes, mime_type, picture_name="Uploaded Im
         print("❌ Error: Could not get valid user token")
         print("💡 Make sure user_token is set in your .env file")
         return None
-    
+
     # Determine content type from mime_type or default
     content_type = mime_type or "image/jpeg"
-    
+
     # Determine file extension and filename from mime type
     if 'jpeg' in content_type or 'jpg' in content_type:
         file_ext = '.jpg'
@@ -410,148 +409,51 @@ def upload_image_bytes_to_ebay(image_bytes, mime_type, picture_name="Uploaded Im
         file_ext = '.webp'
     else:
         file_ext = '.jpg'  # Default
-    
+
     # Create a safe filename from picture_name
     safe_filename = "".join(c for c in picture_name if c.isalnum() or c in (' ', '-', '_')).strip()
     if not safe_filename:
         safe_filename = "uploaded_image"
     safe_filename = safe_filename.replace(' ', '_') + file_ext
-    
-    # Construct XML request payload
-    xml_payload = f"""<?xml version="1.0" encoding="utf-8"?>
-<UploadSiteHostedPicturesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-    <RequesterCredentials>
-        <eBayAuthToken>{valid_token}</eBayAuthToken>
-    </RequesterCredentials>
-    <PictureName><![CDATA[{picture_name}]]></PictureName>
-    <PictureSet>Standard</PictureSet>
-</UploadSiteHostedPicturesRequest>"""
-    
-    # Set headers for eBay Trading API
-    headers = {
-        "X-EBAY-API-SITEID": TRADING_API_SITE_ID,
-        "X-EBAY-API-COMPATIBILITY-LEVEL": TRADING_API_COMPATIBILITY_LEVEL,
-        "X-EBAY-API-CALL-NAME": "UploadSiteHostedPictures",
-        "X-EBAY-API-RESPONSE-ENCODING": "XML"
-    }
 
-    # eBay API endpoint
-    url = EBAY_TRADING_API_URL
-    
+    # Commerce Media API (REST replacement for the retired Trading API
+    # UploadSiteHostedPictures call). Returns an EPS imageUrl valid in listings.
+    url = EBAY_MEDIA_API_CREATE_IMAGE_FROM_FILE
+    headers = {"Authorization": f"Bearer {valid_token}"}
+
     try:
-        print(f"📤 Uploading image to eBay Picture Services...")
+        print(f"📤 Uploading image to eBay Picture Services (Media API)...")
         print(f"📝 Picture name: {picture_name}")
-        print(f"📦 Using multipart/form-data with binary attachment ({len(image_bytes)} bytes)")
-        
-        # Manually construct multipart/form-data
-        import uuid
-        
-        # Generate a unique boundary
-        boundary = f"----FormBoundary{uuid.uuid4().hex[:16]}"
-        
-        # Build multipart body
-        body_parts = []
-        
-        # First part: XML Payload
-        body_parts.append(f"--{boundary}\r\n".encode('utf-8'))
-        body_parts.append(f'Content-Disposition: form-data; name="XML Payload"\r\n'.encode('utf-8'))
-        body_parts.append(f'\r\n'.encode('utf-8'))
-        body_parts.append(xml_payload.encode('utf-8'))
-        body_parts.append(f'\r\n'.encode('utf-8'))
-        
-        # Second part: Binary image
-        escaped_picture_name = picture_name.replace('"', '\\"')
-        escaped_filename = safe_filename.replace('"', '\\"')
-        
-        body_parts.append(f"--{boundary}\r\n".encode('utf-8'))
-        body_parts.append(f'Content-Disposition: form-data; name="{escaped_picture_name}"; filename="{escaped_filename}"\r\n'.encode('utf-8'))
-        body_parts.append(f'Content-Type: {content_type}\r\n'.encode('utf-8'))
-        body_parts.append(f'\r\n'.encode('utf-8'))
-        body_parts.append(image_bytes)
-        body_parts.append(f'\r\n'.encode('utf-8'))
-        
-        # Closing boundary
-        body_parts.append(f"--{boundary}--\r\n".encode('utf-8'))
-        
-        # Combine all parts
-        multipart_body = b''.join(body_parts)
-        
-        # Update headers with multipart content type
-        headers['Content-Type'] = f'multipart/form-data; boundary={boundary}'
-        
-        response = requests.post(url, data=multipart_body, headers=headers, timeout=60)
+        print(f"📦 multipart/form-data with binary attachment ({len(image_bytes)} bytes)")
 
-        if response.status_code != 200:
+        response = requests.post(
+            url,
+            headers=headers,
+            files={"image": (safe_filename, image_bytes, content_type)},
+            timeout=120,
+        )
+
+        if response.status_code not in (200, 201):
             print(f"❌ HTTP Error {response.status_code}")
             print(f"Response: {response.text[:500]}")
             return None
-        
-        # Check if response is valid XML before parsing
-        response_text = response.text.strip()
-        
-        if not response_text.startswith('<?xml') and not response_text.startswith('<'):
-            print(f"❌ eBay API returned non-XML error response:")
-            print(f"Response: {response_text}")
-            
-            if "ErrorId=" in response_text:
-                import urllib.parse
-                try:
-                    if "Error from PES" in response_text:
-                        error_part = response_text.split("Error from PES, ")[-1]
-                        error_params = urllib.parse.parse_qs(error_part)
-                        error_id = error_params.get('ErrorId', ['Unknown'])[0]
-                        error_msg = error_params.get('ErrorMessage', ['Unknown error'])[0]
-                        print(f"Error ID: {error_id}")
-                        print(f"Error Message: {error_msg}")
-                    else:
-                        print(f"Full error: {response_text}")
-                except:
-                    print(f"Full error: {response_text}")
-            
-            return None
-        
-        # Parse XML response
+
         try:
-            root = ET.fromstring(response.content)
-            
-            # Check for errors
-            ack = root.find(".//{urn:ebay:apis:eBLBaseComponents}Ack")
-            if ack is not None and ack.text != "Success":
-                print(f"❌ eBay API returned error: {ack.text}")
-                
-                errors = root.findall(".//{urn:ebay:apis:eBLBaseComponents}Errors")
-                for error in errors:
-                    short_message = error.find(".//{urn:ebay:apis:eBLBaseComponents}ShortMessage")
-                    long_message = error.find(".//{urn:ebay:apis:eBLBaseComponents}LongMessage")
-                    error_code = error.find(".//{urn:ebay:apis:eBLBaseComponents}ErrorCode")
-                    
-                    if short_message is not None:
-                        print(f"Error: {short_message.text}")
-                    if long_message is not None:
-                        print(f"Details: {long_message.text}")
-                    if error_code is not None:
-                        print(f"Error Code: {error_code.text}")
-                
-                return None
-            
-            # Extract FullURL from SiteHostedPictureDetails
-            full_url_elem = root.find(".//{urn:ebay:apis:eBLBaseComponents}FullURL")
-            
-            if full_url_elem is not None and full_url_elem.text:
-                image_url = full_url_elem.text
-                print(f"✅ Image uploaded successfully!")
-                print(f"🔗 Image URL: {image_url}")
-                return image_url
-            else:
-                print("❌ Could not find FullURL in response")
-                print(f"Response XML: {response.text[:1000]}")
-                return None
-                
-        except ET.ParseError as e:
-            print(f"❌ Error parsing XML response: {e}")
-            print(f"Response: {response.text[:500]}")
+            result = response.json()
+        except ValueError:
+            print(f"❌ eBay Media API returned non-JSON response: {response.text[:500]}")
             return None
-            
+
+        image_url = result.get("imageUrl") or result.get("maxDimensionImageUrl")
+        if image_url:
+            print(f"✅ Image uploaded successfully!")
+            print(f"🔗 Image URL: {image_url}")
+            return image_url
+
+        print("❌ Could not find imageUrl in Media API response")
+        print(f"Response: {json.dumps(result, indent=2)[:1000]}")
+        return None
+
     except requests.exceptions.RequestException as e:
         print(f"❌ Error calling eBay API: {e}")
         if hasattr(e, 'response') and e.response is not None:

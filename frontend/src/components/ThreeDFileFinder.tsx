@@ -1,7 +1,8 @@
 import { useState } from "react";
+import JSZip from "jszip";
 import MessageBarInput from "./MessageBarInput";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
-import { DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, type DownloadMode } from "../constants/files3d";
+import { DOWNLOAD_MODE_FILES, DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, threeDSiteKeyFromLink, type DownloadMode, type ThreeDSiteStatus } from "../constants/files3d";
 
 interface SearchResult {
   site_type?: string;
@@ -11,12 +12,87 @@ interface SearchResult {
   source?: string;
 }
 
+// Minimal File System Access API surface (Chromium-only; absent elsewhere → fallback downloads)
+interface FsWritable {
+  write(data: Blob): Promise<void>;
+  close(): Promise<void>;
+}
+interface FsDirectoryHandle {
+  getDirectoryHandle(name: string, opts: { create: boolean }): Promise<FsDirectoryHandle>;
+  getFileHandle(name: string, opts: { create: boolean }): Promise<{ createWritable(): Promise<FsWritable> }>;
+}
+interface WindowWithDirPicker {
+  showDirectoryPicker?: () => Promise<FsDirectoryHandle>;
+}
+
+interface UnzippedEntry {
+  path: string[]; // sanitized path segments, filename last
+  data: Blob;
+}
+
+// Unzip a blob into flat entries; non-zip blobs (e.g. MakerWorld .3mf) become a single entry
+const unzipBlob = async (blob: Blob, filename: string): Promise<UnzippedEntry[]> => {
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(blob);
+  } catch {
+    return [{ path: [filename], data: blob }];
+  }
+  const entries: UnzippedEntry[] = [];
+  for (const [name, entry] of Object.entries(zip.files)) {
+    if (entry.dir) continue;
+    // strip empty/dangerous segments so zip entries can't escape the target folder
+    const parts = name.split("/").filter((s) => s !== "" && s !== "." && s !== "..");
+    if (parts.length === 0) continue;
+    entries.push({ path: parts, data: await entry.async("blob") });
+  }
+  if (entries.length === 0) throw new Error("Zip archive contains no files");
+  return entries;
+};
+
+// Write entries into a user-picked folder preserving zip structure. Returns null if the user cancelled.
+const saveEntriesToFolder = async (entries: UnzippedEntry[]): Promise<boolean | null> => {
+  const picker = (window as unknown as WindowWithDirPicker).showDirectoryPicker;
+  if (!picker) return false;
+  let root: FsDirectoryHandle;
+  try {
+    root = await picker();
+  } catch (err) {
+    if ((err as Error).name === "AbortError") return null; // user cancelled the picker
+    throw err;
+  }
+  for (const { path, data } of entries) {
+    let dir = root;
+    for (const segment of path.slice(0, -1)) {
+      dir = await dir.getDirectoryHandle(segment, { create: true });
+    }
+    const fileHandle = await dir.getFileHandle(path[path.length - 1], { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(data);
+    await writable.close();
+  }
+  return true;
+};
+
+// Fallback for browsers without the File System Access API: one download per file
+const downloadEntriesIndividually = (entries: UnzippedEntry[]): void => {
+  for (const { path, data } of entries) {
+    const url = URL.createObjectURL(data);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = path.join("__"); // flatten: browsers sanitize "/" in the download attribute
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+};
+
 interface ThreeDFileFinderProps {
   addToast?: (type: string, message: string) => void;
   fileDownloadDelay?: number;
+  siteStatus?: ThreeDSiteStatus | null;
 }
 
-function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderProps) {
+function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null }: ThreeDFileFinderProps) {
   // Step 1 — Fetch eBay Photos
   const [step1Link, setStep1Link] = useState("");
   const [step1Photos, setStep1Photos] = useState<string[]>([]);
@@ -32,7 +108,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderP
   // Step 3 — Download 3D File
   const [step3Url, setStep3Url] = useState("");
   const [step3LoadingMode, setStep3LoadingMode] = useState<DownloadMode | null>(null);
-  const [step3Result, setStep3Result] = useState<{ filename: string; bytes: number } | null>(null);
+  const [step3Result, setStep3Result] = useState<{ filename: string; bytes: number; fileCount?: number } | null>(null);
   const [step3Error, setStep3Error] = useState<string | null>(null);
 
   // True when a result link can be forwarded to Step 3
@@ -95,9 +171,22 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderP
       });
       const data = await res.json() as { error?: string; results?: SearchResult[] };
       if (!res.ok || data.error) throw new Error(data.error || "Search failed");
-      const filtered = (data.results || []).filter(r => r.site_type === "whitelisted");
+      // Skip results from 3D sites whose scraper failed the operational test
+      const whitelisted = (data.results || []).filter(r => r.site_type === "whitelisted");
+      const skippedSites = new Set<string>();
+      const filtered = whitelisted.filter(r => {
+        const key = threeDSiteKeyFromLink(r.link);
+        if (key && siteStatus?.[key] && !siteStatus[key].ok) {
+          skippedSites.add(key);
+          return false;
+        }
+        return true;
+      });
       setStep2Results(filtered);
-      if (filtered.length === 0) addToast?.("info", "No 3D file results found for this image");
+      if (skippedSites.size > 0) {
+        addToast?.("info", `Skipped results from ${[...skippedSites].join(", ")} — site failed its operational test (see Settings > 3D File Sites)`);
+      }
+      if (filtered.length === 0 && skippedSites.size === 0) addToast?.("info", "No 3D file results found for this image");
     } catch (err) {
       addToast?.("error", (err as Error).message || "Search failed");
     } finally {
@@ -112,10 +201,12 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderP
     setStep3Result(null);
     setStep3Error(null);
     try {
+      // "files" mode reuses the full-zip response; unzipping happens client-side
+      const wireMode = mode === DOWNLOAD_MODE_FILES ? DOWNLOAD_MODE_FULL_ZIP : mode;
       const res = await fetch("/api/download-3d-file", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ link, file_download_delay: fileDownloadDelay, mode }),
+        body: JSON.stringify({ link, file_download_delay: fileDownloadDelay, mode: wireMode }),
       });
       if (!res.ok) {
         let errMsg = `Download failed (${res.status})`;
@@ -127,8 +218,19 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderP
       }
       const disposition = res.headers.get("Content-Disposition") || "";
       const nameMatch = disposition.match(/filename="?([^"]+)"?/);
-      const filename = nameMatch ? nameMatch[1] : (mode === DOWNLOAD_MODE_FULL_ZIP ? "download.zip" : "download.3mf");
+      const filename = nameMatch ? nameMatch[1] : (mode === DOWNLOAD_MODE_SINGLE_FILE ? "download.3mf" : "download.zip");
       const blob = await res.blob();
+      if (mode === DOWNLOAD_MODE_FILES) {
+        const entries = await unzipBlob(blob, filename);
+        const savedToFolder = await saveEntriesToFolder(entries);
+        if (savedToFolder === null) return; // user cancelled the folder picker
+        if (!savedToFolder) {
+          downloadEntriesIndividually(entries);
+          addToast?.("info", `Downloading ${entries.length} files individually — browser may ask to allow multiple downloads`);
+        }
+        setStep3Result({ filename: filename.replace(/\.zip$/i, ""), bytes: blob.size, fileCount: entries.length });
+        return;
+      }
       const downloadUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = downloadUrl;
@@ -339,6 +441,14 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderP
           >
             {step3LoadingMode === DOWNLOAD_MODE_SINGLE_FILE ? "Downloading..." : "Download Single File"}
           </button>
+          <button
+            type="button"
+            className={btnPill}
+            onClick={() => handleStep3Download(DOWNLOAD_MODE_FILES)}
+            disabled={!step3Supported || step3LoadingMode !== null}
+          >
+            {step3LoadingMode === DOWNLOAD_MODE_FILES ? "Downloading..." : "Download Files"}
+          </button>
         </form>
         <p className="text-xs">
           {step3Url.trim() && !step3Supported ? (
@@ -349,7 +459,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0 }: ThreeDFileFinderP
         </p>
         {step3Result && (
           <p className="text-sm text-green-400">
-            Downloaded: {step3Result.filename} ({formatBytes(step3Result.bytes)})
+            Downloaded: {step3Result.filename}{step3Result.fileCount !== undefined ? ` (${step3Result.fileCount} file${step3Result.fileCount !== 1 ? "s" : ""} unzipped)` : ""} ({formatBytes(step3Result.bytes)})
           </p>
         )}
         {step3Error && (

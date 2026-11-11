@@ -1,5 +1,5 @@
 {
-  "counter": 103,
+  "counter": 109,
   "merchant_location_key": "PlasticLoveShopLocation",
   "default_quantity": 15,
   "default_dimensions": {
@@ -14,10 +14,11 @@
   },
   "auto_restock_enabled": true,
   "auto_restock_quantity": 15,
-  "minimum_images_per_listing": 4,
-  "manual_listings_last_refreshed": "2026-10-26T17:50:51.687152+00:00",
+  "minimum_images_per_listing": 2,
+  "manual_listings_last_refreshed": "2026-11-06T19:05:32.167914+00:00",
   "auto_promote_enabled": true,
-  "promoted_listing_ad_rate": 7.0,
+  "promoted_listing_ad_rate": 9.0,
   "promoted_listing_campaign_id": "",
-  "promoted_listing_ad_group_id": ""
+  "promoted_listing_ad_group_id": "",
+  "operation_cooldown_hours": 24
 }

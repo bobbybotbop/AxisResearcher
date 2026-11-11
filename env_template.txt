@@ -24,6 +24,14 @@ serp_api_token=
 # copy the full "Cookie:" header value and paste it here.
 MAKERWORLD_COOKIES=
 
+# Cults3D account (used to log in when the persistent profile is signed out;
+# can also be set in Settings > 3D File Sites)
+CULTS3D_EMAIL=
+CULTS3D_PASSWORD=
+# Run Cults3D downloads headless (true) with automatic fallback to a headed
+# window if Cloudflare blocks it. Set to false to always run headed.
+CULTS3D_HEADLESS=true
+
 # eBay OAuth Tokens
 user_token=
 

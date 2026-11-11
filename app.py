@@ -52,8 +52,9 @@ from backend.copyScripts.create_image import (
     ImageType,
     categorize_images,
     _openrouter_response_dict_to_image_bytes_and_mime,
+    upload_image_bytes_to_ebay,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting
 from backend.helper_functions import remove_html_tags
 import os
 import json
@@ -2298,6 +2299,34 @@ def api_save_minimum_images_setting():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/settings/operation-cooldown', methods=['GET'])
+def api_get_operation_cooldown_setting():
+    """Read the persisted auto-operation cooldown (hours)."""
+    try:
+        return jsonify(get_operation_cooldown_setting()), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/settings/operation-cooldown', methods=['POST'])
+def api_save_operation_cooldown_setting():
+    """Persist the auto-operation cooldown (hours)."""
+    body = request.get_json(silent=True) or {}
+    hours = body.get('operation_cooldown_hours')
+    try:
+        if hours is None:
+            return jsonify({'error': 'operation_cooldown_hours is required'}), 400
+        hours = int(hours)
+        if hours < 1:
+            return jsonify({'error': 'operation_cooldown_hours must be a positive integer'}), 400
+        result = save_operation_cooldown_setting(hours)
+        return jsonify(result), 200
+    except (TypeError, ValueError):
+        return jsonify({'error': 'operation_cooldown_hours must be a positive integer'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/settings/promoted-listings', methods=['GET'])
 def api_get_promoted_listing_settings():
     """Read promoted listing enabled flag and ad rate."""
@@ -2880,6 +2909,88 @@ def cults3d_auto_load_cookies():
         return jsonify({"error": str(e)}), 500
 
 
+def _update_env_vars(updates: dict) -> None:
+    """Write key=value pairs into the project .env, replacing existing keys."""
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+    try:
+        with open(env_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        lines = []
+
+    new_lines = []
+    found = {name: False for name in updates}
+    for line in lines:
+        replaced = False
+        for name, value in updates.items():
+            if line.strip().startswith(name + '='):
+                new_lines.append(f'{name}={value}\n')
+                found[name] = True
+                replaced = True
+                break
+        if not replaced:
+            new_lines.append(line)
+
+    for name, was_found in found.items():
+        if not was_found:
+            if new_lines and not new_lines[-1].endswith('\n'):
+                new_lines.append('\n')
+            new_lines.append(f'{name}={updates[name]}\n')
+
+    with open(env_path, 'w', encoding='utf-8') as f:
+        f.writelines(new_lines)
+
+    load_dotenv(env_path, override=True)
+
+
+@app.route('/api/makerworld-credential-status', methods=['GET'])
+def makerworld_credential_status():
+    """Return the auth state for MakerWorld (email/password or existing session profile)."""
+    email = os.environ.get("MAKERWORLD_EMAIL", "").strip()
+    password = os.environ.get("MAKERWORLD_PASSWORD", "").strip()
+    has_credentials = bool(email and password)
+    masked_email = ""
+    if email:
+        at = email.find("@")
+        local = email[:at] if at > 0 else email
+        domain = email[at:] if at > 0 else ""
+        masked_email = local[:2] + "*" * max(0, len(local) - 2) + domain
+    profile_present = os.path.isdir(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     'backend', 'downloaders', 'makerworld_profile')
+    )
+    return jsonify({
+        "has_credentials": has_credentials,
+        "auth_type": "email" if has_credentials else None,
+        "email": masked_email,
+        "profile_present": profile_present,
+    })
+
+
+@app.route('/api/makerworld-email-credentials', methods=['POST'])
+def update_makerworld_email_credentials():
+    """Save MAKERWORLD_EMAIL and MAKERWORLD_PASSWORD to the .env file."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        email = str(data.get('email', '')).strip()
+        password = str(data.get('password', '')).strip()
+
+        if not email or not password:
+            return jsonify({"error": "Email and password are required"}), 400
+
+        _update_env_vars({'MAKERWORLD_EMAIL': email, 'MAKERWORLD_PASSWORD': password})
+        print("[API] MakerWorld email credentials updated in .env")
+        return jsonify({"success": True, "message": "Email credentials saved."})
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": f"Failed to save credentials: {str(e)}"}), 500
+
+
 @app.route('/api/download-3d-file', methods=['POST'])
 def download_3d_file():
     """
@@ -3114,102 +3225,20 @@ def api_upload_image():
         if not image_bytes:
             return jsonify({"error": "Empty image file"}), 400
 
-        import base64
-        import requests as http_requests
-        import xml.etree.ElementTree as ET
-
         user_token = os.getenv('user_token')
         if not user_token:
             return jsonify({"error": "eBay user token not configured"}), 500
 
-        # Determine content type
         content_type = file.content_type or 'image/png'
-        if 'jpeg' in content_type or 'jpg' in content_type:
-            file_ext = '.jpg'
-        elif 'png' in content_type:
-            file_ext = '.png'
-        elif 'webp' in content_type:
-            file_ext = '.webp'
-        else:
-            file_ext = '.png'
-            content_type = 'image/png'
-
-        safe_filename = f"canvas_image{file_ext}"
-        picture_name = "Canvas Compiled Image"
-
-        # Build eBay UploadSiteHostedPictures XML
-        xml_payload = f"""<?xml version="1.0" encoding="utf-8"?>
-<UploadSiteHostedPicturesRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-    <RequesterCredentials>
-        <eBayAuthToken>{user_token}</eBayAuthToken>
-    </RequesterCredentials>
-    <PictureName><![CDATA[{picture_name}]]></PictureName>
-    <PictureSet>Standard</PictureSet>
-</UploadSiteHostedPicturesRequest>"""
-
-        headers = {
-            "X-EBAY-API-SITEID": "0",
-            "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
-            "X-EBAY-API-CALL-NAME": "UploadSiteHostedPictures",
-            "X-EBAY-API-RESPONSE-ENCODING": "XML"
-        }
-
-        url = "https://api.ebay.com/ws/api.dll"
-
-        # Construct multipart/form-data
-        boundary = f"----FormBoundary{uuid.uuid4().hex[:16]}"
-        body_parts = []
-
-        # XML Payload part
-        body_parts.append(f"--{boundary}\r\n".encode('utf-8'))
-        body_parts.append(f'Content-Disposition: form-data; name="XML Payload"\r\n'.encode('utf-8'))
-        body_parts.append(f'\r\n'.encode('utf-8'))
-        body_parts.append(xml_payload.encode('utf-8'))
-        body_parts.append(f'\r\n'.encode('utf-8'))
-
-        # Binary image part
-        body_parts.append(f"--{boundary}\r\n".encode('utf-8'))
-        body_parts.append(f'Content-Disposition: form-data; name="{picture_name}"; filename="{safe_filename}"\r\n'.encode('utf-8'))
-        body_parts.append(f'Content-Type: {content_type}\r\n'.encode('utf-8'))
-        body_parts.append(f'\r\n'.encode('utf-8'))
-        body_parts.append(image_bytes)
-        body_parts.append(f'\r\n'.encode('utf-8'))
-
-        # Closing boundary
-        body_parts.append(f"--{boundary}--\r\n".encode('utf-8'))
-
-        multipart_body = b''.join(body_parts)
-        headers['Content-Type'] = f'multipart/form-data; boundary={boundary}'
 
         print(f"[API] Uploading {len(image_bytes)} bytes to eBay Picture Services...")
-        resp = http_requests.post(url, data=multipart_body, headers=headers, timeout=60)
-
-        if resp.status_code != 200:
-            print(f"[API] eBay upload HTTP error: {resp.status_code}")
-            return jsonify({"error": f"eBay upload failed with status {resp.status_code}"}), 502
-
-        # Parse XML response
-        root = ET.fromstring(resp.content)
-        ack = root.find(".//{urn:ebay:apis:eBLBaseComponents}Ack")
-        if ack is not None and ack.text != "Success":
-            errors = root.findall(".//{urn:ebay:apis:eBLBaseComponents}Errors")
-            error_msgs = []
-            for error in errors:
-                short_msg = error.find(".//{urn:ebay:apis:eBLBaseComponents}ShortMessage")
-                if short_msg is not None:
-                    error_msgs.append(short_msg.text)
-            error_str = "; ".join(error_msgs) if error_msgs else "Unknown eBay error"
-            print(f"[API] eBay upload error: {error_str}")
-            return jsonify({"error": f"eBay upload failed: {error_str}"}), 502
-
-        full_url_elem = root.find(".//{urn:ebay:apis:eBLBaseComponents}FullURL")
-        if full_url_elem is not None and full_url_elem.text:
-            ebay_url = full_url_elem.text
+        ebay_url = upload_image_bytes_to_ebay(image_bytes, content_type, picture_name="Uploaded Image")
+        if ebay_url:
             print(f"[API] Image uploaded successfully: {ebay_url}")
             return jsonify({"url": ebay_url}), 200
-        else:
-            print("[API] Could not find FullURL in eBay response")
-            return jsonify({"error": "eBay upload succeeded but no URL returned"}), 502
+
+        print("[API] eBay upload failed (no URL returned)")
+        return jsonify({"error": "eBay upload failed"}), 502
 
     except Exception as e:
         try:
@@ -3763,5 +3792,70 @@ class _QuietTokensRequestHandler(WSGIRequestHandler):
         super().log_request(code, size)
 
 
+def _free_port_from_stale_backend(port: int) -> None:
+    """Kill a stale AxisResearcher backend still holding `port`.
+
+    A previous backend can be orphaned when its terminal dies without shutting
+    Flask down. Without this, a new `npm run dev` cannot bind the port and the
+    frontend ends up proxying to the stale process serving old code.
+    Only kills processes whose command line looks like `python ... app.py`.
+    """
+    import socket
+    import subprocess
+
+    def port_is_free() -> bool:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            probe.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+        probe.close()
+        return True
+
+    if port_is_free():
+        return
+
+    try:
+        out = subprocess.run(
+            ["netstat", "-ano", "-p", "tcp"],
+            capture_output=True, text=True, timeout=15,
+        ).stdout
+    except Exception:
+        return
+
+    pids = set()
+    for line in out.splitlines():
+        parts = line.split()
+        if (
+            len(parts) >= 5
+            and parts[0] == "TCP"
+            and parts[1].endswith(f":{port}")
+            and parts[3].upper() == "LISTENING"
+        ):
+            pids.add(parts[-1])
+
+    for pid in pids:
+        try:
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"],
+                capture_output=True, text=True, timeout=15,
+            )
+            cmdline = (r.stdout or "").lower()
+        except Exception:
+            continue
+        if "python" in cmdline and "app.py" in cmdline:
+            print(f"[startup] Port {port} is held by a stale backend (PID {pid}); killing it.")
+            subprocess.run(["taskkill", "/PID", pid, "/T", "/F"],
+                           capture_output=True, timeout=15)
+
+    for _ in range(20):
+        if port_is_free():
+            return
+        time.sleep(0.5)
+    print(f"[startup] WARNING: port {port} is still busy; Flask may fail to bind.")
+
+
 if __name__ == '__main__':
+    _free_port_from_stale_backend(5000)
     app.run(debug=True, use_reloader=False, port=5000, request_handler=_QuietTokensRequestHandler)

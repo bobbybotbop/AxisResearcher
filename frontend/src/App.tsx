@@ -14,11 +14,13 @@ import CreateWorkflow from "./components/CreateWorkflow";
 import ToastContainer from "./components/ToastContainer";
 import GeneratedListingCard from "./components/GeneratedListingCard";
 import CompactListingRow from "./components/CompactListingRow";
+import ListingDetailModal from "./components/ListingDetailModal";
 import UploadListingsToolbar from "./components/UploadListingsToolbar";
 import ApiKeyManagementSection from "./components/ApiKeyManagementSection";
 import TestAiModelSection from "./components/TestAiModelSection";
 import LogsTab from "./components/LogsTab";
 import ThreeDFileFinder from "./components/ThreeDFileFinder";
+import NumberInput from "./components/NumberInput";
 import { MOCK_DATA, MOCK_GENERATED_TITLE, MOCK_GENERATED_DESCRIPTION } from "./mockData";
 import { createTestWorkflowState } from "./testWorkflowState";
 import { trimTransparentPadding } from "./utils/trimImage";
@@ -28,7 +30,11 @@ import { fetchWithProgress } from "./utils/fetchWithProgress";
 import { DEFAULT_TEXT_MODEL_OPTIONS, IMAGE_MODEL_OPTIONS, CLASSIFIER_MODEL_OPTIONS, PROVIDER_LABELS } from "./constants/models";
 import type { ImageModelOption } from "./constants/models";
 import { TAB_PATHS } from "./constants/routes";
+import { createPlaceholderImageDataUrl, renderPlaceholderImagePngBlob } from "./constants/placeholder";
 import type { TabName } from "./constants/routes";
+import { THREE_D_SITES, THREE_D_SITE_STATUS_STORAGE_KEY, THREE_D_SITE_TESTED_AT_STORAGE_KEY } from "./constants/files3d";
+import { DEFAULT_OPERATION_COOLDOWN_HOURS, MS_PER_HOUR, STOCK_QUANTITIES_STORAGE_KEY, STOCK_REFRESHED_AT_STORAGE_KEY } from "./constants/cooldown";
+import type { ThreeDSiteStatus } from "./constants/files3d";
 import type { DropResult } from "@hello-pangea/dnd";
 import type { Listing, ModelOption, ProgressState, ImageGenProgress } from "./types/listing";
 import type { TestWorkflowState } from "./types/workflow";
@@ -263,6 +269,13 @@ function App() {
       return true;
     }
   });
+  const [testUserEnabled, setTestUserEnabled] = useState(() => {
+    try {
+      return localStorage.getItem("axisTestUserEnabled") === "true";
+    } catch {
+      return false;
+    }
+  });
   const [threeDDownloadDelay, setThreeDDownloadDelay] = useState(() => {
     try {
       const stored = localStorage.getItem("axisThreeDDownloadDelay");
@@ -271,8 +284,33 @@ function App() {
       return 1.0;
     }
   });
-  const [threeDSiteStatus, setThreeDSiteStatus] = useState<Record<string, { ok: boolean; message: string }> | null>(null);
+  const [threeDSiteStatus, setThreeDSiteStatus] = useState<ThreeDSiteStatus | null>(() => {
+    try {
+      const stored = localStorage.getItem(THREE_D_SITE_STATUS_STORAGE_KEY);
+      return stored ? (JSON.parse(stored) as ThreeDSiteStatus) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [threeDSiteTestedAt, setThreeDSiteTestedAt] = useState<number | null>(() => {
+    try {
+      const stored = localStorage.getItem(THREE_D_SITE_TESTED_AT_STORAGE_KEY);
+      return stored ? parseInt(stored, 10) : null;
+    } catch {
+      return null;
+    }
+  });
   const [threeDSiteTesting, setThreeDSiteTesting] = useState(false);
+  const threeDSiteAutoTestRan = useRef(false);
+  // Shared cooldown (hours) for automatic background operations: History-tab
+  // stock refresh and the 3D site auto-test. Fetched from the backend on
+  // mount; user-configurable in Settings.
+  const [operationCooldownHours, setOperationCooldownHours] = useState<number>(DEFAULT_OPERATION_COOLDOWN_HOURS);
+  const operationCooldownHoursRef = useRef<number>(DEFAULT_OPERATION_COOLDOWN_HOURS);
+  const applyOperationCooldownHours = (hours: number): void => {
+    operationCooldownHoursRef.current = hours;
+    setOperationCooldownHours(hours);
+  };
   const [cults3dCredStatus, setCults3dCredStatus] = useState<{ has_credentials: boolean; auth_type: string | null; email: string } | null>(null);
   const [cults3dCredFormOpen, setCults3dCredFormOpen] = useState(false);
   const [cults3dCookiesInput, setCults3dCookiesInput] = useState("");
@@ -280,6 +318,12 @@ function App() {
   const [cults3dPasswordInput, setCults3dPasswordInput] = useState("");
   const [cults3dCredSaving, setCults3dCredSaving] = useState(false);
   const [cults3dCredMessage, setCults3dCredMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [makerworldCredStatus, setMakerworldCredStatus] = useState<{ has_credentials: boolean; auth_type: string | null; email: string; profile_present?: boolean } | null>(null);
+  const [makerworldCredFormOpen, setMakerworldCredFormOpen] = useState(false);
+  const [makerworldEmailInput, setMakerworldEmailInput] = useState("");
+  const [makerworldPasswordInput, setMakerworldPasswordInput] = useState("");
+  const [makerworldCredSaving, setMakerworldCredSaving] = useState(false);
+  const [makerworldCredMessage, setMakerworldCredMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [autoPromoteEnabled, setAutoPromoteEnabled] = useState(true);
   const [promotedListingAdRate, setPromotedListingAdRate] = useState(7.0);
   const [bgRemovedPhotos, setBgRemovedPhotos] = useState<Record<string, string>>({});
@@ -318,9 +362,12 @@ function App() {
     const stored = localStorage.getItem("axisHistoryViewMode");
     return stored === "detailed" ? "detailed" : "compact";
   });
-  const [listingQuantities, setListingQuantities] = useState<Record<string, number>>({});
+  const [listingQuantities, setListingQuantities] = useState<Record<string, number | null>>({});
   const [loadingQuantities, setLoadingQuantities] = useState(false);
   const quantitiesFetchedRef = useRef<boolean>(false);
+  // True once stock was actually fetched from eBay this session (vs. restored
+  // from the cooldown cache). Distinguishes the two for pagination refills.
+  const quantitiesLiveFetchedRef = useRef<boolean>(false);
   const [autoRestockEnabled, setAutoRestockEnabled] = useState(false);
   const [autoRestockQuantity, setAutoRestockQuantity] = useState(15);
   const [minimumImagesPerListing, setMinimumImagesPerListing] = useState(10);
@@ -502,6 +549,17 @@ function App() {
     }
   }, [autoBackgroundRemovalEnabled]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        "axisTestUserEnabled",
+        testUserEnabled ? "true" : "false",
+      );
+    } catch {
+      // ignore
+    }
+  }, [testUserEnabled]);
+
   // Keep URLs aligned with tab state. Each tab has its own path.
   useEffect(() => {
     const p = normalizePathname(location.pathname);
@@ -630,7 +688,7 @@ function App() {
     try {
       await fetch('/api/import-listings', { method: 'POST' });
       quantitiesFetchedRef.current = false;   // force quantity re-fetch
-      await fetchAllListings();
+      await fetchAllListings({ forceQuantities: true });   // manual refresh bypasses the cooldown
     } catch (e) {
       // non-fatal
     } finally {
@@ -1270,6 +1328,60 @@ function App() {
       }
       return newSet;
     });
+  };
+
+  /**
+   * Test-user placeholder mode: skip AI generation for these photos and add
+   * placeholder images instead. Each placeholder is rendered as a PNG and
+   * uploaded to eBay Picture Services (/api/upload-image), so the resulting
+   * EPS URLs are valid in a live listing upload.
+   */
+  const handleUsePlaceholderImages = async (photoUrls: string[]): Promise<void> => {
+    if (!photoUrls?.length) return;
+    setSkippedPhotos((prev) => {
+      const next = new Set(prev);
+      photoUrls.forEach((url) => next.add(url));
+      return next;
+    });
+    try {
+      const newImages = [...generatedImages];
+      for (let i = 0; i < photoUrls.length; i++) {
+        const blob = await renderPlaceholderImagePngBlob(newImages.length + 1);
+        const formData = new FormData();
+        formData.append("image", blob, "placeholder.png");
+        const uploadResp = await fetch("/api/upload-image", {
+          method: "POST",
+          body: formData,
+        });
+        const uploadData = await uploadResp.json();
+        if (!uploadResp.ok)
+          throw new Error(uploadData.error || "Upload to eBay failed");
+        if (!uploadData.url)
+          throw new Error("No URL returned from eBay upload");
+        newImages.push(uploadData.url);
+      }
+      setGeneratedImages(newImages);
+
+      if (currentSku && newImages.length > 0) {
+        fetch("/api/update-listing-images", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sku: currentSku, image_urls: newImages }),
+        })
+          .then((r) => r.json())
+          .then((syncData) => {
+            if (syncData.listing_data) setListingData(syncData.listing_data);
+          })
+          .catch((err) => console.error("Failed to sync images to disk:", err));
+      }
+      addToast(
+        "success",
+        `Added ${photoUrls.length} placeholder image${photoUrls.length === 1 ? "" : "s"} (AI generation skipped)`,
+      );
+    } catch (err) {
+      console.error("Error adding placeholder images:", err);
+      addToast("error", (err as Error).message || "An error occurred while adding placeholder images");
+    }
   };
   const handleConfirmCategories = async (): Promise<void> => {
     console.log("Confirm categories button clicked");
@@ -2134,7 +2246,41 @@ function App() {
     }
   };
 
-  const fetchAllListings = async (): Promise<void> => {
+  // Stock auto-refresh cooldown: the History tab refreshes live eBay
+  // quantities at most once per operationCooldownHours; within the window the
+  // last snapshot is restored from localStorage instead. The manual Refresh
+  // button bypasses the cooldown (and resets it).
+  const isStockRefreshStale = (): boolean => {
+    try {
+      const stored = localStorage.getItem(STOCK_REFRESHED_AT_STORAGE_KEY);
+      if (!stored) return true;
+      return Date.now() - parseInt(stored, 10) >= operationCooldownHoursRef.current * MS_PER_HOUR;
+    } catch {
+      return true;
+    }
+  };
+
+  const loadCachedQuantities = (): void => {
+    try {
+      const stored = localStorage.getItem(STOCK_QUANTITIES_STORAGE_KEY);
+      if (stored) setListingQuantities(JSON.parse(stored) as Record<string, number | null>);
+    } catch {
+      // ignore corrupt cache — quantities simply stay empty
+    }
+  };
+
+  const persistQuantityUpdates = (updates: Record<string, number | null>): void => {
+    try {
+      const stored = localStorage.getItem(STOCK_QUANTITIES_STORAGE_KEY);
+      const cache = stored ? (JSON.parse(stored) as Record<string, number | null>) : {};
+      Object.assign(cache, updates);
+      localStorage.setItem(STOCK_QUANTITIES_STORAGE_KEY, JSON.stringify(cache));
+    } catch {
+      // ignore — cache is best-effort
+    }
+  };
+
+  const fetchAllListings = async (opts?: { forceQuantities?: boolean }): Promise<void> => {
     setLoadingListings(true);
 
     try {
@@ -2154,7 +2300,11 @@ function App() {
       console.log("Loaded listings:", listings);
       if (!quantitiesFetchedRef.current) {
         quantitiesFetchedRef.current = true;
-        fetchQuantitiesForPage(listings);
+        if (opts?.forceQuantities || isStockRefreshStale()) {
+          void fetchQuantitiesForPage(listings);
+        } else {
+          loadCachedQuantities();
+        }
       }
     } catch (err) {
       console.error("Error fetching listings:", err);
@@ -2180,6 +2330,13 @@ function App() {
       if (!res.ok) return;
       const data = await res.json();
       setListingQuantities((prev) => ({ ...prev, ...data }));
+      persistQuantityUpdates(data);
+      quantitiesLiveFetchedRef.current = true;
+      try {
+        localStorage.setItem(STOCK_REFRESHED_AT_STORAGE_KEY, String(Date.now()));
+      } catch {
+        // ignore
+      }
     } catch {
       // silently ignore
     } finally {
@@ -2193,7 +2350,15 @@ function App() {
     const skus = allListings
       .filter((l) => l.sku!.startsWith("MANUAL_") || isUploaded(l))
       .filter((l) => !l.isVariationListing)
-      .filter((l) => listingQuantities[l.sku!] !== qty)
+      .filter((l) => {
+        const current = listingQuantities[l.sku!];
+        if (source === "auto") {
+          // Auto-restock only tops up listings known to be below the target.
+          // Unknown (null/undefined) quantities are skipped, never blind-restocked.
+          return typeof current === "number" && Number.isFinite(current) && current < qty;
+        }
+        return current !== qty;
+      })
       .filter((l) => (l.ebay_status as string | undefined) !== 'not_found')
       .map((l) => l.sku);
     if (!skus.length) return;
@@ -2213,6 +2378,7 @@ function App() {
         : {};
 
       if (data.updated?.length) {
+        persistQuantityUpdates(Object.fromEntries(data.updated.map((sku: string) => [sku, qty])));
         setListingQuantities((prev) => {
           const next = { ...prev };
           data.updated.forEach((sku: string) => {
@@ -2310,8 +2476,17 @@ function App() {
     }
   };
 
-  const handleMinimumImagesChange = (value: string): void => {
-    const parsed = parseInt(value, 10);
+  const handleOperationCooldownChange = (parsed: number): void => {
+    if (isNaN(parsed) || parsed < 1) return;
+    applyOperationCooldownHours(parsed);
+    fetch("/api/settings/operation-cooldown", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operation_cooldown_hours: parsed }),
+    }).catch(() => {});
+  };
+
+  const handleMinimumImagesChange = (parsed: number): void => {
     if (isNaN(parsed) || parsed < 1) return;
     setMinimumImagesPerListing(parsed);
     fetch("/api/settings/minimum-images", {
@@ -2330,8 +2505,7 @@ function App() {
     }).catch(() => {});
   };
 
-  const handleThreeDDownloadDelayChange = (value: string): void => {
-    const parsed = parseFloat(value);
+  const handleThreeDDownloadDelayChange = (parsed: number): void => {
     if (isNaN(parsed) || parsed < 0) return;
     setThreeDDownloadDelay(parsed);
     try { localStorage.setItem("axisThreeDDownloadDelay", String(parsed)); } catch { /* ignore */ }
@@ -2339,23 +2513,52 @@ function App() {
 
   const handleTest3dSites = async (): Promise<void> => {
     setThreeDSiteTesting(true);
-    setThreeDSiteStatus(null);
     try {
       const res = await fetch("/api/test-3d-sites");
-      const data = await res.json() as { results: Record<string, { ok: boolean; message: string }> };
+      const data = await res.json() as { results: ThreeDSiteStatus };
       setThreeDSiteStatus(data.results);
+      const now = Date.now();
+      setThreeDSiteTestedAt(now);
+      try {
+        localStorage.setItem(THREE_D_SITE_STATUS_STORAGE_KEY, JSON.stringify(data.results));
+        localStorage.setItem(THREE_D_SITE_TESTED_AT_STORAGE_KEY, String(now));
+      } catch {
+        // ignore
+      }
     } catch {
-      setThreeDSiteStatus({
-        "printables.com": { ok: false, message: "Request failed" },
-        "thingiverse.com": { ok: false, message: "Request failed" },
-        "makerworld.com": { ok: false, message: "Request failed" },
-        "cults3d.com": { ok: false, message: "Request failed" },
-        "thangs.com": { ok: false, message: "Request failed" },
-      });
+      const failed: ThreeDSiteStatus = {};
+      for (const { site, supported } of THREE_D_SITES) {
+        if (supported) failed[site] = { ok: false, message: "Request failed" };
+      }
+      setThreeDSiteStatus(failed);
     } finally {
       setThreeDSiteTesting(false);
     }
   };
+
+  // On mount, load the shared operation cooldown from the backend, then
+  // auto-test download-capable 3D sites if the cooldown window has elapsed.
+  useEffect(() => {
+    if (threeDSiteAutoTestRan.current) return;
+    threeDSiteAutoTestRan.current = true;
+    (async () => {
+      let hours = DEFAULT_OPERATION_COOLDOWN_HOURS;
+      try {
+        const res = await fetch("/api/settings/operation-cooldown");
+        const data = await res.json() as { operation_cooldown_hours?: number };
+        if (typeof data.operation_cooldown_hours === "number" && data.operation_cooldown_hours >= 1) {
+          hours = data.operation_cooldown_hours;
+          applyOperationCooldownHours(hours);
+        }
+      } catch {
+        // backend unreachable — fall back to the default
+      }
+      const stale = threeDSiteTestedAt === null || Date.now() - threeDSiteTestedAt >= hours * MS_PER_HOUR;
+      if (stale) void handleTest3dSites();
+    })();
+    // runs once on mount; handleTest3dSites identity is stable enough for this purpose
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const savePromotedListingAdRate = (val: number): void => {
     if (isNaN(val) || val < 1) return;
@@ -2525,6 +2728,7 @@ function App() {
       autoRestockEnabled &&
       allListings.length > 0 &&
       quantitiesFetchedRef.current &&
+      Object.keys(listingQuantities).length > 0 &&
       !autoRestockRanRef.current
     ) {
       autoRestockRanRef.current = true;
@@ -2548,6 +2752,14 @@ function App() {
           }
         })
         .catch(() => {});
+      fetch("/api/settings/operation-cooldown")
+        .then((res) => res.json())
+        .then((data) => {
+          if (typeof data.operation_cooldown_hours === "number" && data.operation_cooldown_hours >= 1) {
+            applyOperationCooldownHours(data.operation_cooldown_hours);
+          }
+        })
+        .catch(() => {});
       fetch("/api/settings/promoted-listings")
         .then((r) => r.json())
         .then((d) => {
@@ -2563,9 +2775,11 @@ function App() {
   }, [uploadListingsSearch, uploadListingsDateFrom, uploadListingsDateTo, uploadListingsShowIncomplete, uploadListingsShowUnuploaded, uploadListingsShowManual]);
 
   useEffect(() => {
-    if (paginatedListings.length > 0) {
-      fetchQuantitiesForPage(paginatedListings);
-    }
+    if (paginatedListings.length === 0) return;
+    // Within the cooldown window the cached snapshot is already loaded —
+    // don't hit eBay again just because the page changed.
+    if (!quantitiesLiveFetchedRef.current && !isStockRefreshStale()) return;
+    fetchQuantitiesForPage(paginatedListings);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [historyPage, historyPageSize]);
 
@@ -2621,7 +2835,7 @@ function App() {
       const data = await res.json() as { has_credentials: boolean; auth_type: string | null; email: string };
       setCults3dCredStatus(data);
     } catch {
-      setCults3dCredStatus({ has_credentials: false, email: "" });
+      setCults3dCredStatus({ has_credentials: false, auth_type: null, email: "" });
     }
   }, []);
 
@@ -2686,6 +2900,49 @@ function App() {
   }, [cults3dEmailInput, cults3dPasswordInput, fetchCults3dCredStatus]);
 
   const [cults3dAutoLoading, setCults3dAutoLoading] = useState(false);
+
+  const fetchMakerworldCredStatus = useCallback(async (): Promise<void> => {
+    try {
+      const res = await fetch("/api/makerworld-credential-status");
+      const data = await res.json() as { has_credentials: boolean; auth_type: string | null; email: string; profile_present?: boolean };
+      setMakerworldCredStatus(data);
+    } catch {
+      setMakerworldCredStatus({ has_credentials: false, auth_type: null, email: "" });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "settings") fetchMakerworldCredStatus();
+  }, [activeTab, fetchMakerworldCredStatus]);
+
+  const handleSaveMakerworldEmailCreds = useCallback(async (): Promise<void> => {
+    const email = makerworldEmailInput.trim();
+    const password = makerworldPasswordInput.trim();
+    if (!email || !password) {
+      setMakerworldCredMessage({ type: "error", text: "Email and password are required." });
+      return;
+    }
+    setMakerworldCredSaving(true);
+    setMakerworldCredMessage(null);
+    try {
+      const res = await fetch("/api/makerworld-email-credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json() as { error?: string };
+      if (!res.ok || data.error) throw new Error(data.error || "Failed to save credentials");
+      setMakerworldEmailInput("");
+      setMakerworldPasswordInput("");
+      setMakerworldCredFormOpen(false);
+      setMakerworldCredMessage({ type: "success", text: "Email credentials saved." });
+      await fetchMakerworldCredStatus();
+    } catch (err) {
+      setMakerworldCredMessage({ type: "error", text: (err as Error).message || "Failed to save credentials" });
+    } finally {
+      setMakerworldCredSaving(false);
+    }
+  }, [makerworldEmailInput, makerworldPasswordInput, fetchMakerworldCredStatus]);
 
   const handleAutoLoadCults3dCookies = useCallback(async (): Promise<void> => {
     setCults3dAutoLoading(true);
@@ -3027,6 +3284,22 @@ function App() {
       });
       setTestLoading(false);
     }, 1500);
+  };
+
+  /** Test-user placeholder mode (mock tab mirror of handleUsePlaceholderImages). */
+  const testHandleUsePlaceholderImages = (photoUrls: string[]): void => {
+    if (!photoUrls?.length) return;
+    setTestSkippedPhotos((prev) => {
+      const s = new Set(prev);
+      photoUrls.forEach((url) => s.add(url));
+      return s;
+    });
+    setTestGeneratedImages((prev) => [
+      ...prev,
+      ...photoUrls.map((_, idx) =>
+        createPlaceholderImageDataUrl(prev.length + idx + 1),
+      ),
+    ]);
   };
 
   const testHandleConfirmCategories = (): void => {
@@ -3491,6 +3764,8 @@ function App() {
               onCategoryChange={(url, cat) =>
                 setTestEditableCategories((prev) => ({ ...prev, [url]: cat }))
               }
+              testUserEnabled={testUserEnabled}
+              onUsePlaceholderImages={testHandleUsePlaceholderImages}
               onSkipPhoto={(url) =>
                 setTestSkippedPhotos((prev) => {
                   const s = new Set(prev);
@@ -3788,46 +4063,12 @@ function App() {
           )}
 
           {selectedListing && (
-            <div
-              className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 p-4"
-              onClick={closeListingDetail}
-            >
-              <div
-                className="flex max-h-[90vh] max-w-[90%] flex-col overflow-hidden rounded-xl bg-surface-panel shadow-2xl animate-slide-up md:max-w-[95%]"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex items-center justify-between border-b-2 border-border-default p-4">
-                  <h2 className="m-0 text-xl font-semibold text-text-primary md:text-2xl">
-                    Listing Details: {selectedListing.sku}
-                  </h2>
-                  <button
-                    className="flex h-10 w-10 items-center justify-center rounded-full border-none bg-surface-muted text-2xl text-text-muted transition-all hover:rotate-90 hover:bg-surface-hover hover:text-text-primary"
-                    onClick={closeListingDetail}
-                  >
-                    &times;
-                  </button>
-                </div>
-
-                {loadingListingDetail ? (
-                  <div className="flex flex-col items-center justify-center gap-4 py-12">
-                    <div className="h-12 w-12 animate-spin rounded-full border-4 border-border-default border-t-primary" />
-                    <p className="text-text-muted">
-                      Loading listing details...
-                    </p>
-                  </div>
-                ) : listingDetailData ? (
-                  <div className="flex-1 overflow-auto p-4">
-                    <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-border-default bg-surface-muted p-4 font-mono text-sm text-text-primary">
-                      {JSON.stringify(listingDetailData, null, 2)}
-                    </pre>
-                  </div>
-                ) : (
-                  <div className="p-8 text-center text-danger">
-                    Failed to load listing details
-                  </div>
-                )}
-              </div>
-            </div>
+            <ListingDetailModal
+              sku={selectedListing.sku ?? ""}
+              data={listingDetailData}
+              loading={loadingListingDetail}
+              onClose={closeListingDetail}
+            />
           )}
 
           {activeTab === "testing" && (
@@ -3878,7 +4119,7 @@ function App() {
                   </div>
                 )}
                 <hr className="border-border-default" />
-                <ThreeDFileFinder addToast={addToast as (type: string, message: string) => void} fileDownloadDelay={threeDDownloadDelay} />
+                <ThreeDFileFinder addToast={addToast as (type: string, message: string) => void} fileDownloadDelay={threeDDownloadDelay} siteStatus={threeDSiteStatus} />
               </div>
             </div>
           )}
@@ -3911,6 +4152,28 @@ function App() {
                     aria-pressed={themeMode === "dark"}
                   >
                     {themeMode === "dark" ? "Dark Mode: On" : "Dark Mode: Off"}
+                  </button>
+                </div>
+              </div>
+              <div className="mb-5 rounded-xl border border-border-default bg-surface-muted p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="m-0 text-lg font-semibold text-text-primary">
+                      Test User
+                    </h3>
+                    <p className="mt-1 text-sm text-text-muted">
+                      Enables test-only features such as placeholder image mode,
+                      which skips AI image generation and uses placeholder images.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded-lg border border-border-default bg-surface-panel px-4 py-2 text-sm font-semibold text-text-primary shadow-sm transition-all hover:-translate-y-0.5 hover:bg-surface-hover hover:shadow-md"
+                    onClick={() => setTestUserEnabled((prev) => !prev)}
+                    aria-label="Toggle test user mode"
+                    aria-pressed={testUserEnabled}
+                  >
+                    {testUserEnabled ? "Test User: On" : "Test User: Off"}
                   </button>
                 </div>
               </div>
@@ -3952,13 +4215,13 @@ function App() {
                     {autoPromoteEnabled && (
                       <div className="flex items-center gap-1">
                         <label className="text-sm text-text-secondary">Ad Rate:</label>
-                        <input
-                          type="number"
+                        <NumberInput
                           min={1}
                           max={100}
                           step={0.1}
                           value={promotedListingAdRate}
-                          onChange={(e) => savePromotedListingAdRate(parseFloat(e.target.value))}
+                          onCommit={savePromotedListingAdRate}
+                          ariaLabel="Ad rate"
                           className="w-20 rounded border border-border-default bg-surface-panel px-2 py-1 text-text-primary text-sm"
                         />
                         <span className="text-sm text-text-secondary">%</span>
@@ -4016,11 +4279,11 @@ function App() {
                     <label className="text-text-secondary text-sm">
                       Minimum images per listing
                     </label>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={1}
                       value={minimumImagesPerListing}
-                      onChange={(e) => handleMinimumImagesChange(e.target.value)}
+                      onCommit={handleMinimumImagesChange}
+                      ariaLabel="Minimum images per listing"
                       className="w-24 rounded border border-border-default bg-surface-panel px-2 py-1 text-text-primary text-sm"
                     />
                     <span className="text-text-tertiary text-xs">
@@ -4234,38 +4497,61 @@ function App() {
                 <div className="flex flex-col gap-4">
                   <div>
                     <h3 className="m-0 text-lg font-semibold text-text-primary">
+                      Automatic Operation Cooldown
+                    </h3>
+                    <p className="mt-1 text-sm text-text-muted">
+                      Minimum time between automatic background operations: the History tab's stock refresh and the 3D site auto-test. Manual refreshes always run immediately and reset the timer.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-text-secondary text-sm">
+                      Cooldown (hours)
+                    </label>
+                    <NumberInput
+                      min={1}
+                      value={operationCooldownHours}
+                      onCommit={handleOperationCooldownChange}
+                      ariaLabel="Automatic operation cooldown (hours)"
+                      className="w-24 rounded border border-border-default bg-surface-panel px-2 py-1 text-text-primary text-sm"
+                    />
+                    <span className="text-text-tertiary text-xs">
+                      Default: {DEFAULT_OPERATION_COOLDOWN_HOURS} hours.
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="mb-5 rounded-xl border border-border-default bg-surface-muted p-5">
+                <div className="flex flex-col gap-4">
+                  <div>
+                    <h3 className="m-0 text-lg font-semibold text-text-primary">
                       3D File Sites
                     </h3>
                     <p className="mt-1 text-sm text-text-muted">
-                      Sites available for 3D model search and download. Only sites marked "Download supported" can be used in the 3D File Finder.
+                      Sites available for 3D model search and download. Download-capable sites are tested automatically on page load (at most once per the operation cooldown above); sites that fail are skipped in the 3D File Finder.
                     </p>
                   </div>
                   <div className="flex flex-col gap-2">
-                    {(
-                      [
-                        { site: "makerworld.com", supported: true },
-                        { site: "printables.com", supported: true },
-                        { site: "yeggi.com", supported: false },
-                        { site: "cults3d.com", supported: true, requiresAuth: true },
-                        { site: "thingiverse.com", supported: true },
-                        { site: "thangs.com", supported: true },
-                      ] as { site: string; supported: boolean; requiresAuth?: boolean }[]
-                    ).map(({ site, supported, requiresAuth }) => {
+                    {THREE_D_SITES.map(({ site, supported, requiresAuth }) => {
                       const testResult = threeDSiteStatus?.[site];
                       const isCults3d = site === "cults3d.com";
-                      const credStatus = isCults3d ? cults3dCredStatus : null;
+                      const isMakerworld = site === "makerworld.com";
+                      const credStatus = isCults3d ? cults3dCredStatus : isMakerworld ? makerworldCredStatus : null;
                       return (
                         <div key={site} className="flex flex-col gap-2 rounded-lg border border-border-default bg-surface-panel px-3 py-2">
                           <div className="flex items-center justify-between gap-3">
                             <span className="font-mono text-sm text-text-primary">{site}</span>
                             <div className="flex items-center gap-2">
                               {supported ? (
-                                testResult ? (
-                                  <span className={`rounded px-2 py-0.5 text-xs font-semibold ${testResult.ok ? "bg-emerald-100 text-emerald-900" : "bg-red-100 text-red-900"}`}>
-                                    {testResult.ok ? "OK" : "Failed"}: {testResult.message}
-                                  </span>
+                                threeDSiteTesting && !testResult ? (
+                                  <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">Checking...</span>
+                                ) : testResult ? (
+                                  testResult.ok ? (
+                                    <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-900">Operational</span>
+                                  ) : (
+                                    <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-900">Down: {testResult.message}</span>
+                                  )
                                 ) : (
-                                  <span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-900">Download supported</span>
+                                  <span className="rounded bg-surface-hover px-2 py-0.5 text-xs font-semibold text-text-muted">Not tested</span>
                                 )
                               ) : (
                                 <span className="rounded bg-surface-hover px-2 py-0.5 text-xs font-semibold text-text-muted">Search only</span>
@@ -4279,16 +4565,21 @@ function App() {
                                     : "Not configured"}
                                 </span>
                               )}
-                              {isCults3d && (
+                              {(isCults3d || isMakerworld) && (
                                 <button
                                   type="button"
                                   className="cursor-pointer rounded px-2 py-0.5 text-xs font-semibold text-text-secondary underline-offset-2 hover:text-text-primary hover:underline"
                                   onClick={() => {
-                                    setCults3dCredFormOpen((v) => !v);
-                                    setCults3dCredMessage(null);
+                                    if (isCults3d) {
+                                      setCults3dCredFormOpen((v) => !v);
+                                      setCults3dCredMessage(null);
+                                    } else {
+                                      setMakerworldCredFormOpen((v) => !v);
+                                      setMakerworldCredMessage(null);
+                                    }
                                   }}
                                 >
-                                  {cults3dCredFormOpen ? "Cancel" : credStatus?.has_credentials ? "Update" : "Configure"}
+                                  {(isCults3d ? cults3dCredFormOpen : makerworldCredFormOpen) ? "Cancel" : credStatus?.has_credentials ? "Update" : "Configure"}
                                 </button>
                               )}
                             </div>
@@ -4371,6 +4662,50 @@ function App() {
                           {isCults3d && !cults3dCredFormOpen && cults3dCredMessage?.type === "success" && (
                             <span className="text-xs font-medium text-emerald-600">{cults3dCredMessage.text}</span>
                           )}
+                          {isMakerworld && makerworldCredFormOpen && (
+                            <div className="flex flex-col gap-4 border-t border-border-default pt-3">
+                              <div className="flex flex-col gap-1.5">
+                                <p className="text-xs font-semibold text-text-primary">Email &amp; password <span className="font-normal text-text-muted">(Bambu Lab account — the session persists in a local browser profile, no manual steps after first login)</span></p>
+                                <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2">
+                                  <input
+                                    type="email"
+                                    placeholder="Email"
+                                    value={makerworldEmailInput}
+                                    onChange={(e) => setMakerworldEmailInput(e.target.value)}
+                                    disabled={makerworldCredSaving}
+                                    className="flex-1 rounded border border-border-default bg-surface-hover px-2 py-1 text-sm text-text-primary focus:border-primary focus:outline-none disabled:opacity-50"
+                                    autoComplete="username"
+                                  />
+                                  <input
+                                    type="password"
+                                    placeholder="Password"
+                                    value={makerworldPasswordInput}
+                                    onChange={(e) => setMakerworldPasswordInput(e.target.value)}
+                                    disabled={makerworldCredSaving}
+                                    className="flex-1 rounded border border-border-default bg-surface-hover px-2 py-1 text-sm text-text-primary focus:border-primary focus:outline-none disabled:opacity-50"
+                                    autoComplete="current-password"
+                                    onKeyDown={(e) => { if (e.key === "Enter") void handleSaveMakerworldEmailCreds(); }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleSaveMakerworldEmailCreds()}
+                                    disabled={makerworldCredSaving}
+                                    className="cursor-pointer rounded bg-primary px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    {makerworldCredSaving ? "Saving..." : "Save"}
+                                  </button>
+                                </div>
+                              </div>
+                              {makerworldCredMessage && (
+                                <span className={`text-xs font-medium ${makerworldCredMessage.type === "success" ? "text-emerald-600" : "text-red-600"}`}>
+                                  {makerworldCredMessage.text}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {isMakerworld && !makerworldCredFormOpen && makerworldCredMessage?.type === "success" && (
+                            <span className="text-xs font-medium text-emerald-600">{makerworldCredMessage.text}</span>
+                          )}
                         </div>
                       );
                     })}
@@ -4382,23 +4717,25 @@ function App() {
                       onClick={handleTest3dSites}
                       disabled={threeDSiteTesting}
                     >
-                      {threeDSiteTesting ? "Testing..." : "Test Supported Sites"}
+                      {threeDSiteTesting ? "Testing..." : "Re-test Now"}
                     </button>
-                    {threeDSiteStatus && !threeDSiteTesting && (
-                      <span className="text-xs text-text-muted">Done</span>
+                    {threeDSiteTestedAt && !threeDSiteTesting && (
+                      <span className="text-xs text-text-muted">
+                        Last tested: {new Date(threeDSiteTestedAt).toLocaleString()} (auto-tests every {operationCooldownHours}h)
+                      </span>
                     )}
                   </div>
                   <div className="flex flex-col gap-1">
                     <label className="text-sm text-text-secondary">
                       Delay between file downloads (seconds)
                     </label>
-                    <input
-                      type="number"
+                    <NumberInput
                       min={0}
                       step={0.1}
                       value={threeDDownloadDelay}
-                      onChange={(e) => handleThreeDDownloadDelayChange(e.target.value)}
-                      className="w-24 rounded border border-border-default bg-surface-panel px-2 py-1 text-sm text-text-primary"
+                      onCommit={handleThreeDDownloadDelayChange}
+                      ariaLabel="Delay between file downloads (seconds)"
+                      className="w-24 rounded border border-border-default bg-surface-panel px-2 py-1 text-text-primary text-sm"
                     />
                     <span className="text-xs text-text-tertiary">
                       Pause between file downloads within a model. Reduces Cloudflare rate-limiting on multi-file models.
@@ -4565,6 +4902,8 @@ function App() {
               onChatSubmit={handleChatSubmit}
               onCategoryChange={handleCategoryChange}
               onSkipPhoto={handleSkipPhoto}
+              testUserEnabled={testUserEnabled}
+              onUsePlaceholderImages={handleUsePlaceholderImages}
               onPromptModifierChange={setPromptModifier}
               onConfirmCategories={handleConfirmCategories}
               onImageSelection={handleImageSelection}

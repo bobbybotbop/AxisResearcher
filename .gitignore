@@ -16,3 +16,5 @@ frontend/dist/index.html
 docs/superpowers/
 logs.ndjson
 *.venv
+backend/downloaders/cults3d_profile/
+backend/downloaders/makerworld_profile/

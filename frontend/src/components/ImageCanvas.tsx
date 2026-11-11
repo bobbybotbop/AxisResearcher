@@ -16,6 +16,7 @@ import {
 } from "@mynaui/icons-react";
 import { trimTransparentPadding } from "../utils/trimImage";
 import ImageUploadModal, { type PendingImage } from "./ImageUploadModal";
+import NumberInput from "./NumberInput";
 import { btnPill, btnPillSecondary, btnPillSm } from "../styles/buttonPill";
 
 const DISPLAY_MAX = 324;
@@ -558,19 +559,12 @@ export default function ImageCanvas({
               <div className="absolute left-full top-0 z-10 ml-2 flex w-40 flex-col gap-2 rounded-lg border border-border-default bg-surface-panel p-3 text-text-primary shadow-lg">
                 <div className="flex items-center justify-between gap-2">
                   <label className="text-sm">Size:</label>
-                  <input
-                    type="number"
-                    min="8"
-                    max="500"
+                  <NumberInput
+                    min={8}
+                    max={500}
                     value={textFontSize}
-                    onChange={(e) =>
-                      setTextFontSize(
-                        Math.max(
-                          8,
-                          Math.min(500, parseInt(e.target.value, 10) || 48),
-                        ),
-                      )
-                    }
+                    onCommit={setTextFontSize}
+                    ariaLabel="Text size"
                     className="w-16 rounded border border-border-default bg-surface-muted px-2 py-1 text-sm text-text-primary"
                   />
                 </div>

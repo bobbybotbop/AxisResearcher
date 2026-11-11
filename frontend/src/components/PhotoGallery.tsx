@@ -17,6 +17,8 @@ interface PhotoGalleryProps {
   onRemoveBackgrounds?: (urls: string[]) => void;
   showClassification?: boolean;
   hideConfirmButton?: boolean;
+  testUserEnabled?: boolean;
+  onUsePlaceholderImages?: (photoUrls: string[]) => void;
 }
 
 function PhotoGallery({
@@ -34,6 +36,8 @@ function PhotoGallery({
   onRemoveBackgrounds,
   showClassification = true,
   hideConfirmButton = false,
+  testUserEnabled = false,
+  onUsePlaceholderImages,
 }: PhotoGalleryProps) {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
@@ -176,6 +180,21 @@ function PhotoGallery({
                 >
                   Skip
                 </button>
+                {testUserEnabled && onUsePlaceholderImages && (
+                  <button
+                    type="button"
+                    className="w-full px-4 py-2 text-left text-sm text-text-primary hover:bg-surface-app"
+                    onClick={() => {
+                      const urls = Array.from(selectedPhotos).map((idx) => photos[idx]);
+                      onUsePlaceholderImages(urls);
+                      setSelectedPhotos(new Set());
+                      setSelectMode(false);
+                      setBulkDropdownOpen(false);
+                    }}
+                  >
+                    Use Placeholder Images
+                  </button>
+                )}
                 {onRemoveBackgrounds && (
                   <button
                     type="button"

@@ -15,7 +15,11 @@ There is also a standalone CLI (`backend/ebay_cli.py`, invoked via `python -m ba
 Run from the project root unless noted.
 
 ```
-npm run dev              # backend (python app.py) + frontend (vite), waits for backend on :5000 first
+npm run dev              # backend (python app.py) + frontend (vite), waits for backend on :5000 first.
+                         # On startup the backend kills any stale python app.py process still
+                         # holding :5000 (orphans from a killed terminal). --kill-others-on-fail
+                         # tears down both sides if the backend dies; wait-on gives up after 90s.
+                         # If Ctrl+C prompts "Terminate batch job (Y/N)?", answer Y.
 npm run dev:backend      # python app.py only (Flask, port 5000)
 npm run dev:frontend     # cd frontend && npm run dev only (Vite, port 4000, proxies /api -> :5000)
 ```
@@ -135,6 +139,16 @@ All magic strings, magic numbers, hardcoded lists, and configuration values must
 
 Backend domains: `ebay` (API URLs, OAuth config), `models` (AI model IDs, prompt filenames), `listing` (title rules, SKU prefixes, image category maps), `serp` (whitelisted/blacklisted sites), `paths` (filesystem paths and log limits).
 
-Frontend domains: `models` (model option arrays, provider labels), `routes` (tab paths and `TabName` type), `logs` (event labels, filter chips), `chatContextModes` (chat context config).
+Frontend domains: `models` (model option arrays, provider labels), `routes` (tab paths and `TabName` type), `logs` (event labels, filter chips), `chatContextModes` (chat context config), `placeholder` (test-user placeholder image data URLs), `cooldown` (shared auto-operation cooldown default and stock-snapshot localStorage keys; the live value is `operation_cooldown_hours` in `listingPreferences.json`, editable in Settings → Automatic Operation Cooldown, and gates both the History-tab stock auto-refresh and the 3D site auto-test).
 
 What is NOT moved to constants: values loaded from `.env` or `listingPreferences.json` at runtime (these are config), the `ImageType` enum (it is a type, not a value), and one-off inline LLM prompt strings.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as local markdown files under `.scratch/`. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.

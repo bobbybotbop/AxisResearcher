@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Search, Filter } from "@mynaui/icons-react";
 import { RefreshCw, LayoutList, LayoutGrid } from "lucide-react";
 import { btnPillSm } from "../styles/buttonPill";
+import NumberInput from "./NumberInput";
 
 interface UploadListingsToolbarProps {
   searchQuery: string;
@@ -58,13 +59,6 @@ export default function UploadListingsToolbar({
 }: UploadListingsToolbarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const [quantityDraft, setQuantityDraft] = useState(
-    String(autoRestockQuantity ?? ""),
-  );
-
-  useEffect(() => {
-    setQuantityDraft(String(autoRestockQuantity ?? ""));
-  }, [autoRestockQuantity]);
 
   const filtersActive =
     showIncompleteListings ||
@@ -282,20 +276,12 @@ export default function UploadListingsToolbar({
             />
             <span className="whitespace-nowrap">Auto-restock</span>
           </label>
-          <input
-            type="number"
-            min="0"
-            value={quantityDraft}
-            onChange={(e) => setQuantityDraft(e.target.value)}
-            onBlur={() => {
-              const n = parseInt(quantityDraft, 10);
-              if (Number.isFinite(n) && n >= 0) {
-                onAutoRestockQuantityChange?.(n);
-              } else {
-                setQuantityDraft(String(autoRestockQuantity ?? ""));
-              }
-            }}
-            aria-label="Auto-restock target quantity"
+          <NumberInput
+            min={0}
+            value={autoRestockQuantity ?? 0}
+            onCommit={(n) => onAutoRestockQuantityChange?.(n)}
+            commitOn="blur"
+            ariaLabel="Auto-restock target quantity"
             className="w-14 rounded border border-border-default bg-surface-muted px-2 py-1 text-sm text-text-primary"
           />
         </div>

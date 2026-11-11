@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from backend.constants.ebay import EBAY_INVENTORY_API_BASE
 from backend.constants.paths import CONFIG_FILE, GENERATED_LISTINGS_DIR
-from backend.constants.listing import SKU_PREFIX, MANUAL_SKU_PREFIX
+from backend.constants.listing import SKU_PREFIX, MANUAL_SKU_PREFIX, DEFAULT_OPERATION_COOLDOWN_HOURS
 
 # Load environment variables
 load_dotenv()
@@ -498,6 +498,35 @@ def save_minimum_images_setting(minimum):
     config["minimum_images_per_listing"] = int(minimum)
     save_config(config)
     return {"minimum_images_per_listing": int(minimum)}
+
+
+def get_operation_cooldown_setting():
+    """
+    Read operation_cooldown_hours from listingPreferences.json.
+
+    Returns:
+        dict: {"operation_cooldown_hours": int}
+    """
+    config = load_config()
+    return {
+        "operation_cooldown_hours": int(config.get("operation_cooldown_hours", DEFAULT_OPERATION_COOLDOWN_HOURS)),
+    }
+
+
+def save_operation_cooldown_setting(hours):
+    """
+    Persist operation_cooldown_hours to listingPreferences.json.
+
+    Args:
+        hours (int): New cooldown in hours. Must be a positive integer.
+
+    Returns:
+        dict: {"operation_cooldown_hours": int} reflecting the saved state.
+    """
+    config = load_config()
+    config["operation_cooldown_hours"] = int(hours)
+    save_config(config)
+    return {"operation_cooldown_hours": int(hours)}
 
 
 def get_promoted_listing_settings():

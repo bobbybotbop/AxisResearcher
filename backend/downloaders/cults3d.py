@@ -1,21 +1,62 @@
+"""Cults3D downloader.
+
+Uses SeleniumBase UC Mode (undetected-chromedriver) with a persistent local
+Chrome profile instead of connecting to an external browser. The profile at
+backend/downloaders/cults3d_profile/ keeps the Cults3D login session and
+Cloudflare clearance across runs, so no external browser (e.g. BrowserOS neo)
+is required.
+
+Headless behavior:
+- Runs headless by default (CULTS3D_HEADLESS=true in .env).
+- If a Cloudflare challenge cannot be cleared headless, the download is
+  retried once in a headed window, where the challenge can be solved
+  automatically (uc_gui_handle_captcha) or manually by the user.
+- Set CULTS3D_HEADLESS=false to always run headed.
+
+Login: CULTS3D_EMAIL / CULTS3D_PASSWORD from .env are used when the profile
+is not already logged in. After one successful login the profile session
+persists and credentials are no longer needed.
+"""
+
 import io
 import json
 import os
 import re
-import tempfile
+import threading
 import time
 import zipfile
 
 import requests
 
 CULTS3D_BASE = "https://cults3d.com"
-_COOKIE_FILE = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "..", ".cults3d_cookies.json")
+
+# Persistent Chrome profile — carries the Cults3D session + Cloudflare
+# clearance between runs. Gitignored; delete it to force a fresh login.
+_PROFILE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cults3d_profile")
+
+# A single Chrome profile cannot be shared between concurrent browser
+# instances, so serialize downloads process-wide.
+_PROFILE_LOCK = threading.Lock()
+
+_HEADLESS = os.environ.get("CULTS3D_HEADLESS", "true").strip().lower() not in ("0", "false", "no")
+
+# Used only for the plain-requests probe() and as a fallback download UA.
+# The browser itself must NOT be given a pinned UA: a UA that disagrees with
+# the installed Chrome version (sec-ch-ua client hints) is a bot signal to
+# Cloudflare. Downloads instead reuse the browser's real UA (see stream_zip).
+_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
 )
 
 
 class PaidModelError(ValueError):
     """Raised when the requested model requires payment."""
+
+
+class _CloudflareBlocked(RuntimeError):
+    """Raised when the Cloudflare challenge could not be cleared."""
 
 
 def extract_slug(link: str) -> str:
@@ -25,121 +66,14 @@ def extract_slug(link: str) -> str:
     return match.group(1)
 
 
-def load_cookies_from_browser() -> str:
-    """
-    Attempt to read Cults3D cookies from an installed browser.
-    Chrome 127+ uses App-Bound Encryption that blocks this without admin
-    privileges. Firefox works reliably if the user is logged in there.
-    """
+def _require_seleniumbase():
     try:
-        import browser_cookie3
-    except ImportError:
-        raise RuntimeError("browser_cookie3 is not installed.")
-
-    errors: list[str] = []
-
-    for browser_name, loader in [
-        ("Firefox", lambda: browser_cookie3.firefox(domain_name="cults3d.com")),
-        ("Edge", lambda: browser_cookie3.edge(domain_name="cults3d.com")),
-        ("Chrome", lambda: browser_cookie3.chrome(domain_name="cults3d.com")),
-    ]:
-        try:
-            cjar = loader()
-            parts = [f"{c.name}={c.value}" for c in cjar if c.value]
-            if parts:
-                return "; ".join(parts)
-        except Exception as e:
-            err_str = str(e)
-            if "admin" in err_str.lower() or "RequiresAdmin" in type(e).__name__:
-                errors.append(
-                    f"{browser_name}: Chrome 127+ cookies require admin access to read automatically."
-                )
-            else:
-                errors.append(f"{browser_name}: {err_str}")
-
-    raise RuntimeError(
-        "Could not auto-load cookies from any browser. "
-        + " | ".join(errors)
-        + " — Use email/password login in Settings instead, or paste cookies manually from DevTools."
-    )
-
-
-def _require_sb_cdp():
-    try:
-        from seleniumbase import sb_cdp
-        return sb_cdp
+        from seleniumbase import SB
+        return SB
     except ImportError as exc:
         raise RuntimeError(
             "seleniumbase is not installed. Run: pip install seleniumbase"
         ) from exc
-
-
-def _csrf_from_html(html: str) -> str:
-    match = re.search(r'name="authenticity_token"\s+value="([^"]+)"', html)
-    if not match:
-        match = re.search(r'value="([^"]+)"\s+name="authenticity_token"', html)
-    if not match:
-        raise RuntimeError("Could not find CSRF token in page HTML")
-    return match.group(1)
-
-
-def _dismiss_popups(sb) -> None:
-    try:
-        if sb.is_element_visible('button:contains("CONFIRM")'):
-            sb.click('button:contains("CONFIRM")')
-            time.sleep(0.5)
-    except Exception:
-        pass
-
-
-def _inject_cookie_string(sb, cookie_string: str) -> None:
-    """Convert a browser cookie string to SeleniumBase JSON format and load it."""
-    cookies = []
-    for part in cookie_string.split(";"):
-        part = part.strip()
-        if "=" in part:
-            name, _, value = part.partition("=")
-            name = name.strip()
-            if name:
-                cookies.append({
-                    "name": name,
-                    "value": value.strip(),
-                    "domain": ".cults3d.com",
-                    "path": "/",
-                })
-    if not cookies:
-        return
-    tmp = tempfile.NamedTemporaryFile(
-        suffix=".json", delete=False, mode="w", encoding="utf-8"
-    )
-    json.dump(cookies, tmp)
-    tmp.close()
-    try:
-        sb.load_cookies(tmp.name)
-    except Exception:
-        pass
-    finally:
-        try:
-            os.unlink(tmp.name)
-        except Exception:
-            pass
-
-
-def _do_login(sb, email: str, password: str) -> None:
-    sb.goto(f"{CULTS3D_BASE}/en/users/sign-in")
-    time.sleep(2)
-    _dismiss_popups(sb)
-    sb.type('input[name="user[email]"]', email)
-    sb.type('input[name="user[password]"]', password)
-    time.sleep(0.3)
-    sb.evaluate('document.querySelector(\'form[action*="sign-in"]\').submit()')
-    time.sleep(4)
-    if "sign-in" in sb.get_current_url().lower():
-        raise RuntimeError("Cults3D login failed. Check email/password.")
-    try:
-        sb.save_cookies(_COOKIE_FILE)
-    except Exception:
-        pass
 
 
 def _check_price(html: str) -> None:
@@ -181,6 +115,14 @@ def _extract_file_links(html: str) -> list[dict]:
             seen.add(url)
             files.append({"name": name, "url": url})
 
+    # Order page "DOWNLOAD ALL" link, e.g. /en/downloads/195749838?creation=<slug>
+    for path, creation in re.findall(
+        r'href="(/en/downloads/\d+\?creation=([^"&]+))"',
+        html,
+        re.IGNORECASE,
+    ):
+        add(f"{creation}.zip", CULTS3D_BASE + path)
+
     for url in re.findall(
         r'href="(https://fbi\.cults3d\.com/uploaders/\d+/creation-file/[^"]+)"',
         html,
@@ -199,126 +141,167 @@ def _extract_file_links(html: str) -> list[dict]:
     return files
 
 
-def _place_free_order(sb, link: str, slug: str) -> list[dict]:
-    sb.goto(link)
-    time.sleep(3)
-    _dismiss_popups(sb)
-
-    html = sb.get_page_source()
-    files = _extract_file_links(html)
-    if files:
-        return files
-
-    # Click the download/order button
-    clicked = False
-    for selector in [
-        'a[href*="free_orders"]',
-        'a:contains("Download")',
-        'button:contains("Download")',
-        ".crea-dl a",
-        "a.btn-dl",
-    ]:
+def _wait_for_cloudflare(sb, timeout: float = 20) -> bool:
+    """Poll until the Cloudflare challenge page is gone. Returns False if it persists."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
         try:
-            if sb.is_element_visible(selector):
-                sb.click(selector)
-                time.sleep(3)
-                _dismiss_popups(sb)
-                clicked = True
-                break
+            title = sb.get_title() or ""
         except Exception:
-            continue
+            title = ""
+        try:
+            body = sb.get_text("body") or ""
+        except Exception:
+            body = ""
+        if "Just a moment" not in title and "Performing security verification" not in body:
+            return True
+        sb.sleep(1)
+    return False
 
-    if clicked:
-        for confirm_selector in [
-            'button:contains("Confirm")',
-            'input[type="submit"][value*="Order"]',
-            'button:contains("Order")',
-            '.modal button[type="submit"]',
-        ]:
-            try:
-                if sb.is_element_visible(confirm_selector):
-                    sb.click(confirm_selector)
-                    time.sleep(3)
-                    break
-            except Exception:
-                continue
 
-        html = sb.get_page_source()
-        files = _extract_file_links(html)
-        if files:
-            return files
+def _is_on_sign_in(url: str) -> bool:
+    return bool(re.search(r"/(sign.?in|log.?in)", url, re.IGNORECASE))
 
-    # Fallback: AJAX order placement using the browser's authenticated cookies.
-    # The browser has already passed Cloudflare, so its cookies can be reused
-    # in a plain requests call for this XHR-style endpoint.
-    html = sb.get_page_source()
-    cookie_str = sb.get_cookie_string()
-    csrf = None
+
+def _dismiss_overlays(sb) -> None:
+    """Dismiss cookie-consent banners/modals that overlay page controls.
+
+    The consent flow is two steps: a banner with CONFIRM, then a follow-up
+    dialog ("We have received your choices…") with an OK button. Both block
+    clicks on the underlying page until dismissed.
+    """
     try:
-        csrf = _csrf_from_html(html)
-    except RuntimeError:
+        if sb.is_element_visible('button:contains("CONFIRM")'):
+            sb.click('button:contains("CONFIRM")')
+            sb.sleep(1)
+    except Exception:
+        pass
+    try:
+        ok_xpath = '//button[normalize-space(text())="OK"]'
+        if sb.is_element_visible(ok_xpath, by="xpath"):
+            sb.click(ok_xpath, by="xpath")
+            sb.sleep(1)
+    except Exception:
         pass
 
-    if csrf and cookie_str:
-        order_url = f"{CULTS3D_BASE}/en/free_orders?creation_slug={slug}"
+
+def _do_login(sb, email: str, password: str) -> None:
+    sb.uc_open_with_reconnect(f"{CULTS3D_BASE}/en/users/sign-in", 4)
+    if not _wait_for_cloudflare(sb, 20):
+        raise _CloudflareBlocked("Cloudflare challenge blocked the Cults3D sign-in page.")
+    sb.wait_for_element("form", timeout=15)
+
+    # A cookie-consent modal can overlay the form on a fresh profile and make
+    # the inputs non-interactable — dismiss it first.
+    _dismiss_overlays(sb)
+
+    # The sign-in form (id "new-session") uses #session_email /
+    # #registration_password. Fall back to the Rails field names.
+    email_sel = "#session_email"
+    if not sb.is_element_present(email_sel):
+        email_sel = 'input[name="user[email]"]'
+    password_sel = "#registration_password"
+    if not sb.is_element_present(password_sel):
+        password_sel = 'input[name="user[password]"]'
+
+    try:
+        sb.type(email_sel, email)
+        sb.type(password_sel, password)
+    except Exception:
+        # If the inputs stay non-interactable (overlay, animation), set the
+        # values via JS — the real submit click below still fires the handlers.
+        sb.js_update_text(email_sel, email)
+        sb.js_update_text(password_sel, password)
+
+    # A real button click, not JS form.submit() — Cults3D binds handlers to it.
+    # (uc_click's disconnect/reconnect closes the tab in headless mode, so a
+    # plain click is used here and for DOWNLOAD below.)
+    for btn_sel in ['input[type="submit"][value="Log in"]', 'button:contains("Log in")', 'input[type="submit"]', 'button[type="submit"]']:
+        if sb.is_element_visible(btn_sel):
+            sb.click(btn_sel)
+            break
+
+    # Don't wait for networkidle — ads/analytics keep connections alive forever.
+    # Instead poll until the URL leaves the sign-in page.
+    deadline = time.time() + 20
+    while time.time() < deadline and _is_on_sign_in(sb.get_current_url()):
+        sb.sleep(1)
+    if _is_on_sign_in(sb.get_current_url()):
+        raise RuntimeError("Cults3D login failed. Check your credentials in Settings.")
+
+
+def _ensure_logged_in(sb, email: str | None, password: str | None, link: str) -> None:
+    """If the current page indicates a logged-out state, log in and navigate back."""
+    needs_login = _is_on_sign_in(sb.get_current_url())
+
+    if not needs_login:
+        # Also check the navbar text — the SIGN IN element is not always an
+        # <a> inside <nav>, so a scoped text check is more reliable.
         try:
-            r = requests.post(
-                order_url,
-                data={"authenticity_token": csrf},
-                headers={
-                    "Cookie": cookie_str,
-                    "Referer": link,
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Accept": "application/json, text/javascript, */*; q=0.01",
-                    "X-Requested-With": "XMLHttpRequest",
-                    "User-Agent": (
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/131.0.0.0 Safari/537.36"
-                    ),
-                },
-                timeout=30,
-                allow_redirects=True,
-            )
-            r.raise_for_status()
-
-            ct = r.headers.get("Content-Type", "")
-            if "json" in ct:
-                data = r.json()
-                if "error" not in data:
-                    if "files" in data:
-                        return [
-                            {"name": f.get("name", f"file_{i}"), "url": f["url"]}
-                            for i, f in enumerate(data["files"])
-                            if "url" in f
-                        ]
-                    for key in ("download_url", "redirect_url", "location", "url"):
-                        if key in data:
-                            target = data[key]
-                            if not target.startswith("http"):
-                                target = CULTS3D_BASE + target
-                            sb.goto(target)
-                            time.sleep(2)
-                            files = _extract_file_links(sb.get_page_source())
-                            if files:
-                                return files
-                            break
-
-            files = _extract_file_links(r.text)
-            if files:
-                return files
+            needs_login = sb.is_text_visible("SIGN IN", "nav")
         except Exception:
             pass
 
-    sb.goto(link)
-    time.sleep(3)
+    if not needs_login:
+        return
+
+    if not email or not password:
+        raise RuntimeError(
+            "Cults3D credentials required. "
+            "Add your email and password in Settings > 3D File Sites."
+        )
+    _do_login(sb, email, password)
+    sb.uc_open_with_reconnect(link, 3)
+    if not _wait_for_cloudflare(sb, 20):
+        raise _CloudflareBlocked("Cloudflare challenge blocked the Cults3D model page after login.")
+    _dismiss_overlays(sb)
+
+
+def _place_free_order(sb, link: str) -> list[dict]:
+    """Click the free download button and return extracted file links."""
+    _dismiss_overlays(sb)
     files = _extract_file_links(sb.get_page_source())
     if files:
         return files
 
+    # The model page has a single "DOWNLOAD FREE" button for free models.
+    # Note: :contains is case-sensitive and the all-caps "DOWNLOAD" variant
+    # matches nothing here — "Download" is the working selector. Scope the
+    # search to <button> elements: a page-wide text search would first match
+    # FAQ anchors like "How can I download files?" and navigate away.
+    try:
+        if sb.is_element_visible('button:contains("Download")'):
+            sb.click('button:contains("Download")')
+            # Lands on the order page (/en/orders/<id>) with the real file links
+            deadline = time.time() + 15
+            while time.time() < deadline and "/orders/" not in sb.get_current_url():
+                sb.sleep(0.5)
+            sb.sleep(2)
+            # Some models show a license confirmation modal first
+            for confirm_sel in [
+                'button:contains("Confirm")',
+                'button:contains("Order")',
+                '.modal button[type="submit"]',
+            ]:
+                try:
+                    if sb.is_element_visible(confirm_sel):
+                        sb.click(confirm_sel)
+                        sb.sleep(3)
+                        break
+                except Exception:
+                    continue
+    except Exception:
+        pass
+
+    return _extract_file_links(sb.get_page_source())
+
+
+def load_cookies_from_browser() -> str:
+    """No longer used — the local persistent profile maintains the Cults3D session."""
     raise RuntimeError(
-        "Could not extract file download URLs after placing the free order. "
-        "The site's response format may have changed."
+        "Auto-loading cookies from an installed browser is no longer needed. "
+        "The downloader keeps its own persistent profile, so once you are logged in "
+        "(via Settings > 3D File Sites) the session persists automatically."
     )
 
 
@@ -326,17 +309,10 @@ def probe() -> tuple[bool, str]:
     try:
         r = requests.get(
             CULTS3D_BASE,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/131.0.0.0 Safari/537.36"
-                ),
-            },
+            headers={"User-Agent": _USER_AGENT},
             timeout=10,
         )
-        # Cloudflare may return 403 for plain requests, but the site is still
-        # reachable - SeleniumBase will bypass it during actual downloads.
+        # Cloudflare may return 403 for plain requests — the site is still reachable
         if r.status_code in (200, 403):
             return True, "Cults3D reachable"
         return False, f"HTTP {r.status_code}"
@@ -344,73 +320,60 @@ def probe() -> tuple[bool, str]:
         return False, str(e)
 
 
-def stream_zip(
+def _stream_zip_attempt(
     link: str,
-    cookies: str | None = None,
-    email: str | None = None,
-    password: str | None = None,
-    file_download_delay: float = 0.0,
+    email: str | None,
+    password: str | None,
+    file_download_delay: float,
+    headless: bool,
 ) -> tuple[str, bytes]:
     slug = extract_slug(link)
+    SB = _require_seleniumbase()
 
-    resolved_cookies = cookies or os.environ.get("CULTS3D_COOKIES", "").strip() or None
-    resolved_email = email or os.environ.get("CULTS3D_EMAIL", "").strip() or None
-    resolved_password = password or os.environ.get("CULTS3D_PASSWORD", "").strip() or None
-
-    sb_cdp = _require_sb_cdp()
-    sb = None
-    try:
-        sb = sb_cdp.Chrome()
-
-        # Navigate to domain first so Cloudflare challenge is resolved and
-        # cookies can be loaded into the correct origin context.
-        sb.goto(CULTS3D_BASE)
-        time.sleep(2)
-        _dismiss_popups(sb)
-
-        if os.path.exists(_COOKIE_FILE):
-            try:
-                sb.load_cookies(_COOKIE_FILE)
-            except Exception:
-                pass
-
-        sb.goto(link)
-        time.sleep(3)
-        _dismiss_popups(sb)
-
-        if re.search(r"/(sign.?in|log.?in)", sb.get_current_url(), re.IGNORECASE):
-            if resolved_cookies:
-                _inject_cookie_string(sb, resolved_cookies)
-                sb.goto(link)
-                time.sleep(3)
-                _dismiss_popups(sb)
-
-            if re.search(r"/(sign.?in|log.?in)", sb.get_current_url(), re.IGNORECASE):
-                if not resolved_email or not resolved_password:
-                    raise RuntimeError(
-                        "Cults3D credentials required. "
-                        "Add your email and password in Settings > 3D File Sites."
-                    )
-                _do_login(sb, resolved_email, resolved_password)
-                sb.goto(link)
-                time.sleep(3)
-                _dismiss_popups(sb)
-
-            if re.search(r"/(sign.?in|log.?in)", sb.get_current_url(), re.IGNORECASE):
-                raise RuntimeError(
-                    "Cults3D authentication failed. "
-                    "If using cookies, they may be expired; update them in Settings. "
-                    "If using email/password, check your credentials in Settings."
+    with SB(
+        uc=True,
+        headless=headless,
+        headless2=headless,
+        user_data_dir=_PROFILE_DIR,
+        locale_code="en",
+    ) as sb:
+        sb.uc_open_with_reconnect(link, 4)
+        if not _wait_for_cloudflare(sb, 20):
+            if headless:
+                raise _CloudflareBlocked(
+                    "Cloudflare challenge could not be cleared in headless mode."
                 )
+            # Headed: try the automatic Turnstile click (requires pyautogui),
+            # then allow time for a manual solve if the challenge needs human
+            # interaction. Guarded so a missing pyautogui never triggers
+            # SeleniumBase's mid-run auto-installer.
+            import importlib.util
+            if importlib.util.find_spec("pyautogui") is not None:
+                try:
+                    sb.driver.uc_gui_handle_captcha()
+                except Exception:
+                    pass
+            if not _wait_for_cloudflare(sb, 60):
+                raise _CloudflareBlocked(
+                    "Cloudflare challenge could not be cleared. Try again."
+                )
+
+        _ensure_logged_in(sb, email, password, link)
 
         _check_price(sb.get_page_source())
 
-        files = _place_free_order(sb, link, slug)
-
+        files = _place_free_order(sb, link)
         if not files:
             raise RuntimeError("No downloadable files found for this Cults3D model.")
 
-        cookie_str = sb.get_cookie_string()
+        # Grab the browser's cookies (includes cf_clearance + session) and its
+        # real UA — cf_clearance is bound to the user agent, so the follow-up
+        # requests must present the same one.
+        cookie_str = "; ".join(f"{c['name']}={c['value']}" for c in sb.get_cookies())
+        try:
+            download_ua = sb.get_user_agent() or _USER_AGENT
+        except Exception:
+            download_ua = _USER_AGENT
 
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -422,22 +385,52 @@ def stream_zip(
                     headers={
                         "Cookie": cookie_str,
                         "Referer": link,
-                        "User-Agent": (
-                            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                            "AppleWebKit/537.36 (KHTML, like Gecko) "
-                            "Chrome/131.0.0.0 Safari/537.36"
-                        ),
+                        "User-Agent": download_ua,
                     },
                     timeout=60,
                 )
                 r.raise_for_status()
-                zf.writestr(f["name"], r.content)
+                content = r.content
+                # Cults3D's "DOWNLOAD ALL" endpoint returns a zip itself —
+                # unwrap it so the output contains the actual 3D files,
+                # not a nested zip (single_file mode needs this too).
+                if content[:4] == b"PK\x03\x04":
+                    try:
+                        with zipfile.ZipFile(io.BytesIO(content)) as inner:
+                            for info in inner.infolist():
+                                if info.is_dir():
+                                    continue
+                                zf.writestr(info.filename, inner.read(info.filename))
+                        continue
+                    except zipfile.BadZipFile:
+                        pass
+                zf.writestr(f["name"], content)
 
         return f"{slug}.zip", buf.getvalue()
 
-    finally:
-        if sb is not None:
-            try:
-                sb.quit()
-            except Exception:
-                pass
+
+def stream_zip(
+    link: str,
+    cookies: str | None = None,
+    email: str | None = None,
+    password: str | None = None,
+    file_download_delay: float = 0.0,
+) -> tuple[str, bytes]:
+    resolved_email = email or os.environ.get("CULTS3D_EMAIL", "").strip() or None
+    resolved_password = password or os.environ.get("CULTS3D_PASSWORD", "").strip() or None
+
+    with _PROFILE_LOCK:
+        if not _HEADLESS:
+            return _stream_zip_attempt(
+                link, resolved_email, resolved_password, file_download_delay, headless=False
+            )
+
+        # Headless first; fall back to one headed attempt if Cloudflare blocks it.
+        try:
+            return _stream_zip_attempt(
+                link, resolved_email, resolved_password, file_download_delay, headless=True
+            )
+        except _CloudflareBlocked:
+            return _stream_zip_attempt(
+                link, resolved_email, resolved_password, file_download_delay, headless=False
+            )

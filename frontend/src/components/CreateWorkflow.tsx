@@ -129,6 +129,8 @@ interface CreateWorkflowProps {
   onSelectAllImages?: () => void;
   onClearImageSelection?: () => void;
   classifyImagesEnabled?: boolean;
+  testUserEnabled?: boolean;
+  onUsePlaceholderImages?: (photoUrls: string[]) => void;
   photoSelectionActive?: boolean;
   pendingPhotoPrompt?: string;
   pendingImagePromptModifier?: string;
@@ -213,6 +215,8 @@ function CreateWorkflow({
   onSelectAllImages,
   onClearImageSelection,
   classifyImagesEnabled = true,
+  testUserEnabled = false,
+  onUsePlaceholderImages,
   photoSelectionActive = false,
   pendingPhotoPrompt = "",
   pendingImagePromptModifier = "",
@@ -687,6 +691,8 @@ function CreateWorkflow({
             onRemoveBackgrounds={onRemoveBackgroundOriginal}
             showClassification={classifyImagesEnabled}
             hideConfirmButton={autoBackgroundRemovalEnabled}
+            testUserEnabled={testUserEnabled}
+            onUsePlaceholderImages={onUsePlaceholderImages}
           />
           {pendingImagePromptModifier && !(generatedImages?.length) && (
             <div className="mt-3 flex items-center gap-2 rounded-xl border border-border-default bg-surface-panel px-4 py-2.5">

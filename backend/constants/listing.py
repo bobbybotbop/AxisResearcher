@@ -33,3 +33,7 @@ CATEGORY_TO_IMAGE_TYPE = {
 }
 
 EBAY_STATUS_NOT_FOUND = "not_found"
+
+# Default hours between automatic background operations (History-tab stock
+# refresh, 3D site auto-test). User-overridable via /api/settings/operation-cooldown.
+DEFAULT_OPERATION_COOLDOWN_HOURS = 24
