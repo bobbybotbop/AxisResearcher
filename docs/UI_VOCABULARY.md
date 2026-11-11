@@ -71,6 +71,30 @@ Both states use the **same** `MessageBarInput` component in `CreateWorkflow.jsx`
 
 ---
 
+## Listing workflow — source listing summary
+
+| Reference ID | Short name | When | What the user sees |
+|--------------|------------|------|-------------------|
+| `listing-source-summary` | **Source listing summary** | After link submit, once `listing` is loaded (`listingLinkSubmitted === true`) | Compact panel above the photo gallery: source eBay listing title, `{sku} · date · N images · Cat …` meta line, price right-aligned, scrollable description. |
+
+### Aliases (same thing)
+
+- "source listing card" / "listing summary" / "top listing details" → `listing-source-summary`
+
+### Code map
+
+| Reference ID | Component | Wrapper / state |
+|--------------|-----------|-----------------|
+| `listing-source-summary` | `ListingDetails` | `CreateWorkflow` — rendered when `listingLinkSubmitted && listing`, above `PhotoGallery`. Receives `listing`, `photos`, `sku` props. |
+
+**Files**
+
+- `frontend/src/components/ListingDetails.jsx` — source listing panel
+- `frontend/src/components/CreateWorkflow.jsx` — placement + props
+- `frontend/src/utils/listingDisplay.js` — shared formatters (`formatPrice`, `formatListingDateTime`, `formatCategoryShort`) also used by `GeneratedListingCard.jsx`
+
+---
+
 ## Adding terms
 
 When adding a new entry, include:

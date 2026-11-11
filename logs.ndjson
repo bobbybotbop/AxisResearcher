@@ -82,3 +82,4 @@
 {"timestamp": "2026-11-02T16:20:56.802257+00:00", "event": "import", "status": "success", "count": 9, "imported_skus": []}
 {"timestamp": "2026-11-06T19:05:38.320500+00:00", "event": "draft_created", "status": "success", "sku": "AXIS_109", "sourceListingId": "126828603644"}
 {"timestamp": "2026-11-06T19:24:21.988936+00:00", "event": "import", "status": "error", "error": "HTTPSConnectionPool(host='api.ebay.com', port=443): Max retries exceeded with url: /ws/api.dll (Caused by NameResolutionError(\"HTTPSConnection(host='api.ebay.com', port=443): Failed to resolve 'api.ebay.com' ([Errno 11001] getaddrinfo failed)\"))"}
+{"timestamp": "2026-11-11T16:22:16.775227+00:00", "event": "restock", "status": "success", "source": "auto", "quantity": 15, "skus": ["AXIS_agn_20"]}
