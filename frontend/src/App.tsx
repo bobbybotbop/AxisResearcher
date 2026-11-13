@@ -2473,10 +2473,9 @@ function App() {
             data.not_found.includes(l.sku) ? { ...l, ebay_status: 'not_found' } : l
           )
         );
-        addToast('error', `${data.not_found.length} listing(s) no longer on eBay`);
-      } else {
-        addToast('success', 'All listings verified on eBay');
       }
+      addToast('success', `Sync complete: ${data.active} active, ${data.newly_inactive} marked inactive, ${data.updated} updated`);
+      await fetchAllListings();
     } catch (err) {
       addToast('error', (err as Error).message || 'Sync failed');
     } finally {
