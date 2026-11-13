@@ -4160,7 +4160,12 @@ function App() {
                   </div>
                 )}
                 <hr className="border-border-default" />
-                <ThreeDFileFinder addToast={addToast as (type: string, message: string) => void} fileDownloadDelay={threeDDownloadDelay} siteStatus={threeDSiteStatus} />
+                <ThreeDFileFinder
+                  addToast={addToast as (type: string, message: string) => void}
+                  fileDownloadDelay={threeDDownloadDelay}
+                  siteStatus={threeDSiteStatus}
+                  enabledSites={THREE_D_SITES.map(({ site }) => site).filter(site => threeDSitesEnabled[site] ?? true)}
+                />
               </div>
             </div>
           )}

@@ -90,9 +90,10 @@ interface ThreeDFileFinderProps {
   addToast?: (type: string, message: string) => void;
   fileDownloadDelay?: number;
   siteStatus?: ThreeDSiteStatus | null;
+  enabledSites?: string[];
 }
 
-function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null }: ThreeDFileFinderProps) {
+function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, enabledSites }: ThreeDFileFinderProps) {
   // Step 1 — Fetch eBay Photos
   const [step1Link, setStep1Link] = useState("");
   const [step1Photos, setStep1Photos] = useState<string[]>([]);
@@ -167,7 +168,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null }
       const res = await fetch("/api/serp-lens", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image_url: url }),
+        body: JSON.stringify({ image_url: url, enabled_sites: enabledSites }),
       });
       const data = await res.json() as { error?: string; results?: SearchResult[] };
       if (!res.ok || data.error) throw new Error(data.error || "Search failed");
