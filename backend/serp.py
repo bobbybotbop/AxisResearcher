@@ -53,3 +53,23 @@ def extract_top_links(serpapi_response: dict, limit: int = 10) -> list[dict]:
             unique.append(r)
 
     return unique[:limit]
+
+
+def filter_links_by_enabled_sites(links: list[dict], enabled_sites: list[str] | None) -> list[dict]:
+    """Drop whitelisted results whose host is not in enabled_sites.
+    None means all sites are enabled (backward-compatible default)."""
+    if enabled_sites is None:
+        return links
+    enabled_set = set(enabled_sites)
+    result = []
+    for r in links:
+        if r.get("site_type") != "whitelisted":
+            result.append(r)
+            continue
+        try:
+            host = urlparse(r["link"]).netloc.lower().removeprefix("www.")
+        except Exception:
+            host = ""
+        if host in enabled_set:
+            result.append(r)
+    return result
