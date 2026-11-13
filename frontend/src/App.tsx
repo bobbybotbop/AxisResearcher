@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+﻿import { useState, useEffect, useCallback, useRef, useMemo, useReducer } from "react";
 import {
   FilePlus,
   History,
@@ -458,12 +458,29 @@ function App() {
     return saved ? parseInt(saved, 10) : null;
   });
   const [, setTickCounter] = useState<number>(0);
+  const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
 
   // Re-render every 60s so the "ago" label and stale status stay current
   useEffect(() => {
     const interval = setInterval(() => setTickCounter((c) => c + 1), 60000);
     return () => clearInterval(interval);
   }, []);
+
+  // When the sync cooldown is active, schedule a re-render for the exact moment it expires
+  // so the Sync button re-enables itself without requiring user interaction.
+  useEffect(() => {
+    if (!syncLastRefreshed) return;
+    const elapsed = Date.now() - new Date(syncLastRefreshed).getTime();
+    if (elapsed >= 24 * 60 * 60 * 1000) return;
+    const remaining = 24 * 60 * 60 * 1000 - elapsed;
+    const timer = setTimeout(() => {
+      fetch("/api/settings/import-sync")
+        .then((r) => r.json())
+        .then((d) => setSyncLastRefreshed(d.last_refreshed ?? null))
+        .catch(() => forceUpdate());
+    }, remaining);
+    return () => clearTimeout(timer);
+  }, [syncLastRefreshed]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     try {
@@ -587,6 +604,12 @@ function App() {
   const isTokenStale = tokenLastUpdated
     ? Date.now() - tokenLastUpdated > TOKEN_STALE_MS
     : true;
+
+  const syncElapsedMs = syncLastRefreshed ? Date.now() - new Date(syncLastRefreshed).getTime() : null;
+  const syncOnCooldown = syncElapsedMs !== null && syncElapsedMs < 24 * 60 * 60 * 1000;
+  const syncAvailableInHours = syncOnCooldown && syncElapsedMs !== null
+    ? Math.ceil((24 * 60 * 60 * 1000 - syncElapsedMs) / (60 * 60 * 1000))
+    : null;
 
   const formatTimeAgo = (timestamp: number | null): string => {
     if (!timestamp) return "never";
@@ -2805,7 +2828,7 @@ function App() {
       fetch("/api/settings/import-sync")
         .then((res) => res.json())
         .then((data) => {
-          if (data.last_refreshed !== undefined) setSyncLastRefreshed(data.last_refreshed);
+          setSyncLastRefreshed(data.last_refreshed ?? null);
         })
         .catch(() => {});
     }
@@ -4801,46 +4824,37 @@ function App() {
                   </div>
                 </div>
               </div>
-              {(() => {
-                const syncOnCooldown = syncLastRefreshed !== null && (Date.now() - new Date(syncLastRefreshed).getTime()) < 24 * 60 * 60 * 1000;
-                const syncElapsedMs = syncLastRefreshed ? Date.now() - new Date(syncLastRefreshed).getTime() : null;
-                const syncAvailableInHours = syncOnCooldown && syncElapsedMs !== null
-                  ? Math.ceil((24 * 60 * 60 * 1000 - syncElapsedMs) / (60 * 60 * 1000))
-                  : null;
-                return (
-                  <div className="mb-5 rounded-xl border border-border-default bg-surface-muted p-5">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h3 className="m-0 text-lg font-semibold text-text-primary">Sync eBay Listings</h3>
-                        <p className="mt-1 text-sm text-text-muted">Import active listings from your eBay account into this app.</p>
-                        <p className="mt-1 text-xs text-text-muted">
-                          {syncLastRefreshed
-                            ? `Last synced ${formatTimeAgo(new Date(syncLastRefreshed).getTime())}`
-                            : "Never synced"}
-                        </p>
-                        {syncOnCooldown && syncAvailableInHours !== null && (
-                          <p className="mt-0.5 text-xs text-text-muted">
-                            Available in {syncAvailableInHours} {syncAvailableInHours === 1 ? "hour" : "hours"}
-                          </p>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        className="cursor-pointer rounded-lg border border-border-default bg-surface-panel px-4 py-2 text-sm font-semibold text-text-primary shadow-sm transition-all hover:-translate-y-0.5 hover:bg-surface-hover hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:transform-none"
-                        onClick={() => void handleSyncEbayListings()}
-                        disabled={isSyncing || syncOnCooldown}
-                      >
-                        {isSyncing ? (
-                          <span className="flex items-center gap-2">
-                            <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                            Syncing...
-                          </span>
-                        ) : "Sync"}
-                      </button>
-                    </div>
+              <div className="mb-5 rounded-xl border border-border-default bg-surface-muted p-5">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="m-0 text-lg font-semibold text-text-primary">Sync eBay Listings</h3>
+                    <p className="mt-1 text-sm text-text-muted">Import active listings from your eBay account into this app.</p>
+                    <p className="mt-1 text-xs text-text-muted">
+                      {syncLastRefreshed
+                        ? `Last synced ${formatTimeAgo(new Date(syncLastRefreshed).getTime())}`
+                        : "Never synced"}
+                    </p>
+                    {syncOnCooldown && syncAvailableInHours !== null && (
+                      <p className="mt-0.5 text-xs text-text-muted">
+                        Available in {syncAvailableInHours} {syncAvailableInHours === 1 ? "hour" : "hours"}
+                      </p>
+                    )}
                   </div>
-                );
-              })()}
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded-lg border border-border-default bg-surface-panel px-4 py-2 text-sm font-semibold text-text-primary shadow-sm transition-all hover:-translate-y-0.5 hover:bg-surface-hover hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:transform-none"
+                    onClick={() => void handleSyncEbayListings()}
+                    disabled={isSyncing || syncOnCooldown}
+                  >
+                    {isSyncing ? (
+                      <span className="flex items-center gap-2">
+                        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                        Syncing...
+                      </span>
+                    ) : "Sync"}
+                  </button>
+                </div>
+              </div>
               <ApiKeyManagementSection
                 active={activeTab === "settings"}
                 onKeysSaved={fetchTextModels}

@@ -2302,8 +2302,11 @@ def api_save_minimum_images_setting():
 @app.route('/api/settings/import-sync', methods=['GET'])
 def api_get_import_sync_status():
     """Return the last-sync timestamp for the manual eBay import."""
-    last_refreshed = get_manual_import_last_refreshed()
-    return jsonify({"last_refreshed": last_refreshed})
+    try:
+        last_refreshed = get_manual_import_last_refreshed()
+        return jsonify({"last_refreshed": last_refreshed})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/settings/operation-cooldown', methods=['GET'])
