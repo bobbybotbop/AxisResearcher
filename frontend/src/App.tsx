@@ -381,6 +381,7 @@ function App() {
   const [autoRestockConfirm, setAutoRestockConfirm] = useState<{ nextEnabled: boolean; nextQuantity: number } | null>(null);
   const [isRestocking, setIsRestocking] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [syncLastRefreshed, setSyncLastRefreshed] = useState<string | null>(null);
   const [historySelectMode, setHistorySelectMode] = useState<boolean>(false);
   const [historySelectedSkus, setHistorySelectedSkus] = useState<Set<string>>(new Set());
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
@@ -2457,6 +2458,25 @@ function App() {
     }
   };
 
+  const handleSyncEbayListings = async (): Promise<void> => {
+    setIsSyncing(true);
+    try {
+      const res = await fetch('/api/import-listings', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Sync failed');
+      const imported = data.imported ?? 0;
+      const updated = data.updated ?? 0;
+      const skipped = data.skipped ?? 0;
+      addToast('success', `Sync complete: ${imported} imported, ${updated} updated, ${skipped} skipped`);
+      setSyncLastRefreshed(new Date().toISOString());
+      await fetchAllListings();
+    } catch (err) {
+      addToast('error', (err as Error).message || 'Sync failed');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const handleAutoRestockEnabledChange = (checked: boolean): void => {
     if (checked) {
       setAutoRestockConfirm({ nextEnabled: true, nextQuantity: autoRestockQuantity });
@@ -2780,6 +2800,12 @@ function App() {
         .then((d) => {
           if (d.auto_promote_enabled !== undefined) setAutoPromoteEnabled(d.auto_promote_enabled);
           if (d.promoted_listing_ad_rate !== undefined) setPromotedListingAdRate(d.promoted_listing_ad_rate);
+        })
+        .catch(() => {});
+      fetch("/api/settings/import-sync")
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.last_refreshed !== undefined) setSyncLastRefreshed(data.last_refreshed);
         })
         .catch(() => {});
     }
@@ -4775,6 +4801,46 @@ function App() {
                   </div>
                 </div>
               </div>
+              {(() => {
+                const syncOnCooldown = syncLastRefreshed !== null && (Date.now() - new Date(syncLastRefreshed).getTime()) < 24 * 60 * 60 * 1000;
+                const syncElapsedMs = syncLastRefreshed ? Date.now() - new Date(syncLastRefreshed).getTime() : null;
+                const syncAvailableInHours = syncOnCooldown && syncElapsedMs !== null
+                  ? Math.ceil((24 * 60 * 60 * 1000 - syncElapsedMs) / (60 * 60 * 1000))
+                  : null;
+                return (
+                  <div className="mb-5 rounded-xl border border-border-default bg-surface-muted p-5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="m-0 text-lg font-semibold text-text-primary">Sync eBay Listings</h3>
+                        <p className="mt-1 text-sm text-text-muted">Import active listings from your eBay account into this app.</p>
+                        <p className="mt-1 text-xs text-text-muted">
+                          {syncLastRefreshed
+                            ? `Last synced ${formatTimeAgo(new Date(syncLastRefreshed).getTime())}`
+                            : "Never synced"}
+                        </p>
+                        {syncOnCooldown && syncAvailableInHours !== null && (
+                          <p className="mt-0.5 text-xs text-text-muted">
+                            Available in {syncAvailableInHours} {syncAvailableInHours === 1 ? "hour" : "hours"}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        className="cursor-pointer rounded-lg border border-border-default bg-surface-panel px-4 py-2 text-sm font-semibold text-text-primary shadow-sm transition-all hover:-translate-y-0.5 hover:bg-surface-hover hover:shadow-md disabled:cursor-not-allowed disabled:opacity-50 disabled:transform-none"
+                        onClick={() => void handleSyncEbayListings()}
+                        disabled={isSyncing || syncOnCooldown}
+                      >
+                        {isSyncing ? (
+                          <span className="flex items-center gap-2">
+                            <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                            Syncing...
+                          </span>
+                        ) : "Sync"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
               <ApiKeyManagementSection
                 active={activeTab === "settings"}
                 onKeysSaved={fetchTextModels}

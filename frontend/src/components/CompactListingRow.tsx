@@ -191,9 +191,16 @@ export default function CompactListingRow({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col justify-center gap-1 px-3 py-2">
         <div className="flex shrink-0 items-center justify-between gap-4">
           <div className="min-w-0 flex-1">
-            <h3 className="line-clamp-1 text-base font-semibold leading-snug text-text-primary">
-              {title}
-            </h3>
+            <div className="flex items-center gap-2">
+              <h3 className="line-clamp-1 text-base font-semibold leading-snug text-text-primary">
+                {title}
+              </h3>
+              {isManual && (
+                <span className="shrink-0 rounded-full border border-border-default bg-surface-muted px-2 py-0.5 text-xs font-medium text-text-muted">
+                  Synced
+                </span>
+              )}
+            </div>
             <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0 text-sm text-text-muted">
               <span className="font-mono text-text-muted">{listing.sku}</span>
               {createdDateTime && (
