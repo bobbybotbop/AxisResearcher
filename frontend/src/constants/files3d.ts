@@ -26,6 +26,7 @@ export type ThreeDSiteStatus = Record<string, { ok: boolean; message: string }>;
 // user-configurable in Settings).
 export const THREE_D_SITE_STATUS_STORAGE_KEY = "axis3dSiteStatus";
 export const THREE_D_SITE_TESTED_AT_STORAGE_KEY = "axis3dSiteTestedAt";
+export const THREE_D_SITES_ENABLED_STORAGE_KEY = "axis3dSitesEnabled";
 
 // Map a result link to its 3D site key (e.g. "printables.com"), or null if not a known site
 export function threeDSiteKeyFromLink(link: string): string | null {
