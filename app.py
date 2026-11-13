@@ -81,9 +81,11 @@ from backend.constants.paths import GENERATED_LISTINGS_DIR, GENERATED_IMAGES_DIR
 from backend.constants.render import (
     DEFAULT_RENDER_AZIMUTH, DEFAULT_RENDER_COLOR, DEFAULT_RENDER_ELEVATION,
     DEFAULT_RENDER_FOV, DEFAULT_RENDER_ROUGHNESS, DEFAULT_RENDER_RESOLUTION,
-    NATIVE_RENDER_EXTENSIONS, RENDER_FOV_RANGE, RENDER_OUTPUT_PREFIX, RENDER_RESOLUTIONS,
+    RENDER_FOV_RANGE, RENDER_OUTPUT_PREFIX, RENDER_RESOLUTIONS,
+    SUPPORTED_RENDER_EXTENSIONS,
 )
 from backend.render import render_model, RenderError
+from backend.render.normalize import normalize_to_render_mesh
 from backend.render.camera import compute_blender_camera
 import re
 import requests
@@ -3377,7 +3379,8 @@ def start_render():
     Start a Render Job (Step 4 Studio Render) for an uploaded 3D model.
 
     Accepts multipart/form-data:
-        file:       model file, native formats only (.stl/.obj/.ply)
+        file:       model file (.stl/.obj/.ply used as-is; .step/.stp/.3mf are
+                    normalized to an STL Render Mesh before Blender sees them)
         color:      optional hex color (default near-black #1a1a1a)
         roughness:  optional 0..1 (default 0.3)
         resolution: optional square size, one of RENDER_RESOLUTIONS (default 1024)
@@ -3397,10 +3400,10 @@ def start_render():
             return jsonify({"error": "A model file is required", "task_id": None}), 400
 
         extension = os.path.splitext(file.filename)[1].lower()
-        if extension not in NATIVE_RENDER_EXTENSIONS:
+        if extension not in SUPPORTED_RENDER_EXTENSIONS:
             return jsonify({
-                "error": f"'{extension or file.filename}' files are not supported for rendering yet. "
-                         f"Supported formats: {', '.join(NATIVE_RENDER_EXTENSIONS)}",
+                "error": f"'{extension or file.filename}' files are not supported for rendering. "
+                         f"Supported formats: {', '.join(SUPPORTED_RENDER_EXTENSIONS)}",
                 "task_id": None,
             }), 400
 
@@ -3471,8 +3474,11 @@ def start_render():
 
         def run_render():
             try:
+                # Normalize to the Render Mesh first (native formats pass through).
+                # The converted STL is cache-owned — only the uploaded temp is removed below.
+                mesh_path = normalize_to_render_mesh(input_path)
                 render_model(
-                    input_path, output_path,
+                    mesh_path, output_path,
                     color=color, roughness=roughness, resolution=resolution,
                     azimuth=azimuth, elevation=elevation, fov=fov,
                 )
@@ -3501,6 +3507,43 @@ def start_render():
 
     except Exception as e:
         return jsonify({"error": f"An error occurred while starting the render: {str(e)}", "task_id": None}), 500
+
+
+@app.route('/api/render-preview', methods=['POST'])
+def render_preview():
+    """
+    Return the normalized Render Mesh (STL bytes) for an uploaded model.
+
+    Accepts multipart/form-data with a 'file' field (.stl/.obj/.ply pass
+    through; .step/.stp/.3mf are converted server-side). The Step 4 panel
+    previews exactly these bytes, so preview and render show identical geometry.
+
+    Returns:
+        STL bytes (model/stl), or a JSON friendly error
+    """
+    try:
+        file = request.files.get('file')
+        if not file or not file.filename:
+            return jsonify({"error": "A model file is required"}), 400
+
+        import tempfile
+        extension = os.path.splitext(file.filename)[1].lower()
+        fd, input_path = tempfile.mkstemp(prefix="render_preview_", suffix=extension or ".bin")
+        os.close(fd)
+        try:
+            file.save(input_path)
+            mesh_path = normalize_to_render_mesh(input_path)
+            with open(mesh_path, 'rb') as f:
+                return Response(f.read(), mimetype='model/stl')
+        finally:
+            try:
+                os.remove(input_path)
+            except OSError:
+                pass
+    except RenderError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": f"An error occurred while preparing the preview: {str(e)}"}), 500
 
 
 @app.route('/api/render-status/<task_id>', methods=['GET'])
