@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import JSZip from "jszip";
 import MessageBarInput from "./MessageBarInput";
+import StudioRenderPreview, { type StudioRenderPreviewHandle } from "./StudioRenderPreview";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { DOWNLOAD_MODE_FILES, DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, threeDSiteKeyFromLink, type DownloadMode, type ThreeDSiteStatus } from "../constants/files3d";
 
@@ -34,22 +35,17 @@ interface UnzippedEntry {
 const NATIVE_RENDER_EXTENSIONS = [".obj", ".stl", ".ply"];
 const extOf = (name: string) => name.slice(name.lastIndexOf(".")).toLowerCase();
 
-// Pick the best natively renderable entry (zip contents or a single file).
-// Returns null when nothing renderable is inside (format conversion lands in ticket 04).
-const pickRenderEntry = (entries: UnzippedEntry[]): File | null => {
-  const native = entries
+// All natively renderable entries (zip contents or a single file), best-ranked
+// first. Empty when nothing renderable is inside (format conversion lands in ticket 04).
+const pickRenderCandidates = (entries: UnzippedEntry[]): File[] =>
+  entries
     .filter((e) => NATIVE_RENDER_EXTENSIONS.includes(extOf(e.path[e.path.length - 1])))
     .sort(
       (a, b) =>
         NATIVE_RENDER_EXTENSIONS.indexOf(extOf(a.path[a.path.length - 1])) -
         NATIVE_RENDER_EXTENSIONS.indexOf(extOf(b.path[b.path.length - 1])),
-    );
-  if (native.length === 0) return null;
-  return new File([native[0].data], native[0].path[native[0].path.length - 1]);
-};
-
-const pickRenderFile = async (blob: Blob, filename: string): Promise<File | null> =>
-  pickRenderEntry(await unzipBlob(blob, filename));
+    )
+    .map((e) => new File([e.data], e.path[e.path.length - 1]));
 
 // Unzip a blob into flat entries; non-zip blobs (e.g. MakerWorld .3mf) become a single entry
 const unzipBlob = async (blob: Blob, filename: string): Promise<UnzippedEntry[]> => {
@@ -135,17 +131,32 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
 
   // Step 4 — Studio Render (renderFile = best native-format file from the Step 3 download)
   const [renderFile, setRenderFile] = useState<File | null>(null);
+  const [renderCandidates, setRenderCandidates] = useState<File[]>([]);
   const [renderFileChecked, setRenderFileChecked] = useState(false);
+  const [renderFov, setRenderFov] = useState(40); // component state for now; ticket 05 persists it
+  const [previewReady, setPreviewReady] = useState(false);
+  const previewRef = useRef<StudioRenderPreviewHandle>(null);
   const [step4Loading, setStep4Loading] = useState(false);
   const [step4Image, setStep4Image] = useState<{ url: string; filename: string } | null>(null);
   const [step4Error, setStep4Error] = useState<string | null>(null);
 
   const resetStep4 = () => {
     setRenderFile(null);
+    setRenderCandidates([]);
     setRenderFileChecked(false);
+    setPreviewReady(false);
     setStep4Loading(false);
     setStep4Image(null);
     setStep4Error(null);
+  };
+
+  // Auto-pick the best-ranked model; the dropdown lets the user switch when
+  // a download contains several renderable candidates
+  const applyRenderCandidates = (candidates: File[]) => {
+    setRenderCandidates(candidates);
+    setRenderFile(candidates[0] ?? null);
+    setRenderFileChecked(true);
+    setPreviewReady(false);
   };
 
   // True when a result link can be forwarded to Step 3
@@ -260,8 +271,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       const blob = await res.blob();
       if (mode === DOWNLOAD_MODE_FILES) {
         const entries = await unzipBlob(blob, filename);
-        setRenderFile(pickRenderEntry(entries));
-        setRenderFileChecked(true);
+        applyRenderCandidates(pickRenderCandidates(entries));
         const savedToFolder = await saveEntriesToFolder(entries);
         if (savedToFolder === null) return; // user cancelled the folder picker
         if (!savedToFolder) {
@@ -277,8 +287,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       a.download = filename;
       a.click();
       URL.revokeObjectURL(downloadUrl);
-      setRenderFile(await pickRenderFile(blob, filename));
-      setRenderFileChecked(true);
+      applyRenderCandidates(pickRenderCandidates(await unzipBlob(blob, filename)));
       setStep3Result({ filename, bytes: blob.size });
     } catch (err) {
       setStep3Error((err as Error).message || "Download failed");
@@ -299,6 +308,13 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       form.append("color", "#1a1a1a");
       form.append("roughness", "0.3");
       form.append("resolution", "1024");
+      // Camera Intent: the angle the user framed in the preview
+      const intent = previewRef.current?.getCameraIntent();
+      if (intent) {
+        form.append("camera_position", intent.position.join(","));
+        form.append("camera_target", intent.target.join(","));
+      }
+      form.append("fov", String(renderFov));
       const res = await fetch("/api/render", { method: "POST", body: form });
       const data = await res.json() as { task_id?: string; error?: string };
       if (!res.ok || data.error || !data.task_id) throw new Error(data.error || "Failed to start the render");
@@ -554,18 +570,63 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
             type="button"
             className={btnPill}
             onClick={handleStep4Render}
-            disabled={!renderFile || step4Loading}
+            disabled={!renderFile || !previewReady || step4Loading}
           >
             {step4Loading ? "Rendering..." : "Render"}
           </button>
           <p className="text-xs text-text-muted">
             {renderFile
-              ? `Ready to render: ${renderFile.name} (${formatBytes(renderFile.size)})`
+              ? previewReady
+                ? `Ready to render: ${renderFile.name} (${formatBytes(renderFile.size)})`
+                : "Loading preview..."
               : renderFileChecked
                 ? "No renderable .stl/.obj/.ply file in this download — other formats are not supported yet"
                 : "Download a model in Step 3 to enable rendering"}
           </p>
         </div>
+        {renderCandidates.length > 1 && renderFile && (
+          <label className="flex items-center gap-2 text-xs text-text-muted">
+            Model to render:
+            <select
+              className="rounded border border-border-default bg-surface-panel px-2 py-1 text-xs text-text-primary"
+              value={renderCandidates.indexOf(renderFile)}
+              onChange={(e) => {
+                setRenderFile(renderCandidates[Number(e.target.value)]);
+                setPreviewReady(false);
+              }}
+              aria-label="Model to render"
+            >
+              {renderCandidates.map((candidate, i) => (
+                <option key={`${i}-${candidate.name}`} value={i}>
+                  {candidate.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {renderFile && (
+          <>
+            <StudioRenderPreview
+              ref={previewRef}
+              file={renderFile}
+              fov={renderFov}
+              onReady={() => setPreviewReady(true)}
+            />
+            <label className="flex items-center gap-3 text-xs text-text-muted">
+              <span className="shrink-0">Field of view: {renderFov}°</span>
+              <input
+                type="range"
+                min={20}
+                max={80}
+                step={1}
+                value={renderFov}
+                onChange={(e) => setRenderFov(Number(e.target.value))}
+                className="flex-1 accent-primary"
+                aria-label="Field of view"
+              />
+            </label>
+          </>
+        )}
         {step4Loading && (
           <p className="text-xs text-text-muted">Rendering in Blender — this usually takes 10–30 seconds...</p>
         )}
