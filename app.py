@@ -2568,6 +2568,23 @@ def api_restock_listings():
         restock_kwargs = {"source": source, "quantity": quantity}
         if updated:
             restock_kwargs["skus"] = updated
+            # Build parallel ebay_ids array (same length as skus)
+            _base_dir = os.path.dirname(os.path.abspath(__file__))
+            ebay_ids = []
+            for _sku in updated:
+                if _sku.startswith(MANUAL_SKU_PREFIX):
+                    ebay_ids.append(_sku[len(MANUAL_SKU_PREFIX):])
+                else:
+                    _ebay_id = ""
+                    _fpath = os.path.join(_base_dir, GENERATED_LISTINGS_DIR, f'{_sku}.json')
+                    try:
+                        with open(_fpath, 'r', encoding='utf-8') as _f:
+                            _d = json.load(_f)
+                        _ebay_id = _d.get('ebayListingId', '') or ''
+                    except Exception:
+                        pass
+                    ebay_ids.append(_ebay_id)
+            restock_kwargs["ebay_ids"] = ebay_ids
         all_failed = failed + not_found_skus
         if all_failed:
             restock_kwargs["failed_skus"] = all_failed
