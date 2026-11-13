@@ -6,8 +6,9 @@
 
 Scene per .scratch/studio-render/spec.md: white sweep + shadow-catcher ground,
 3-point area-light rig, single Principled BSDF, Cycles CPU + OIDN denoise.
-Camera params (--azimuth/--elevation/--fov/--target) are fixed defaults in
-ticket 02; ticket 03 (Camera Intent) passes real values from the preview.
+Camera params (--azimuth/--elevation/--fov) come from the preview's Camera
+Intent (converted to Z-up by backend.render.camera); --target defaults to the
+normalized model center and distance is auto-computed to frame the whole model.
 """
 
 import argparse

@@ -79,10 +79,12 @@ from backend.constants.listing import (
 from backend.constants.ebay import EBAY_MARKETPLACE_ID, EBAY_BROWSE_API_BASE, EBAY_INVENTORY_API_BASE
 from backend.constants.paths import GENERATED_LISTINGS_DIR, GENERATED_IMAGES_DIR
 from backend.constants.render import (
-    DEFAULT_RENDER_COLOR, DEFAULT_RENDER_ROUGHNESS, DEFAULT_RENDER_RESOLUTION,
-    NATIVE_RENDER_EXTENSIONS, RENDER_OUTPUT_PREFIX, RENDER_RESOLUTIONS,
+    DEFAULT_RENDER_AZIMUTH, DEFAULT_RENDER_COLOR, DEFAULT_RENDER_ELEVATION,
+    DEFAULT_RENDER_FOV, DEFAULT_RENDER_ROUGHNESS, DEFAULT_RENDER_RESOLUTION,
+    NATIVE_RENDER_EXTENSIONS, RENDER_FOV_RANGE, RENDER_OUTPUT_PREFIX, RENDER_RESOLUTIONS,
 )
 from backend.render import render_model, RenderError
+from backend.render.camera import compute_blender_camera
 import re
 import requests
 from dotenv import load_dotenv
@@ -3379,6 +3381,11 @@ def start_render():
         color:      optional hex color (default near-black #1a1a1a)
         roughness:  optional 0..1 (default 0.3)
         resolution: optional square size, one of RENDER_RESOLUTIONS (default 1024)
+        fov:        optional vertical field of view in degrees (default 40, range 20-80)
+        camera_position / camera_target:
+                    optional "x,y,z" in three.js (Y-up) preview coordinates; both or
+                    neither. Converted to Blender (Z-up) azimuth/elevation; distance
+                    is auto-computed to frame the whole model (Camera Intent).
 
     Returns:
         JSON {task_id} for polling /api/render-status/<task_id>, or a friendly error
@@ -3412,6 +3419,38 @@ def start_render():
         if resolution not in RENDER_RESOLUTIONS:
             return jsonify({"error": f"resolution must be one of {list(RENDER_RESOLUTIONS)}", "task_id": None}), 400
 
+        # Camera Intent: preview camera (three.js coords) -> Blender azimuth/elevation
+        try:
+            fov = float(request.form.get("fov", DEFAULT_RENDER_FOV))
+        except (TypeError, ValueError):
+            return jsonify({"error": f"fov must be a number between {RENDER_FOV_RANGE[0]:.0f} and {RENDER_FOV_RANGE[1]:.0f}", "task_id": None}), 400
+        if not RENDER_FOV_RANGE[0] <= fov <= RENDER_FOV_RANGE[1]:
+            return jsonify({"error": f"fov must be between {RENDER_FOV_RANGE[0]:.0f} and {RENDER_FOV_RANGE[1]:.0f} degrees", "task_id": None}), 400
+
+        def parse_vec3(field):
+            raw = request.form.get(field)
+            if raw is None:
+                return None
+            parts = raw.split(",")
+            if len(parts) != 3:
+                raise ValueError
+            return tuple(float(p) for p in parts)
+
+        try:
+            camera_position = parse_vec3("camera_position")
+            camera_target = parse_vec3("camera_target")
+        except (TypeError, ValueError):
+            return jsonify({"error": "camera_position and camera_target must be \"x,y,z\" numbers", "task_id": None}), 400
+        if (camera_position is None) != (camera_target is None):
+            return jsonify({"error": "camera_position and camera_target must be sent together", "task_id": None}), 400
+        if camera_position is not None:
+            try:
+                azimuth, elevation = compute_blender_camera(camera_position, camera_target)
+            except ValueError:
+                return jsonify({"error": "camera position and target must differ", "task_id": None}), 400
+        else:
+            azimuth, elevation = DEFAULT_RENDER_AZIMUTH, DEFAULT_RENDER_ELEVATION
+
         os.makedirs(GENERATED_IMAGES_DIR, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{RENDER_OUTPUT_PREFIX}{timestamp}.png"
@@ -3435,6 +3474,7 @@ def start_render():
                 render_model(
                     input_path, output_path,
                     color=color, roughness=roughness, resolution=resolution,
+                    azimuth=azimuth, elevation=elevation, fov=fov,
                 )
                 with render_tasks_lock:
                     render_tasks[task_id].update(

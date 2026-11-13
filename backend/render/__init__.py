@@ -10,7 +10,10 @@ from pathlib import Path
 from backend.constants.render import (
     BLENDER_PATH_ENV_VAR,
     DEFAULT_BLENDER_PATH,
+    DEFAULT_RENDER_AZIMUTH,
     DEFAULT_RENDER_COLOR,
+    DEFAULT_RENDER_ELEVATION,
+    DEFAULT_RENDER_FOV,
     DEFAULT_RENDER_RESOLUTION,
     DEFAULT_RENDER_ROUGHNESS,
     NATIVE_RENDER_EXTENSIONS,
@@ -54,10 +57,17 @@ def render_model(
     color: str = DEFAULT_RENDER_COLOR,
     roughness: float = DEFAULT_RENDER_ROUGHNESS,
     resolution: int = DEFAULT_RENDER_RESOLUTION,
+    azimuth: float = DEFAULT_RENDER_AZIMUTH,
+    elevation: float = DEFAULT_RENDER_ELEVATION,
+    fov: float = DEFAULT_RENDER_FOV,
     blender_path: str | None = None,
     timeout: int = RENDER_TIMEOUT_SECONDS,
 ) -> Path:
     """Render a native-format mesh (.stl/.obj/.ply) to a studio product shot PNG.
+
+    azimuth/elevation/fov are Blender-space camera angles (see
+    backend.render.camera for the three.js -> Blender conversion). Distance is
+    auto-computed by the Blender script to frame the whole model.
 
     Raises RenderError (or a subclass) with a friendly message on any failure.
     """
@@ -94,6 +104,9 @@ def render_model(
         "--color", f"{red:.6f}", f"{green:.6f}", f"{blue:.6f}",
         "--roughness", f"{roughness:.4f}",
         "--resolution", str(resolution),
+        "--azimuth", f"{float(azimuth):.4f}",
+        "--elevation", f"{float(elevation):.4f}",
+        "--fov", f"{float(fov):.4f}",
     ]
 
     try:

@@ -118,6 +118,67 @@ def test_render_failure_surfaces_friendly_error(client, tmp_path, monkeypatch):
     assert "Blender" in payload["error"]
 
 
+def test_render_without_camera_uses_default_angle(client, fake_render):
+    res = _post_render(client)
+    assert res.status_code == 200
+    _wait_for_status(client, res.get_json()["task_id"])
+    assert fake_render["kwargs"]["azimuth"] == pytest.approx(45.0)
+    assert fake_render["kwargs"]["elevation"] == pytest.approx(28.0)
+    assert fake_render["kwargs"]["fov"] == pytest.approx(40.0)
+
+
+def test_render_forwards_camera_intent_as_blender_angles(client, fake_render):
+    # three.js (Y-up) camera 5 along +Z looking at the origin is azimuth -90
+    # in Blender (Z-up) coordinates — see tests/test_camera_intent.py
+    res = _post_render(client, extra={
+        "camera_position": "0,0,5",
+        "camera_target": "0,0,0",
+        "fov": "55",
+    })
+    assert res.status_code == 200
+    payload = _wait_for_status(client, res.get_json()["task_id"])
+    assert payload["status"] == "completed"
+    assert fake_render["kwargs"]["azimuth"] == pytest.approx(-90.0)
+    assert fake_render["kwargs"]["elevation"] == pytest.approx(0.0, abs=1e-6)
+    assert fake_render["kwargs"]["fov"] == pytest.approx(55.0)
+
+
+def test_render_rejects_fov_outside_slider_range(client, fake_render):
+    res = _post_render(client, extra={"fov": "10"})
+    assert res.status_code == 400
+    assert "fov" in res.get_json()["error"].lower()
+    res = _post_render(client, extra={"fov": "90"})
+    assert res.status_code == 400
+    assert "fov" in res.get_json()["error"].lower()
+
+
+def test_render_rejects_non_numeric_fov(client, fake_render):
+    res = _post_render(client, extra={"fov": "wide"})
+    assert res.status_code == 400
+    assert "fov" in res.get_json()["error"].lower()
+
+
+def test_render_rejects_malformed_camera_position(client, fake_render):
+    res = _post_render(client, extra={"camera_position": "1,2", "camera_target": "0,0,0"})
+    assert res.status_code == 400
+    assert "camera" in res.get_json()["error"].lower()
+    res = _post_render(client, extra={"camera_position": "a,b,c", "camera_target": "0,0,0"})
+    assert res.status_code == 400
+    assert "camera" in res.get_json()["error"].lower()
+
+
+def test_render_rejects_camera_position_without_target(client, fake_render):
+    res = _post_render(client, extra={"camera_position": "0,0,5"})
+    assert res.status_code == 400
+    assert "camera" in res.get_json()["error"].lower()
+
+
+def test_render_rejects_degenerate_camera_at_target(client, fake_render):
+    res = _post_render(client, extra={"camera_position": "1,1,1", "camera_target": "1,1,1"})
+    assert res.status_code == 400
+    assert "camera" in res.get_json()["error"].lower()
+
+
 def test_render_image_rejects_bad_filename(client):
     res = client.get("/api/render-image/..%2F..%2Fapp.py")
     assert res.status_code in (400, 404)
