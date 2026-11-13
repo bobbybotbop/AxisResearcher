@@ -280,6 +280,11 @@ export default function GeneratedListingCard({
               <h3 className="line-clamp-2 text-lg font-bold leading-tight text-text-primary sm:text-xl">
                 {title}
               </h3>
+              {isManual && (
+                <span className="shrink-0 rounded-full border border-border-default bg-surface-muted px-2 py-0.5 text-xs font-medium text-text-muted">
+                  Synced
+                </span>
+              )}
             </div>
             <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-muted">
               <span className="font-mono text-text-muted">{listing.sku}</span>

@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback, useRef, useMemo, useReducer } from "react";
+﻿import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   FilePlus,
   History,
@@ -33,7 +33,7 @@ import { TAB_PATHS } from "./constants/routes";
 import { createPlaceholderImageDataUrl, renderPlaceholderImagePngBlob } from "./constants/placeholder";
 import type { TabName } from "./constants/routes";
 import { THREE_D_SITES, THREE_D_SITE_STATUS_STORAGE_KEY, THREE_D_SITE_TESTED_AT_STORAGE_KEY, THREE_D_SITES_ENABLED_STORAGE_KEY } from "./constants/files3d";
-import { DEFAULT_OPERATION_COOLDOWN_HOURS, MS_PER_HOUR, STOCK_QUANTITIES_STORAGE_KEY, STOCK_REFRESHED_AT_STORAGE_KEY } from "./constants/cooldown";
+import { DEFAULT_OPERATION_COOLDOWN_HOURS, IMPORT_SYNC_COOLDOWN_MS, MS_PER_HOUR, STOCK_QUANTITIES_STORAGE_KEY, STOCK_REFRESHED_AT_STORAGE_KEY } from "./constants/cooldown";
 import type { ThreeDSiteStatus } from "./constants/files3d";
 import type { DropResult } from "@hello-pangea/dnd";
 import type { Listing, ModelOption, ProgressState, ImageGenProgress } from "./types/listing";
@@ -458,7 +458,6 @@ function App() {
     return saved ? parseInt(saved, 10) : null;
   });
   const [, setTickCounter] = useState<number>(0);
-  const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
 
   // Re-render every 60s so the "ago" label and stale status stay current
   useEffect(() => {
@@ -471,13 +470,13 @@ function App() {
   useEffect(() => {
     if (!syncLastRefreshed) return;
     const elapsed = Date.now() - new Date(syncLastRefreshed).getTime();
-    if (elapsed >= 24 * 60 * 60 * 1000) return;
-    const remaining = 24 * 60 * 60 * 1000 - elapsed;
+    if (elapsed >= IMPORT_SYNC_COOLDOWN_MS) return;
+    const remaining = IMPORT_SYNC_COOLDOWN_MS - elapsed;
     const timer = setTimeout(() => {
       fetch("/api/settings/import-sync")
         .then((r) => r.json())
         .then((d) => setSyncLastRefreshed(d.last_refreshed ?? null))
-        .catch(() => forceUpdate());
+        .catch(() => setTickCounter((t) => t + 1));
     }, remaining);
     return () => clearTimeout(timer);
   }, [syncLastRefreshed]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -606,9 +605,9 @@ function App() {
     : true;
 
   const syncElapsedMs = syncLastRefreshed ? Date.now() - new Date(syncLastRefreshed).getTime() : null;
-  const syncOnCooldown = syncElapsedMs !== null && syncElapsedMs < 24 * 60 * 60 * 1000;
+  const syncOnCooldown = syncElapsedMs !== null && syncElapsedMs < IMPORT_SYNC_COOLDOWN_MS;
   const syncAvailableInHours = syncOnCooldown && syncElapsedMs !== null
-    ? Math.ceil((24 * 60 * 60 * 1000 - syncElapsedMs) / (60 * 60 * 1000))
+    ? Math.ceil((IMPORT_SYNC_COOLDOWN_MS - syncElapsedMs) / (60 * 60 * 1000))
     : null;
 
   const formatTimeAgo = (timestamp: number | null): string => {
