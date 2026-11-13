@@ -3123,30 +3123,8 @@ function App() {
     }
   };
 
-  const handleListingClickBySku = async (sku: string): Promise<void> => {
-    setSelectedListing({ sku } as Listing);
-    setLoadingListingDetail(true);
-
-    try {
-      const response = await fetch(`/api/listings/${sku}`);
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to fetch listing details");
-      }
-
-      if (data.error) {
-        throw new Error(data.error);
-      }
-
-      setListingDetailData(data.listing_data);
-    } catch (err) {
-      console.error("Error fetching listing details:", err);
-      addToast("error", (err as Error).message || "An error occurred while fetching listing details");
-    } finally {
-      setLoadingListingDetail(false);
-    }
-  };
+  const handleListingClickBySku = (sku: string): Promise<void> =>
+    handleListingClick({ sku } as Listing);
 
   const closeListingDetail = (): void => {
     setSelectedListing(null);

@@ -14,7 +14,6 @@ interface LogEntry {
   skus?: string[];
   ebay_ids?: string[];
   failed_skus?: string[];
-  not_found_skus?: string[];
   quantity?: number;
   count?: number;
   error?: string;
@@ -154,7 +153,7 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
       )}
 
       <div className="flex flex-col gap-1">
-        {filtered.map((entry, i) => {
+        {filtered.map((entry) => {
           const isError = entry.status === "error";
           const isRestock = entry.event === "restock";
           const hasSku = !!entry.sku;
@@ -171,10 +170,10 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
           };
 
           return (
-            <div key={i} className="flex flex-col">
+            <div key={entry.timestamp} className="flex flex-col">
               <div
                 className={`flex items-start gap-3 rounded-md px-3 py-2.5 text-sm ${
-                  isError ? "bg-danger/5" : "hover:bg-surface-hover"
+                  isError ? "bg-danger/5 hover:bg-danger/10" : "hover:bg-surface-hover"
                 } ${isClickable ? "cursor-pointer" : ""}`}
                 onClick={isClickable ? handleRowClick : undefined}
               >
@@ -227,18 +226,10 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
                     const ebayId = (entry.ebay_ids || [])[j] ?? "";
                     return (
                       <div
-                        key={j}
+                        key={sku}
                         className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-surface-hover"
                       >
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onOpenListing(sku);
-                          }}
-                          className="font-medium text-text-primary hover:text-primary"
-                        >
-                          {sku}
-                        </button>
+                        <span className="font-medium text-text-primary">{sku}</span>
                         {ebayId && (
                           <a
                             href={`https://www.ebay.com/itm/${ebayId}`}
