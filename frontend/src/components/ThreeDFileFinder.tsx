@@ -30,6 +30,27 @@ interface UnzippedEntry {
   data: Blob;
 }
 
+// Formats Blender imports natively (ticket 02 scope); mirrors backend PREFERRED_3D_EXTENSIONS order
+const NATIVE_RENDER_EXTENSIONS = [".obj", ".stl", ".ply"];
+const extOf = (name: string) => name.slice(name.lastIndexOf(".")).toLowerCase();
+
+// Pick the best natively renderable entry (zip contents or a single file).
+// Returns null when nothing renderable is inside (format conversion lands in ticket 04).
+const pickRenderEntry = (entries: UnzippedEntry[]): File | null => {
+  const native = entries
+    .filter((e) => NATIVE_RENDER_EXTENSIONS.includes(extOf(e.path[e.path.length - 1])))
+    .sort(
+      (a, b) =>
+        NATIVE_RENDER_EXTENSIONS.indexOf(extOf(a.path[a.path.length - 1])) -
+        NATIVE_RENDER_EXTENSIONS.indexOf(extOf(b.path[b.path.length - 1])),
+    );
+  if (native.length === 0) return null;
+  return new File([native[0].data], native[0].path[native[0].path.length - 1]);
+};
+
+const pickRenderFile = async (blob: Blob, filename: string): Promise<File | null> =>
+  pickRenderEntry(await unzipBlob(blob, filename));
+
 // Unzip a blob into flat entries; non-zip blobs (e.g. MakerWorld .3mf) become a single entry
 const unzipBlob = async (blob: Blob, filename: string): Promise<UnzippedEntry[]> => {
   let zip: JSZip;
@@ -111,6 +132,21 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
   const [step3LoadingMode, setStep3LoadingMode] = useState<DownloadMode | null>(null);
   const [step3Result, setStep3Result] = useState<{ filename: string; bytes: number; fileCount?: number } | null>(null);
   const [step3Error, setStep3Error] = useState<string | null>(null);
+
+  // Step 4 — Studio Render (renderFile = best native-format file from the Step 3 download)
+  const [renderFile, setRenderFile] = useState<File | null>(null);
+  const [renderFileChecked, setRenderFileChecked] = useState(false);
+  const [step4Loading, setStep4Loading] = useState(false);
+  const [step4Image, setStep4Image] = useState<{ url: string; filename: string } | null>(null);
+  const [step4Error, setStep4Error] = useState<string | null>(null);
+
+  const resetStep4 = () => {
+    setRenderFile(null);
+    setRenderFileChecked(false);
+    setStep4Loading(false);
+    setStep4Image(null);
+    setStep4Error(null);
+  };
 
   // True when a result link can be forwarded to Step 3
   const canForwardToStep3 = (link: string) =>
@@ -201,6 +237,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
     setStep3LoadingMode(mode);
     setStep3Result(null);
     setStep3Error(null);
+    resetStep4();
     try {
       // "files" mode reuses the full-zip response; unzipping happens client-side
       const wireMode = mode === DOWNLOAD_MODE_FILES ? DOWNLOAD_MODE_FULL_ZIP : mode;
@@ -223,6 +260,8 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       const blob = await res.blob();
       if (mode === DOWNLOAD_MODE_FILES) {
         const entries = await unzipBlob(blob, filename);
+        setRenderFile(pickRenderEntry(entries));
+        setRenderFileChecked(true);
         const savedToFolder = await saveEntriesToFolder(entries);
         if (savedToFolder === null) return; // user cancelled the folder picker
         if (!savedToFolder) {
@@ -238,11 +277,49 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       a.download = filename;
       a.click();
       URL.revokeObjectURL(downloadUrl);
+      setRenderFile(await pickRenderFile(blob, filename));
+      setRenderFileChecked(true);
       setStep3Result({ filename, bytes: blob.size });
     } catch (err) {
       setStep3Error((err as Error).message || "Download failed");
     } finally {
       setStep3LoadingMode(null);
+    }
+  };
+
+  const handleStep4Render = async () => {
+    if (!renderFile || step4Loading) return;
+    setStep4Loading(true);
+    setStep4Error(null);
+    setStep4Image(null);
+    try {
+      const form = new FormData();
+      form.append("file", renderFile);
+      // Spec defaults; the controls panel (color/resolution UI) lands in ticket 05
+      form.append("color", "#1a1a1a");
+      form.append("roughness", "0.3");
+      form.append("resolution", "1024");
+      const res = await fetch("/api/render", { method: "POST", body: form });
+      const data = await res.json() as { task_id?: string; error?: string };
+      if (!res.ok || data.error || !data.task_id) throw new Error(data.error || "Failed to start the render");
+
+      const deadline = Date.now() + 120_000; // backend hard-kills at 90s
+      for (;;) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const statusRes = await fetch(`/api/render-status/${data.task_id}`);
+        const status = await statusRes.json() as { status?: string; image?: string; filename?: string; error?: string };
+        if (!statusRes.ok) throw new Error(status.error || "Lost track of the render job");
+        if (status.status === "completed" && status.image && status.filename) {
+          setStep4Image({ url: status.image, filename: status.filename });
+          break;
+        }
+        if (status.status === "failed") throw new Error(status.error || "Render failed");
+        if (Date.now() > deadline) throw new Error("Render is taking too long — check that Blender is installed and the backend is running");
+      }
+    } catch (err) {
+      setStep4Error((err as Error).message || "Render failed");
+    } finally {
+      setStep4Loading(false);
     }
   };
 
@@ -392,6 +469,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
                           setStep3Url(r.link);
                           setStep3Result(null);
                           setStep3Error(null);
+                          resetStep4();
                         }}
                       >
                         Use →
@@ -418,6 +496,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
                 setStep3Url(val);
                 setStep3Result(null);
                 setStep3Error(null);
+                resetStep4();
               }}
               placeholder="Paste printables.com, thingiverse.com, makerworld.com, or cults3d.com URL..."
               disabled={step3LoadingMode !== null}
@@ -465,6 +544,45 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
         )}
         {step3Error && (
           <p className="text-sm text-red-400">{step3Error}</p>
+        )}
+      </div>
+      {/* Step 4 — Studio Render */}
+      <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
+        <p className="text-sm font-semibold text-text-primary">Step 4 — Studio Render</p>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            className={btnPill}
+            onClick={handleStep4Render}
+            disabled={!renderFile || step4Loading}
+          >
+            {step4Loading ? "Rendering..." : "Render"}
+          </button>
+          <p className="text-xs text-text-muted">
+            {renderFile
+              ? `Ready to render: ${renderFile.name} (${formatBytes(renderFile.size)})`
+              : renderFileChecked
+                ? "No renderable .stl/.obj/.ply file in this download — other formats are not supported yet"
+                : "Download a model in Step 3 to enable rendering"}
+          </p>
+        </div>
+        {step4Loading && (
+          <p className="text-xs text-text-muted">Rendering in Blender — this usually takes 10–30 seconds...</p>
+        )}
+        {step4Image && (
+          <div className="flex flex-col items-start gap-2">
+            <img
+              src={step4Image.url}
+              alt="Studio render"
+              className="max-h-80 rounded-lg border border-border-default"
+            />
+            <a href={step4Image.url} download={step4Image.filename} className={btnPillSm}>
+              Download {step4Image.filename}
+            </a>
+          </div>
+        )}
+        {step4Error && (
+          <p className="text-sm text-red-400">{step4Error}</p>
         )}
       </div>
     </div>
