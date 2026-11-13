@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { RefreshCw, CheckCircle, XCircle } from "lucide-react";
+import { RefreshCw, CheckCircle, XCircle, ChevronRight, ChevronDown, ExternalLink } from "lucide-react";
 import { LOG_EVENT_LABELS, LOG_FILTER_CHIPS } from "../constants/logs";
 import type { FilterOption } from "../constants/logs";
 
@@ -12,7 +12,9 @@ interface LogEntry {
   sourceListingId?: string;
   source?: string;
   skus?: string[];
+  ebay_ids?: string[];
   failed_skus?: string[];
+  not_found_skus?: string[];
   quantity?: number;
   count?: number;
   error?: string;
@@ -22,6 +24,7 @@ interface LogEntry {
 
 interface LogsTabProps {
   onNavigateToSku?: (sku: string) => void;
+  onOpenListing: (sku: string) => void;
 }
 
 function formatTimestamp(iso: string) {
@@ -67,11 +70,12 @@ function getEntryDetail(entry: LogEntry): string {
   }
 }
 
-export default function LogsTab({ onNavigateToSku }: LogsTabProps) {
+export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [filter, setFilter] = useState("all");
+  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -94,6 +98,18 @@ export default function LogsTab({ onNavigateToSku }: LogsTabProps) {
 
   const filtered =
     filter === "all" ? logs : logs.filter((e) => e.event === filter);
+
+  function toggleRow(i: number) {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(i)) {
+        next.delete(i);
+      } else {
+        next.add(i);
+      }
+      return next;
+    });
+  }
 
   return (
     <div className="flex flex-col py-6 px-2">
@@ -140,51 +156,118 @@ export default function LogsTab({ onNavigateToSku }: LogsTabProps) {
       <div className="flex flex-col gap-1">
         {filtered.map((entry, i) => {
           const isError = entry.status === "error";
+          const isRestock = entry.event === "restock";
           const hasSku = !!entry.sku;
+          const isExpanded = expandedRows.has(i);
+
+          const isClickable = isRestock || (hasSku && !!onNavigateToSku);
+
+          const handleRowClick = () => {
+            if (isRestock) {
+              toggleRow(i);
+            } else if (hasSku && onNavigateToSku) {
+              onNavigateToSku(entry.sku!);
+            }
+          };
+
           return (
-            <div
-              key={i}
-              className={`flex items-start gap-3 rounded-md px-3 py-2.5 text-sm ${
-                isError ? "bg-danger/5" : "hover:bg-surface-hover"
-              } ${hasSku && onNavigateToSku ? "cursor-pointer" : ""}`}
-              onClick={
-                hasSku && onNavigateToSku
-                  ? () => onNavigateToSku(entry.sku!)
-                  : undefined
-              }
-            >
-              <span className="mt-0.5 shrink-0">
-                {isError ? (
-                  <XCircle size={15} className="text-danger" />
-                ) : (
-                  <CheckCircle size={15} className="text-success" />
-                )}
-              </span>
-              <div className="min-w-0 flex-1">
-                <span
-                  className={`font-medium ${
-                    isError ? "text-danger" : "text-text-primary"
-                  }`}
-                >
-                  {LOG_EVENT_LABELS[entry.event] ?? entry.event}
-                  {entry.event === "restock" && entry.source === "auto" && (
-                    <span className="ml-1.5 text-xs font-normal text-text-muted">
-                      (auto)
-                    </span>
+            <div key={i} className="flex flex-col">
+              <div
+                className={`flex items-start gap-3 rounded-md px-3 py-2.5 text-sm ${
+                  isError ? "bg-danger/5" : "hover:bg-surface-hover"
+                } ${isClickable ? "cursor-pointer" : ""}`}
+                onClick={isClickable ? handleRowClick : undefined}
+              >
+                <span className="mt-0.5 shrink-0">
+                  {isError ? (
+                    <XCircle size={15} className="text-danger" />
+                  ) : (
+                    <CheckCircle size={15} className="text-success" />
                   )}
                 </span>
-                <span className="ml-2 truncate text-text-secondary">
-                  {getEntryDetail(entry)}
+                <div className="min-w-0 flex-1">
+                  <span
+                    className={`font-medium ${
+                      isError ? "text-danger" : "text-text-primary"
+                    }`}
+                  >
+                    {LOG_EVENT_LABELS[entry.event] ?? entry.event}
+                    {entry.event === "restock" && entry.source === "auto" && (
+                      <span className="ml-1.5 text-xs font-normal text-text-muted">
+                        (auto)
+                      </span>
+                    )}
+                  </span>
+                  <span className="ml-2 truncate text-text-secondary">
+                    {getEntryDetail(entry)}
+                  </span>
+                  {isError && entry.error && (
+                    <p className="mt-0.5 truncate text-xs text-danger/80">
+                      {entry.error}
+                    </p>
+                  )}
+                </div>
+                <span className="shrink-0 whitespace-nowrap text-xs text-text-muted">
+                  {formatTimestamp(entry.timestamp)}
                 </span>
-                {isError && entry.error && (
-                  <p className="mt-0.5 truncate text-xs text-danger/80">
-                    {entry.error}
-                  </p>
+                {isRestock && (
+                  <span className="shrink-0 text-text-muted">
+                    {isExpanded ? (
+                      <ChevronDown size={14} />
+                    ) : (
+                      <ChevronRight size={14} />
+                    )}
+                  </span>
                 )}
               </div>
-              <span className="shrink-0 whitespace-nowrap text-xs text-text-muted">
-                {formatTimestamp(entry.timestamp)}
-              </span>
+
+              {isRestock && isExpanded && (
+                <div className="ml-9 mb-1 flex flex-col divide-y divide-border-default rounded-md border border-border-default">
+                  {(entry.skus || []).map((sku, j) => {
+                    const ebayId = (entry.ebay_ids || [])[j] ?? "";
+                    return (
+                      <div
+                        key={j}
+                        className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-surface-hover"
+                      >
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenListing(sku);
+                          }}
+                          className="font-medium text-text-primary hover:text-primary"
+                        >
+                          {sku}
+                        </button>
+                        {ebayId && (
+                          <a
+                            href={`https://www.ebay.com/itm/${ebayId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center gap-0.5 text-xs text-text-muted hover:text-primary"
+                          >
+                            <ExternalLink size={11} />
+                            {ebayId}
+                          </a>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onOpenListing(sku);
+                          }}
+                          className="ml-auto text-xs text-text-muted hover:text-primary"
+                        >
+                          View
+                        </button>
+                      </div>
+                    );
+                  })}
+                  {(entry.skus || []).length === 0 && (
+                    <p className="px-3 py-2 text-xs text-text-muted">No SKUs</p>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}

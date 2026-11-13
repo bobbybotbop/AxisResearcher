@@ -3906,6 +3906,7 @@ function App() {
                 setUploadListingsSearch(sku);
                 handleTabChange("upload");
               }}
+              onOpenListing={handleListingClickBySku}
             />
           )}
 
