@@ -1,3 +1,5 @@
+SITE_TYPE_WHITELISTED = "whitelisted"
+
 WHITELISTED_SITES = [
     "makerworld.com",
     "printables.com",

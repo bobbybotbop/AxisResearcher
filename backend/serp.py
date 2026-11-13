@@ -1,14 +1,21 @@
 import os
 from serpapi import GoogleSearch
 from urllib.parse import urlparse
-from backend.constants.serp import WHITELISTED_SITES, BLACKLISTED_SITES
+from backend.constants.serp import WHITELISTED_SITES, BLACKLISTED_SITES, SITE_TYPE_WHITELISTED
+
+
+def _extract_host(url: str) -> str:
+    try:
+        return urlparse(url).netloc.lower().removeprefix("www.")
+    except Exception:
+        return ""
 
 
 def _classify_site(link: str) -> str:
     try:
-        host = urlparse(link).netloc.lower().removeprefix("www.")
+        host = _extract_host(link)
         if any(host == s or host.endswith("." + s) for s in WHITELISTED_SITES):
-            return "whitelisted"
+            return SITE_TYPE_WHITELISTED
         if any(host == s or host.endswith("." + s) for s in BLACKLISTED_SITES):
             return "blacklisted"
     except Exception:
@@ -60,16 +67,12 @@ def filter_links_by_enabled_sites(links: list[dict], enabled_sites: list[str] | 
     None means all sites are enabled (backward-compatible default)."""
     if enabled_sites is None:
         return links
-    enabled_set = set(enabled_sites)
     result = []
     for r in links:
-        if r.get("site_type") != "whitelisted":
+        if r.get("site_type") != SITE_TYPE_WHITELISTED:
             result.append(r)
             continue
-        try:
-            host = urlparse(r["link"]).netloc.lower().removeprefix("www.")
-        except Exception:
-            host = ""
-        if host in enabled_set:
+        host = _extract_host(r["link"])
+        if any(host == s or host.endswith("." + s) for s in enabled_sites):
             result.append(r)
     return result

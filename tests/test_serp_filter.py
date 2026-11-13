@@ -2,11 +2,12 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from backend.serp import filter_links_by_enabled_sites
+from backend.constants.serp import SITE_TYPE_WHITELISTED
 
 SAMPLE_LINKS = [
-    {"link": "https://www.printables.com/model/123", "site_type": "whitelisted"},
-    {"link": "https://makerworld.com/en/models/456", "site_type": "whitelisted"},
-    {"link": "https://www.thingiverse.com/thing:789", "site_type": "whitelisted"},
+    {"link": "https://www.printables.com/model/123", "site_type": SITE_TYPE_WHITELISTED},
+    {"link": "https://makerworld.com/en/models/456", "site_type": SITE_TYPE_WHITELISTED},
+    {"link": "https://www.thingiverse.com/thing:789", "site_type": SITE_TYPE_WHITELISTED},
     {"link": "https://ebay.com/itm/999", "site_type": "blacklisted"},
     {"link": "https://someothersite.com/page", "site_type": "neutral"},
 ]
@@ -38,3 +39,12 @@ def test_all_sites_enabled_returns_all():
     all_sites = ["printables.com", "makerworld.com", "thingiverse.com"]
     result = filter_links_by_enabled_sites(SAMPLE_LINKS, all_sites)
     assert result == SAMPLE_LINKS
+
+
+def test_subdomain_site_is_kept_when_parent_enabled():
+    links = [
+        {"link": "https://sub.printables.com/model/999", "site_type": SITE_TYPE_WHITELISTED},
+    ]
+    result = filter_links_by_enabled_sites(links, ["printables.com"])
+    assert len(result) == 1
+    assert result[0]["link"] == "https://sub.printables.com/model/999"
