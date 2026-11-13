@@ -32,7 +32,7 @@ import type { ImageModelOption } from "./constants/models";
 import { TAB_PATHS } from "./constants/routes";
 import { createPlaceholderImageDataUrl, renderPlaceholderImagePngBlob } from "./constants/placeholder";
 import type { TabName } from "./constants/routes";
-import { THREE_D_SITES, THREE_D_SITE_STATUS_STORAGE_KEY, THREE_D_SITE_TESTED_AT_STORAGE_KEY } from "./constants/files3d";
+import { THREE_D_SITES, THREE_D_SITE_STATUS_STORAGE_KEY, THREE_D_SITE_TESTED_AT_STORAGE_KEY, THREE_D_SITES_ENABLED_STORAGE_KEY } from "./constants/files3d";
 import { DEFAULT_OPERATION_COOLDOWN_HOURS, MS_PER_HOUR, STOCK_QUANTITIES_STORAGE_KEY, STOCK_REFRESHED_AT_STORAGE_KEY } from "./constants/cooldown";
 import type { ThreeDSiteStatus } from "./constants/files3d";
 import type { DropResult } from "@hello-pangea/dnd";
@@ -299,6 +299,13 @@ function App() {
     } catch {
       return null;
     }
+  });
+  const [threeDSitesEnabled, setThreeDSitesEnabled] = useState<Record<string, boolean>>(() => {
+    try {
+      const stored = localStorage.getItem(THREE_D_SITES_ENABLED_STORAGE_KEY);
+      if (stored) return JSON.parse(stored) as Record<string, boolean>;
+    } catch { /* ignore */ }
+    return Object.fromEntries(THREE_D_SITES.map(({ site }) => [site, true]));
   });
   const [threeDSiteTesting, setThreeDSiteTesting] = useState(false);
   const threeDSiteAutoTestRan = useRef(false);
@@ -2509,6 +2516,14 @@ function App() {
     if (isNaN(parsed) || parsed < 0) return;
     setThreeDDownloadDelay(parsed);
     try { localStorage.setItem("axisThreeDDownloadDelay", String(parsed)); } catch { /* ignore */ }
+  };
+
+  const handleToggleThreeDSite = (site: string) => {
+    setThreeDSitesEnabled(prev => {
+      const next = { ...prev, [site]: !(prev[site] ?? true) };
+      try { localStorage.setItem(THREE_D_SITES_ENABLED_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
   };
 
   const handleTest3dSites = async (): Promise<void> => {
