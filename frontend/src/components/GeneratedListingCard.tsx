@@ -5,6 +5,7 @@ import {
   formatListingDateTime,
   formatCategoryShort,
 } from "../utils/listingDisplay";
+import { displaySku } from "../utils/listingStatus";
 import type { Listing } from "../types/listing";
 
 const THUMB_PX = 80;
@@ -28,6 +29,8 @@ interface GeneratedListingCardProps {
   isSelected?: boolean;
   onToggleSelect?: () => void;
   isInactive?: boolean;
+  isDraft?: boolean;
+  isReady?: boolean;
 }
 
 interface RestGalleryStripProps {
@@ -137,6 +140,8 @@ export default function GeneratedListingCard({
   isSelected,
   onToggleSelect,
   isInactive = false,
+  isDraft = false,
+  isReady = false,
 }: GeneratedListingCardProps) {
   const urls = Array.isArray(listing.imageUrls) ? listing.imageUrls : [];
   const [imageIndex, setImageIndex] = useState(0);
@@ -159,18 +164,52 @@ export default function GeneratedListingCard({
   const models = listing.models as ListingModels | undefined;
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={() => onCardClick?.(listing)}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onCardClick?.(listing);
-        }
-      }}
-      className={`flex w-full cursor-pointer flex-col overflow-hidden rounded-xl bg-surface-panel shadow-sm transition-shadow hover:shadow-md md:flex-row md:items-stretch ${isManual ? "border-2 border-border-default" : "border border-border-default"} ${isInactive ? "opacity-50" : ""}`}
-    >
+    <div className="relative w-full">
+      {isReady && (
+        <div
+          className="absolute right-3 top-3 z-10 flex items-center gap-2"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <span
+            className="rounded-full border border-success/30 bg-success px-2.5 py-0.5 text-xs font-semibold text-white shadow-sm"
+            title="All required fields are complete — ready to upload to eBay"
+          >
+            Ready
+          </span>
+          <button
+            type="button"
+            disabled={isUploading}
+            title={isUploading ? "Uploading..." : "Upload to eBay"}
+            className="flex items-center gap-1.5 rounded-full border border-success/30 bg-success px-3 py-1 text-xs font-semibold text-white shadow-sm transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={(e) => {
+              e.stopPropagation();
+              onUpload?.(listing);
+            }}
+          >
+            {isUploading ? (
+              <>
+                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                Uploading...
+              </>
+            ) : (
+              "Upload"
+            )}
+          </button>
+        </div>
+      )}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => onCardClick?.(listing)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onCardClick?.(listing);
+          }
+        }}
+        className={`flex w-full cursor-pointer flex-col overflow-hidden rounded-xl bg-surface-panel shadow-sm transition-shadow hover:shadow-md md:flex-row md:items-stretch border border-border-default ${isInactive || isDraft ? "opacity-50" : ""}`}
+      >
       {/* Image column */}
       <div className="flex w-full shrink-0 flex-col border-b border-border-default md:w-[30%] md:max-w-md md:border-b-0 md:border-r md:border-border-default">
         <div className="relative w-full">
@@ -226,7 +265,7 @@ export default function GeneratedListingCard({
               >
                 View on eBay
               </a>
-            ) : (
+            ) : isReady ? null : (
               <button
                 type="button"
                 className={`w-full ${btnPill} disabled:transform-none`}
@@ -283,13 +322,16 @@ export default function GeneratedListingCard({
                 {title}
               </h3>
               {isManual && (
-                <span className="shrink-0 rounded-full border border-border-default bg-surface-muted px-2 py-0.5 text-xs font-medium text-text-muted">
-                  Synced
+                <span
+                  className="shrink-0 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
+                  title="Imported from your existing eBay listings"
+                >
+                  Imported
                 </span>
               )}
             </div>
             <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-muted">
-              <span className="font-mono text-text-muted">{listing.sku}</span>
+              <span className="font-mono text-text-muted">{displaySku(listing)}</span>
               {createdDateTime && (
                 <>
                   <span className="text-text-muted">·</span>
@@ -408,6 +450,7 @@ export default function GeneratedListingCard({
           ) : null}
         </div>
       </div>
+    </div>
     </div>
   );
 }

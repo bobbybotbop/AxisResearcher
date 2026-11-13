@@ -92,6 +92,16 @@ def _require_seleniumbase():
         ) from exc
 
 
+def _require_driver():
+    try:
+        from seleniumbase import Driver
+        return Driver
+    except ImportError as exc:
+        raise RuntimeError(
+            "seleniumbase is not installed. Run: pip install seleniumbase"
+        ) from exc
+
+
 def _fetch_model_meta(design_id: str, instance_id: str | None) -> dict:
     """
     Call the design-service API (no auth, no Cloudflare) and return:
@@ -232,8 +242,8 @@ def _do_login(sb, email: str, password: str, headless: bool) -> None:
                 if headless:
                     raise RuntimeError(
                         "MakerWorld requires an email verification code for this login. "
-                        "Run once headed (set MAKERWORLD_HEADLESS=false in .env) and type "
-                        "the code into the browser window; the session then persists."
+                        "Open Settings > 3D File Sites and click 'Open browser' to type "
+                        "the code into a headed browser window; the session then persists."
                     )
                 if not verification_seen:
                     verification_seen = True
@@ -377,20 +387,110 @@ def download_3mf(link_or_design_id: str, instance_id: str | None = None) -> tupl
             return _download_attempt(link, instance_id, email, password, headless=False)
 
 
+# A small free public model used to verify the full download pipeline.
+_PROBE_DESIGN_ID = "2462393"
+
+
 def probe() -> tuple[bool, str]:
     """
-    Probe the public metadata API and check login readiness. Does not launch a
-    browser — a valid profile session can only be confirmed by a real download.
+    Genuinely fetch a file through the real download pipeline (browser,
+    Cloudflare clearance, login session, signed CDN URL). This is the only
+    honest operational check: the metadata API is public and says nothing
+    about the login session.
     """
     try:
-        _fetch_model_meta("2462393", None)
+        name, data = download_3mf(_PROBE_DESIGN_ID)
     except Exception as e:
-        return False, f"Metadata API error: {e}"
+        return False, str(e)
+    if not data:
+        return False, "Pipeline returned an empty file"
+    return True, f"Downloaded {name} ({len(data) // 1024} KB)"
 
-    if os.path.isdir(_PROFILE_DIR):
-        return True, "Metadata API OK, session profile present"
 
-    if os.environ.get("MAKERWORLD_EMAIL", "").strip() and os.environ.get("MAKERWORLD_PASSWORD", "").strip():
-        return True, "Metadata API OK, credentials configured"
+# --- Interactive session ("Open browser") -----------------------------------
+# The human, not the script, decides when a login/session fix is done. The
+# browser stays open until the user closes the window or the app calls
+# close_session(); the profile (cookies, Cloudflare clearance) persists either
+# way. While the session is open it holds _PROFILE_LOCK, so the download
+# pipeline waits rather than fighting over the profile.
 
-    return False, "No MakerWorld login — add email and password in Settings > 3D File Sites"
+_session_lock = threading.Lock()
+_session: dict = {"driver": None}
+
+
+def open_session(url: str | None = None) -> tuple[bool, str]:
+    """
+    Open a headed browser on MakerWorld (or a given MakerWorld/Bambu Lab page)
+    and leave it open for the user to fix whatever the pipeline is stuck on —
+    login, email verification code, Cloudflare challenge. Returns immediately.
+    """
+    if url and "makerworld.com" not in url and "bambulab.com" not in url:
+        return False, "Only makerworld.com / bambulab.com URLs can be opened."
+    with _session_lock:
+        if _session["driver"] is not None:
+            return False, "A session browser is already open."
+        if not _PROFILE_LOCK.acquire(blocking=False):
+            return False, "The download pipeline is using the browser profile right now — try again shortly."
+        driver = None
+        try:
+            Driver = _require_driver()
+            driver = Driver(uc=True, headless=False, user_data_dir=_PROFILE_DIR, locale_code="en")
+            driver.uc_open_with_reconnect(url or MAKERWORLD_BASE + "/en", 4)
+            _session["driver"] = driver
+        except Exception as e:
+            if driver is not None:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+            _PROFILE_LOCK.release()
+            return False, f"Could not open the browser: {e}"
+    return True, "Browser open — fix the login there, then close the window. The session is saved automatically."
+
+
+def _end_session_locked() -> None:
+    """Tear down the session browser. Caller must hold _session_lock."""
+    driver = _session["driver"]
+    _session["driver"] = None
+    if driver is not None:
+        try:
+            driver.quit()
+        except Exception:
+            # The user already closed the window — the session is gone, but
+            # Chrome flushed the profile to disk on exit.
+            pass
+    _PROFILE_LOCK.release()
+
+
+def session_status() -> dict:
+    """Report whether the session browser is still open, plus the current page
+    and a best-effort logged-in guess. Detects the user closing the window and
+    cleans up in that case."""
+    with _session_lock:
+        driver = _session["driver"]
+        if driver is None:
+            return {"open": False}
+        try:
+            if not driver.window_handles:
+                _end_session_locked()
+                return {"open": False, "ended": True}
+            url = driver.current_url
+        except Exception:
+            _end_session_locked()
+            return {"open": False, "ended": True}
+        logged_in = None
+        try:
+            buttons = driver.find_elements("xpath", "//button[contains(normalize-space(.), 'Log In')]")
+            logged_in = not any(b.is_displayed() for b in buttons)
+        except Exception:
+            pass
+        return {"open": True, "url": url, "logged_in": logged_in}
+
+
+def close_session() -> tuple[bool, str]:
+    """Close the session browser gracefully, saving cookies to the profile."""
+    with _session_lock:
+        if _session["driver"] is None:
+            return False, "No session browser is open."
+        _end_session_locked()
+    return True, "Browser closed — session saved to the local browser profile."

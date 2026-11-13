@@ -1567,13 +1567,49 @@ def add_item(item_data):
         return {"success": False, "error": error_msg}
 
 
+def _parse_seller_list_item(item_el, ns):
+    """
+    Parse one <Item> element from a GetSellerList response into the import dict.
+
+    eBay's <Quantity> is the lifetime listed total; the available stock a buyer
+    sees is Quantity - QuantitySold (matching the Offer API's availableQuantity).
+    """
+    pictures = [
+        p.text
+        for p in item_el.findall(f"{ns}PictureDetails/{ns}PictureURL")
+        if p.text
+    ]
+    # BuyItNowPrice is 0.0 on fixed-price listings; use CurrentPrice as the real price.
+    price_el = item_el.find(f"{ns}SellingStatus/{ns}CurrentPrice")
+    if price_el is None:
+        price_el = item_el.find(f"{ns}BuyItNowPrice")
+    qty_listed = int(item_el.findtext(f"{ns}Quantity", "0") or 0)
+    qty_sold = int(item_el.findtext(f"{ns}SellingStatus/{ns}QuantitySold", "0") or 0)
+    return {
+        "item_id": item_el.findtext(f"{ns}ItemID", ""),
+        "title": item_el.findtext(f"{ns}Title", ""),
+        "quantity": max(0, qty_listed - qty_sold),
+        "price": price_el.text if price_el is not None else "0.00",
+        "image_urls": pictures,
+        "condition": item_el.findtext(f"{ns}ConditionDisplayName", ""),
+        "start_time": item_el.findtext(f"{ns}ListingDetails/{ns}StartTime", ""),
+        "description": item_el.findtext(f"{ns}Description", ""),
+        "seller_sku": item_el.findtext(f"{ns}SKU", "") or "",
+        "is_variation": item_el.find(f"{ns}Variations") is not None,
+        "category_id": item_el.findtext(f"{ns}PrimaryCategory/{ns}CategoryID", "") or "",
+        "category_name": item_el.findtext(f"{ns}PrimaryCategory/{ns}CategoryName", "") or "",
+    }
+
+
 def get_seller_list(mod_time_from=None):
     """
     Fetch all active fixed-price listings for the authenticated seller via GetSellerList.
     mod_time_from: ISO datetime string (e.g. "2026-07-01T00:00:00+00:00"). When provided,
                    only listings modified since that time are returned.
     Returns list of dicts: {item_id, title, quantity, price, image_urls, condition,
-                            start_time, description}.
+                            start_time, description, seller_sku, is_variation,
+                            category_id, category_name}.
+    'quantity' is the available stock (Quantity - QuantitySold), what buyers see.
     """
     load_dotenv(override=True)
     token = os.getenv('user_token', '').strip()
@@ -1630,32 +1666,60 @@ def get_seller_list(mod_time_from=None):
         if item_array is None:
             break
         for item_el in item_array.findall(f"{ns}Item"):
-            pictures = [
-                p.text
-                for p in item_el.findall(f"{ns}PictureDetails/{ns}PictureURL")
-                if p.text
-            ]
-            # BuyItNowPrice is 0.0 on fixed-price listings; use CurrentPrice as the real price.
-            price_el = item_el.find(f"{ns}SellingStatus/{ns}CurrentPrice")
-            if price_el is None:
-                price_el = item_el.find(f"{ns}BuyItNowPrice")
-            items.append({
-                "item_id": item_el.findtext(f"{ns}ItemID", ""),
-                "title": item_el.findtext(f"{ns}Title", ""),
-                "quantity": int(item_el.findtext(f"{ns}Quantity", "0") or 0),
-                "price": price_el.text if price_el is not None else "0.00",
-                "image_urls": pictures,
-                "condition": item_el.findtext(f"{ns}ConditionDisplayName", ""),
-                "start_time": item_el.findtext(f"{ns}ListingDetails/{ns}StartTime", ""),
-                "description": item_el.findtext(f"{ns}Description", ""),
-                "seller_sku": item_el.findtext(f"{ns}SKU", "") or "",
-                "is_variation": item_el.find(f"{ns}Variations") is not None,
-            })
+            items.append(_parse_seller_list_item(item_el, ns))
         has_more = root.findtext(f"{ns}HasMoreItems", "false").lower()
         if has_more != "true":
             break
         page += 1
     return items
+
+
+def get_item_available_quantity(item_id):
+    """
+    Fetch the live available quantity for one eBay item via GetItem (Trading API).
+    Returns available stock (Quantity - QuantitySold), or None on any failure.
+    """
+    load_dotenv(override=True)
+    token = os.getenv('user_token', '').strip()
+    if not token:
+        return None
+    ns = '{urn:ebay:apis:eBLBaseComponents}'
+    headers = {
+        "X-EBAY-API-SITEID": "0",
+        "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+        "X-EBAY-API-CALL-NAME": "GetItem",
+        "X-EBAY-API-DEV-NAME": CLIENT_ID,
+        "X-EBAY-API-APP-NAME": API_KEY,
+        "X-EBAY-API-CERT-NAME": CLIENT_SECRET,
+        "Content-Type": "text/xml",
+    }
+    xml_body = f"""<?xml version="1.0" encoding="utf-8"?>
+<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>
+  <ItemID>{escape(str(item_id))}</ItemID>
+  <OutputSelector>ItemID,Quantity,SellingStatus</OutputSelector>
+</GetItemRequest>"""
+    try:
+        r = requests.post(
+            "https://api.ebay.com/ws/api.dll",
+            data=xml_body.encode("utf-8"),
+            headers=headers,
+            timeout=10,
+        )
+    except requests.RequestException:
+        return None
+    if r.status_code != 200:
+        return None
+    try:
+        root = ET.fromstring(r.text)
+    except ET.ParseError:
+        return None
+    if root.findtext(f"{ns}Ack", "") not in ("Success", "Warning"):
+        return None
+    item_el = root.find(f"{ns}Item")
+    if item_el is None:
+        return None
+    return _parse_seller_list_item(item_el, ns)["quantity"]
 
 
 def revise_inventory_status_batch(items):

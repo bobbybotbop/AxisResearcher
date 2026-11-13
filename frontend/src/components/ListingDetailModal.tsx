@@ -93,7 +93,7 @@ function normalizeListing(data: unknown, fallbackSku: string): NormalizedListing
     .filter(Boolean);
 
   return {
-    sku: asString(root.sku) || fallbackSku,
+    sku: asString(root.sellerSku).trim() || asString(root.sku) || fallbackSku,
     title: asString(product.title),
     descriptionHtml: asString(product.description).trim(),
     imageUrls,

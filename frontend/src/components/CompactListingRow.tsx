@@ -4,6 +4,7 @@ import {
   formatListingDateTime,
   formatCategoryShort,
 } from "../utils/listingDisplay";
+import { displaySku } from "../utils/listingStatus";
 import type { Listing } from "../types/listing";
 
 interface UploadResult {
@@ -24,6 +25,8 @@ interface CompactListingRowProps {
   isSelected?: boolean;
   onToggleSelect?: () => void;
   isInactive?: boolean;
+  isDraft?: boolean;
+  isReady?: boolean;
 }
 
 function LinkIcon() {
@@ -67,6 +70,8 @@ export default function CompactListingRow({
   isSelected = false,
   onToggleSelect,
   isInactive = false,
+  isDraft = false,
+  isReady = false,
 }: CompactListingRowProps) {
   const urls = Array.isArray(listing.imageUrls) ? listing.imageUrls : [];
   const [imageIndex, setImageIndex] = useState(0);
@@ -85,17 +90,51 @@ export default function CompactListingRow({
   const createdDateTime = listing.createdDateTime as string | undefined;
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={() => isSelectMode ? onToggleSelect?.() : onCardClick?.(listing)}
+    <div className="relative w-full">
+      {isReady && (
+        <div
+          className="absolute -top-2 right-3 z-10 flex items-center gap-2"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <span
+            className="rounded-full border border-success/30 bg-success px-2.5 py-0.5 text-xs font-semibold text-white shadow-sm"
+            title="All required fields are complete — ready to upload to eBay"
+          >
+            Ready
+          </span>
+          <button
+            type="button"
+            disabled={isUploading}
+            title={isUploading ? "Uploading..." : "Upload to eBay"}
+            className="flex items-center gap-1.5 rounded-full border border-success/30 bg-success px-3 py-0.5 text-xs font-semibold text-white shadow-sm transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+            onClick={(e) => {
+              e.stopPropagation();
+              onUpload?.(listing);
+            }}
+          >
+            {isUploading ? (
+              <>
+                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                Uploading...
+              </>
+            ) : (
+              "Upload"
+            )}
+          </button>
+        </div>
+      )}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => isSelectMode ? onToggleSelect?.() : onCardClick?.(listing)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           isSelectMode ? onToggleSelect?.() : onCardClick?.(listing);
         }
       }}
-      className={`flex w-full cursor-pointer overflow-hidden rounded-xl bg-surface-panel shadow-sm transition-shadow hover:shadow-md ${isSelected ? "ring-2 ring-inset ring-blue-500" : ""} ${isManual ? "border-2 border-border-default" : "border border-border-default"} ${isInactive ? "opacity-50" : ""}`}
+      className={`flex w-full cursor-pointer overflow-hidden rounded-xl bg-surface-panel shadow-sm transition-shadow hover:shadow-md ${isSelected ? "ring-2 ring-inset ring-blue-500" : ""} border border-border-default ${isInactive || isDraft ? "opacity-50" : ""}`}
     >
       {/* Select checkbox */}
       {isSelectMode && (
@@ -168,6 +207,8 @@ export default function CompactListingRow({
             >
               <LinkIcon />
             </a>
+          ) : isReady ? (
+            <div className="h-full w-full bg-surface-muted" />
           ) : (
             <button
               type="button"
@@ -198,13 +239,16 @@ export default function CompactListingRow({
                 {title}
               </h3>
               {isManual && (
-                <span className="shrink-0 rounded-full border border-border-default bg-surface-muted px-2 py-0.5 text-xs font-medium text-text-muted">
-                  Synced
+                <span
+                  className="shrink-0 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
+                  title="Imported from your existing eBay listings"
+                >
+                  Imported
                 </span>
               )}
             </div>
             <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0 text-sm text-text-muted">
-              <span className="font-mono text-text-muted">{listing.sku}</span>
+              <span className="font-mono text-text-muted">{displaySku(listing)}</span>
               {createdDateTime && (
                 <>
                   <span className="text-text-muted">·</span>
@@ -310,6 +354,7 @@ export default function CompactListingRow({
           </div>
         )}
       </div>
+    </div>
     </div>
   );
 }

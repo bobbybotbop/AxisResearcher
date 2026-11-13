@@ -42,7 +42,7 @@ from backend.copyScripts.CopyListingMain import copy_listing_main, testing_funct
 from backend.serp import search_by_image, extract_top_links, filter_links_by_enabled_sites
 from backend.downloaders.thingiverse import extract_thing_id, stream_zip as tv_stream_zip, probe as probe_thingiverse
 from backend.downloaders.printables import extract_model_id as printables_model_id, build_zip as printables_build_zip, probe as probe_printables
-from backend.downloaders.makerworld import extract_model_info as mw_extract_model_info, download_3mf as mw_download_3mf, probe as probe_makerworld
+from backend.downloaders.makerworld import extract_model_info as mw_extract_model_info, download_3mf as mw_download_3mf, probe as probe_makerworld, open_session as mw_open_session, session_status as mw_session_status, close_session as mw_close_session
 from backend.downloaders.cults3d import extract_slug as cults3d_extract_slug, stream_zip as cults3d_stream_zip, probe as probe_cults3d, PaidModelError as Cults3DPaidModelError, load_cookies_from_browser as cults3d_load_cookies_from_browser
 from backend.downloaders.thangs import extract_model_id as thangs_extract_model_id, build_zip as thangs_build_zip, probe as probe_thangs, PaidModelError as ThangsPaidModelError
 from backend.constants.files_3d import DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, DOWNLOAD_MODES
@@ -54,7 +54,7 @@ from backend.copyScripts.create_image import (
     _openrouter_response_dict_to_image_bytes_and_mime,
     upload_image_bytes_to_ebay,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, migrate_hide_not_found_listings
 from backend.helper_functions import remove_html_tags
 import os
 import json
@@ -65,7 +65,7 @@ import uuid
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from backend.copyScripts.create_text import create_text, create_text_stream
-from backend.ebay_cli import call_text_llm, get_seller_list, revise_inventory_status_batch
+from backend.ebay_cli import call_text_llm, get_seller_list, revise_inventory_status_batch, get_item_available_quantity
 from backend.copyScripts.imageEditing import remove_background, compile_images, downscale_image_bytes
 from backend.copyScripts.upload_to_ebay import upload_complete_listing
 from backend.promoted_listings import promote_listing, PromotionError
@@ -1654,7 +1654,11 @@ def list_all_listings():
                 try:
                     with open(filepath, 'r', encoding='utf-8') as f:
                         listing_data = json.load(f)
-                    
+
+                    # Soft-deleted listings never appear in the API response
+                    if listing_data.get('hidden'):
+                        continue
+
                     # Extract summary information
                     sku = listing_data.get('sku', filename.replace('.json', ''))
                     title = listing_data.get('inventoryItem', {}).get('product', {}).get('title', 'No title')
@@ -1683,6 +1687,7 @@ def list_all_listings():
                         'ebayListingId': str(listing_data.get('ebayListingId') or '').strip(),
                         'models': listing_data.get('models') or None,
                         'isManualListing': bool(listing_data.get('isManualListing', False)),
+                        'sellerSku': str(listing_data.get('sellerSku') or '').strip() or None,
                         'isVariationListing': bool(listing_data.get('isVariationListing', False)),
                         'ebay_status': listing_data.get('ebay_status', 'active'),
                     })
@@ -2198,14 +2203,21 @@ def api_listings_quantities():
     result = {}
     for sku in skus:
         if sku.startswith(MANUAL_SKU_PREFIX):
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            fpath = os.path.join(base_dir, GENERATED_LISTINGS_DIR, f'{sku}.json')
-            try:
-                with open(fpath, 'r', encoding='utf-8') as f:
-                    d = json.load(f)
-                result[sku] = int(d.get('offer', {}).get('quantity', 0))
-            except Exception:
-                result[sku] = None
+            # MANUAL_ listings live outside the Sell Inventory API; fetch the
+            # live available quantity from eBay via GetItem, falling back to
+            # the local snapshot if eBay is unreachable.
+            item_id = sku[len(MANUAL_SKU_PREFIX):]
+            qty = get_item_available_quantity(item_id)
+            if qty is None:
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                fpath = os.path.join(base_dir, GENERATED_LISTINGS_DIR, f'{sku}.json')
+                try:
+                    with open(fpath, 'r', encoding='utf-8') as f:
+                        d = json.load(f)
+                    qty = int(d.get('offer', {}).get('quantity', 0))
+                except Exception:
+                    qty = None
+            result[sku] = qty
             continue
         try:
             # Try offer endpoint first (reflects live listing quantity)
@@ -2612,6 +2624,80 @@ def api_restock_listings():
     }), 200
 
 
+def _index_seller_list_items(ebay_items, log_prefix):
+    """Build lookup maps from get_seller_list() items, keyed by item_id and seller_sku."""
+    active_by_item_id = {str(item['item_id']): item for item in ebay_items}
+    active_by_seller_sku = {}
+    for item in ebay_items:
+        seller_sku = item.get('seller_sku')
+        if seller_sku:
+            if seller_sku in active_by_seller_sku:
+                print(f"[{log_prefix}] Duplicate seller_sku '{seller_sku}' in eBay results; SKU fallback unreliable")
+            active_by_seller_sku[seller_sku] = item
+    return active_by_item_id, active_by_seller_sku
+
+
+def _merge_seller_item_into_axis_listing(local_data, matched_item, matched_via, ebay_listing_id):
+    """
+    Merge the fields GetSellerList provides into an AXIS listing dict (in place).
+    Also heals a missing ebayListingId (SKU match) and a stale not_found status.
+    Returns True if anything changed.
+    """
+    data_changed = False
+
+    inv = local_data.setdefault('inventoryItem', {})
+    product = inv.setdefault('product', {})
+    avail = inv.setdefault('availability', {})
+    ship_avail = avail.setdefault('shipToLocationAvailability', {})
+    offer = local_data.setdefault('offer', {})
+    pricing = offer.setdefault('pricingSummary', {})
+    price_obj = pricing.setdefault('price', {})
+
+    new_title = matched_item['title']
+    new_description = matched_item['description']
+    new_image_urls = matched_item['image_urls']
+    new_condition = matched_item['condition']
+    new_quantity = matched_item['quantity']
+    new_price = matched_item['price']
+
+    if product.get('title') != new_title:
+        product['title'] = new_title
+        data_changed = True
+    if product.get('description') != new_description:
+        product['description'] = new_description
+        data_changed = True
+    if product.get('imageUrls') != new_image_urls:
+        product['imageUrls'] = new_image_urls
+        data_changed = True
+    if inv.get('condition') != new_condition:
+        inv['condition'] = new_condition
+        data_changed = True
+    if ship_avail.get('quantity') != new_quantity:
+        ship_avail['quantity'] = new_quantity
+        data_changed = True
+    if price_obj.get('value') != new_price:
+        price_obj['value'] = new_price
+        data_changed = True
+    if offer.get('quantity') != new_quantity:
+        offer['quantity'] = new_quantity
+        data_changed = True
+    new_category_id = matched_item.get('category_id', '')
+    if new_category_id and not offer.get('categoryId'):
+        offer['categoryId'] = new_category_id
+        data_changed = True
+
+    # Heal missing ebayListingId when matched via seller_sku
+    if matched_via == 'seller_sku' and not ebay_listing_id:
+        local_data['ebayListingId'] = matched_item['item_id']
+        data_changed = True
+
+    if local_data.get('ebay_status') == EBAY_STATUS_NOT_FOUND:
+        local_data['ebay_status'] = 'active'
+        data_changed = True
+
+    return data_changed
+
+
 @app.route('/api/listings/sync-active', methods=['POST'])
 def api_sync_active_listings():
     """
@@ -2638,14 +2724,7 @@ def api_sync_active_listings():
         print("[sync-active] GetSellerList returned no items; aborting to prevent false deactivation")
         return jsonify({'error': 'GetSellerList returned no active listings; aborting sync to prevent false deactivation'}), 500
 
-    active_by_item_id = {str(item['item_id']): item for item in ebay_items}
-    active_by_seller_sku = {}
-    for item in ebay_items:
-        seller_sku = item.get('seller_sku')
-        if seller_sku:
-            if seller_sku in active_by_seller_sku:
-                print(f"[sync-active] Duplicate seller_sku '{seller_sku}' in eBay results; SKU fallback unreliable")
-            active_by_seller_sku[seller_sku] = item
+    active_by_item_id, active_by_seller_sku = _index_seller_list_items(ebay_items, 'sync-active')
 
     # Step 2: Scan all local listing JSON files
     active_count = 0
@@ -2699,53 +2778,8 @@ def api_sync_active_listings():
                     updated_count += 1
             else:
                 # AXIS_ listing: merge only the fields GetSellerList provides
-                data_changed = False
-
-                inv = local_data.setdefault('inventoryItem', {})
-                product = inv.setdefault('product', {})
-                avail = inv.setdefault('availability', {})
-                ship_avail = avail.setdefault('shipToLocationAvailability', {})
-                offer = local_data.setdefault('offer', {})
-                pricing = offer.setdefault('pricingSummary', {})
-                price_obj = pricing.setdefault('price', {})
-
-                new_title = matched_item['title']
-                new_description = matched_item['description']
-                new_image_urls = matched_item['image_urls']
-                new_condition = matched_item['condition']
-                new_quantity = matched_item['quantity']
-                new_price = matched_item['price']
-
-                if product.get('title') != new_title:
-                    product['title'] = new_title
-                    data_changed = True
-                if product.get('description') != new_description:
-                    product['description'] = new_description
-                    data_changed = True
-                if product.get('imageUrls') != new_image_urls:
-                    product['imageUrls'] = new_image_urls
-                    data_changed = True
-                if inv.get('condition') != new_condition:
-                    inv['condition'] = new_condition
-                    data_changed = True
-                if ship_avail.get('quantity') != new_quantity:
-                    ship_avail['quantity'] = new_quantity
-                    data_changed = True
-                if price_obj.get('value') != new_price:
-                    price_obj['value'] = new_price
-                    data_changed = True
-                if offer.get('quantity') != new_quantity:
-                    offer['quantity'] = new_quantity
-                    data_changed = True
-
-                # Heal missing ebayListingId when matched via seller_sku
-                if matched_via == 'seller_sku' and not ebay_listing_id:
-                    local_data['ebayListingId'] = matched_item['item_id']
-                    data_changed = True
-
-                if was_not_found:
-                    local_data['ebay_status'] = 'active'
-                    data_changed = True
+                data_changed = _merge_seller_item_into_axis_listing(
+                    local_data, matched_item, matched_via, ebay_listing_id)
 
                 if data_changed:
                     try:
@@ -2784,6 +2818,131 @@ def api_sync_active_listings():
         'updated': updated_count,
         'not_found': not_found_skus,
     }), 200
+
+
+@app.route('/api/listings/sync-startup', methods=['POST'])
+def api_sync_startup_listings():
+    """
+    Startup variant of sync-active (called at most once per 24h by the frontend).
+
+    Uses GetSellerList as the source of truth, with two behavioral differences
+    from /api/listings/sync-active:
+      - A local file with a non-empty ebayListingId that is NOT in the seller
+        list (ended outside Axis Researcher) is soft-deleted (hidden: true)
+        instead of being marked not_found. ebayListingId is kept so the file
+        can be re-matched if the listing comes back.
+      - A matched file that is currently hidden is un-hidden (it apparently
+        came back to life on eBay), in addition to the usual status healing.
+
+    Returns { "removed": N, "healed": M, "aborted": bool, "reason"?: str }.
+    Designed to never break app startup: failures return an error payload.
+    """
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
+
+    try:
+        ebay_items = get_seller_list()
+    except Exception as e:
+        print(f"[sync-startup] GetSellerList failed: {e}")
+        return jsonify({
+            'removed': 0,
+            'healed': 0,
+            'aborted': True,
+            'reason': f'GetSellerList failed: {e}',
+            'error': f'GetSellerList failed: {e}',
+        }), 502
+
+    if not ebay_items:
+        # Safety guard: an empty result likely means an auth or network issue,
+        # not that the seller has zero listings. Abort to avoid mass soft-deletion.
+        reason = 'GetSellerList returned no active listings; aborting sync to prevent false soft-deletion'
+        print(f"[sync-startup] {reason}")
+        return jsonify({'removed': 0, 'healed': 0, 'aborted': True, 'reason': reason}), 200
+
+    active_by_item_id, active_by_seller_sku = _index_seller_list_items(ebay_items, 'sync-startup')
+
+    removed = 0
+    healed = 0
+
+    if os.path.exists(output_dir):
+        for fname in os.listdir(output_dir):
+            if not fname.endswith('.json'):
+                continue
+            sku = fname[:-5]
+            fpath = os.path.join(output_dir, fname)
+            try:
+                with open(fpath, 'r', encoding='utf-8') as f:
+                    local_data = json.load(f)
+            except Exception as e:
+                print(f"[sync-startup] Failed to read {fname}: {e}")
+                continue
+
+            ebay_listing_id = str(local_data.get('ebayListingId') or '').strip()
+            was_hidden = bool(local_data.get('hidden'))
+            was_not_found = local_data.get('ebay_status') == EBAY_STATUS_NOT_FOUND
+
+            matched_item = None
+            matched_via = None
+            if ebay_listing_id and ebay_listing_id in active_by_item_id:
+                matched_item = active_by_item_id[ebay_listing_id]
+                matched_via = 'item_id'
+            elif sku in active_by_seller_sku:
+                matched_item = active_by_seller_sku[sku]
+                matched_via = 'seller_sku'
+
+            # No ebayListingId and no SKU match: draft, skip
+            if not ebay_listing_id and matched_item is None:
+                continue
+
+            if matched_item is not None:
+                if sku.startswith(MANUAL_SKU_PREFIX):
+                    write_manual_listing_json(matched_item)
+                    if was_not_found:
+                        set_listing_ebay_status(sku, 'active')
+                    if was_hidden:
+                        # write_manual_listing_json preserves the hidden flag,
+                        # so explicitly clear it.
+                        try:
+                            with open(fpath, 'r', encoding='utf-8') as f:
+                                file_data = json.load(f)
+                            if file_data.pop('hidden', None) is not None:
+                                with open(fpath, 'w', encoding='utf-8') as f:
+                                    json.dump(file_data, f, indent=2, ensure_ascii=False)
+                        except Exception as e:
+                            print(f"[sync-startup] Failed to unhide {fname}: {e}")
+                else:
+                    data_changed = _merge_seller_item_into_axis_listing(
+                        local_data, matched_item, matched_via, ebay_listing_id)
+                    if was_hidden:
+                        local_data.pop('hidden', None)
+                        data_changed = True
+                    if data_changed:
+                        try:
+                            with open(fpath, 'w', encoding='utf-8') as f:
+                                json.dump(local_data, f, indent=2, ensure_ascii=False)
+                        except Exception as e:
+                            print(f"[sync-startup] Failed to write {fname}: {e}")
+                if was_not_found or was_hidden:
+                    healed += 1
+                    print(f"[sync-startup] Healed: {sku}")
+            else:
+                # Has ebayListingId but not found on eBay: ended outside the
+                # app -> soft-delete. Keep ebayListingId so a future relist can
+                # re-match and heal this file.
+                if not was_hidden:
+                    local_data['hidden'] = True
+                    try:
+                        with open(fpath, 'w', encoding='utf-8') as f:
+                            json.dump(local_data, f, ensure_ascii=False, indent=2)
+                    except Exception as e:
+                        print(f"[sync-startup] Failed to write {fname}: {e}")
+                        continue
+                    removed += 1
+                    print(f"[sync-startup] Soft-deleted externally ended listing: {sku}")
+
+    log_event("sync_startup", "success", removed=removed, healed=healed)
+
+    return jsonify({'removed': removed, 'healed': healed, 'aborted': False}), 200
 
 
 @app.route('/api/logs', methods=['GET'])
@@ -2887,18 +3046,63 @@ def serp_lens_search():
 
 @app.route('/api/test-3d-sites', methods=['GET'])
 def test_3d_sites():
-    """Run quick connectivity probes for each supported 3D download site."""
-    results = {}
-    for site, probe_fn in [("printables.com", probe_printables), ("thingiverse.com", probe_thingiverse), ("makerworld.com", probe_makerworld), ("cults3d.com", probe_cults3d), ("thangs.com", probe_thangs)]:
+    """Probe each supported 3D download site by genuinely fetching a file
+    through its real download pipeline. Probes run concurrently — the
+    MakerWorld probe launches a browser and can take a minute or more."""
+    probes = [("printables.com", probe_printables), ("thingiverse.com", probe_thingiverse), ("makerworld.com", probe_makerworld), ("cults3d.com", probe_cults3d), ("thangs.com", probe_thangs)]
+
+    def run_probe(site, probe_fn):
         try:
             ok, message = probe_fn()
-            results[site] = {"ok": ok, "message": message}
-            if not ok:
-                print(f"[test-3d-sites] {site} FAILED: {message}")
         except Exception as e:
-            results[site] = {"ok": False, "message": str(e)}
-            print(f"[test-3d-sites] {site} ERROR: {e}")
+            ok, message = False, str(e)
+        if not ok:
+            print(f"[test-3d-sites] {site} FAILED: {message}")
+        return site, {"ok": ok, "message": message}
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=len(probes)) as executor:
+        futures = [executor.submit(run_probe, site, fn) for site, fn in probes]
+        for future in as_completed(futures):
+            site, result = future.result()
+            results[site] = result
     return jsonify({"results": results})
+
+
+@app.route('/api/makerworld-session/open', methods=['POST'])
+def makerworld_session_open():
+    """Open a headed MakerWorld browser and leave it open so the user can fix
+    whatever the pipeline is stuck on (login, email verification code,
+    Cloudflare challenge). The session persists in the local browser profile
+    when the window closes."""
+    data = request.get_json(silent=True) or {}
+    url = data.get('url') or None
+    ok, message = mw_open_session(url)
+    if not ok:
+        return jsonify({"error": message}), 409
+    return jsonify({"ok": True, "message": message})
+
+
+@app.route('/api/makerworld-session/status', methods=['GET'])
+def makerworld_session_status():
+    """Report whether the session browser is still open (detects the user
+    closing the window), the current page, and a best-effort logged-in guess."""
+    return jsonify(mw_session_status())
+
+
+@app.route('/api/makerworld-session/close', methods=['POST'])
+def makerworld_session_close():
+    """Close the session browser gracefully, saving cookies to the profile."""
+    ok, message = mw_close_session()
+    return jsonify({"ok": ok, "message": message})
+
+
+@app.route('/api/makerworld-probe', methods=['POST'])
+def makerworld_probe_endpoint():
+    """Re-test the MakerWorld pipeline after the user fixed the session in the
+    headed browser. Runs the genuine download probe."""
+    ok, message = probe_makerworld()
+    return jsonify({"ok": ok, "message": message})
 
 
 @app.route('/api/cults3d-credential-status', methods=['GET'])
@@ -4013,4 +4217,8 @@ def _free_port_from_stale_backend(port: int) -> None:
 
 if __name__ == '__main__':
     _free_port_from_stale_backend(5000)
+    try:
+        migrate_hide_not_found_listings()
+    except Exception as e:
+        print(f"[startup] migrate_hide_not_found_listings failed: {e}")
     app.run(debug=True, use_reloader=False, port=5000, request_handler=_QuietTokensRequestHandler)

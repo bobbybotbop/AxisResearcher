@@ -7,14 +7,8 @@ import NumberInput from "./NumberInput";
 interface UploadListingsToolbarProps {
   searchQuery: string;
   onSearchChange: (value: string) => void;
-  showIncompleteListings: boolean;
-  onShowIncompleteListingsChange: (checked: boolean) => void;
-  showUnuploadedListings: boolean;
-  onShowUnuploadedListingsChange: (checked: boolean) => void;
-  showManualListings: boolean;
-  onShowManualListingsChange: (checked: boolean) => void;
-  showInactiveListings: boolean;
-  onToggleShowInactiveListings: (checked: boolean) => void;
+  showDrafts: boolean;
+  onShowDraftsChange: (checked: boolean) => void;
   dateFrom: string;
   dateTo: string;
   onDateFromChange: (value: string) => void;
@@ -36,14 +30,8 @@ interface UploadListingsToolbarProps {
 export default function UploadListingsToolbar({
   searchQuery,
   onSearchChange,
-  showIncompleteListings,
-  onShowIncompleteListingsChange,
-  showUnuploadedListings,
-  onShowUnuploadedListingsChange,
-  showManualListings,
-  onShowManualListingsChange,
-  showInactiveListings,
-  onToggleShowInactiveListings,
+  showDrafts,
+  onShowDraftsChange,
   dateFrom,
   dateTo,
   onDateFromChange,
@@ -65,12 +53,7 @@ export default function UploadListingsToolbar({
   const rootRef = useRef<HTMLDivElement>(null);
 
   const filtersActive =
-    showIncompleteListings ||
-    showUnuploadedListings ||
-    !showManualListings ||
-    showInactiveListings ||
-    Boolean(dateFrom?.trim()) ||
-    Boolean(dateTo?.trim());
+    showDrafts || Boolean(dateFrom?.trim()) || Boolean(dateTo?.trim());
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -166,46 +149,13 @@ export default function UploadListingsToolbar({
                 <label className="mt-2 flex cursor-pointer items-center gap-3 text-sm text-text-primary">
                   <input
                     type="checkbox"
-                    checked={showIncompleteListings}
+                    checked={showDrafts}
                     onChange={(e) =>
-                      onShowIncompleteListingsChange(e.target.checked)
+                      onShowDraftsChange(e.target.checked)
                     }
                     className="h-3.5 w-3.5 rounded border-border-default text-text-primary focus:ring-border-default"
                   />
-                  <span className="leading-snug">Show incomplete history</span>
-                </label>
-                <label className="mt-2 flex cursor-pointer items-center gap-3 text-sm text-text-primary">
-                  <input
-                    type="checkbox"
-                    checked={showUnuploadedListings}
-                    onChange={(e) =>
-                      onShowUnuploadedListingsChange(e.target.checked)
-                    }
-                    className="h-3.5 w-3.5 rounded border-border-default text-text-primary focus:ring-border-default"
-                  />
-                  <span className="leading-snug">Show unuploaded listings</span>
-                </label>
-                <label className="mt-2 flex cursor-pointer items-center gap-3 text-sm text-text-primary">
-                  <input
-                    type="checkbox"
-                    checked={showManualListings}
-                    onChange={(e) =>
-                      onShowManualListingsChange(e.target.checked)
-                    }
-                    className="h-3.5 w-3.5 rounded border-border-default text-text-primary focus:ring-border-default"
-                  />
-                  <span className="leading-snug">Show manually listed items</span>
-                </label>
-                <label className="mt-2 flex cursor-pointer items-center gap-3 text-sm text-text-primary">
-                  <input
-                    type="checkbox"
-                    checked={showInactiveListings}
-                    onChange={(e) =>
-                      onToggleShowInactiveListings(e.target.checked)
-                    }
-                    className="h-3.5 w-3.5 rounded border-border-default text-text-primary focus:ring-border-default"
-                  />
-                  <span className="leading-snug">Show inactive listings</span>
+                  <span className="leading-snug">Show drafts</span>
                 </label>
               </div>
 

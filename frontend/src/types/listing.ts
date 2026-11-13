@@ -15,6 +15,8 @@ export interface Listing {
   textModel?: string;
   sourceUrl?: string;
   ebay_status?: string;
+  sellerSku?: string;
+  isManualListing?: boolean;
   [key: string]: unknown;
 }
 

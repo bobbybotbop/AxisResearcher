@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from backend.constants.ebay import EBAY_INVENTORY_API_BASE
 from backend.constants.paths import CONFIG_FILE, GENERATED_LISTINGS_DIR
-from backend.constants.listing import SKU_PREFIX, MANUAL_SKU_PREFIX, DEFAULT_OPERATION_COOLDOWN_HOURS
+from backend.constants.listing import SKU_PREFIX, MANUAL_SKU_PREFIX, DEFAULT_OPERATION_COOLDOWN_HOURS, EBAY_STATUS_NOT_FOUND
 
 # Load environment variables
 load_dotenv()
@@ -685,6 +685,53 @@ def backfill_ebay_listing_id_on_all_files():
     return {"updated": updated, "skipped": skipped, "errors": errors}
 
 
+def migrate_hide_not_found_listings():
+    """
+    Soft-delete listings whose eBay offer is gone: set "hidden": true on each
+    Generated_Listings/*.json where ebay_status == "not_found" AND ebayListingId
+    is non-empty (after trimming). Listings marked not_found without a recorded
+    ebayListingId are left untouched, as are files already hidden. Safe to run
+    on every startup (idempotent by construction).
+
+    Returns:
+        dict: counts hidden, skipped, errors
+    """
+    output_dir = _get_generated_listings_dir()
+    if not os.path.isdir(output_dir):
+        return {"hidden": 0, "skipped": 0, "errors": 0}
+
+    hidden = 0
+    skipped = 0
+    errors = 0
+    for name in os.listdir(output_dir):
+        if not name.endswith(".json"):
+            continue
+        filepath = os.path.join(output_dir, name)
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                listing_data = json.load(f)
+            if listing_data.get("hidden"):
+                skipped += 1
+                continue
+            if listing_data.get("ebay_status") != EBAY_STATUS_NOT_FOUND:
+                skipped += 1
+                continue
+            ebay_listing_id = str(listing_data.get("ebayListingId") or "").strip()
+            if not ebay_listing_id:
+                skipped += 1
+                continue
+            listing_data["hidden"] = True
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(listing_data, f, indent=2, ensure_ascii=False)
+            hidden += 1
+        except Exception as e:
+            print(f"❌ migrate_hide_not_found_listings error {name}: {e}")
+            errors += 1
+
+    print(f"Migrate hide not_found listings: hidden={hidden}, skipped={skipped}, errors={errors}")
+    return {"hidden": hidden, "skipped": skipped, "errors": errors}
+
+
 def listing_file_exists(sku):
     """
     Check if a JSON file named {sku}.json exists in the Generated_Listings folder.
@@ -1228,22 +1275,17 @@ def save_manual_import_last_refreshed(dt_str):
 def write_manual_listing_json(item):
     """
     Write (or update) Generated_Listings/MANUAL_<itemId>.json from a get_seller_list() item.
-    item keys: item_id, title, quantity, price, image_urls, condition, start_time, description.
-    Only overwrites an existing file when quantity has changed (to avoid churn).
+    item keys: item_id, title, quantity, price, image_urls, condition, start_time,
+               description, seller_sku, is_variation, category_id.
+    Rewrites an existing file when any eBay-sourced field differs, so stale
+    imports heal on the next sync. Fields that don't come from eBay (models,
+    ebay_status, hidden, ...) are preserved across rewrites.
     Returns True if the file was written, False if unchanged and skipped.
     """
     sku = f"{MANUAL_SKU_PREFIX}{item['item_id']}"
     output_dir = _get_generated_listings_dir()
     os.makedirs(output_dir, exist_ok=True)
     path = os.path.join(output_dir, f"{sku}.json")
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                existing = json.load(f)
-            if existing.get("offer", {}).get("quantity") == item["quantity"]:
-                return False
-        except (json.JSONDecodeError, KeyError):
-            pass  # corrupt - overwrite
     data = {
         "sku": sku,
         "ebayListingId": item["item_id"],
@@ -1263,12 +1305,23 @@ def write_manual_listing_json(item):
             },
         },
         "offer": {
+            "categoryId": item.get("category_id", ""),
             "pricingSummary": {
                 "price": {"value": item["price"], "currency": "USD"}
             },
             "quantity": item["quantity"],
         },
     }
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+            if all(existing.get(k) == v for k, v in data.items()):
+                return False
+            # Keep local-only fields the eBay sync doesn't know about.
+            data = {**existing, **data}
+        except (json.JSONDecodeError, KeyError):
+            pass  # corrupt - overwrite
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
     return True
@@ -1280,5 +1333,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) >= 2 and sys.argv[1] == "backfill-ebay-listing-id":
         backfill_ebay_listing_id_on_all_files()
+    elif len(sys.argv) >= 2 and sys.argv[1] == "migrate-hide-not-found":
+        migrate_hide_not_found_listings()
     else:
-        print("Usage: python backend/copyScripts/combine_data.py backfill-ebay-listing-id")
+        print("Usage: python backend/copyScripts/combine_data.py backfill-ebay-listing-id|migrate-hide-not-found")

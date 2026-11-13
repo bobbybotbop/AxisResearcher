@@ -12,6 +12,7 @@ import {
 import { useLocation, useNavigate } from "react-router-dom";
 import CreateWorkflow from "./components/CreateWorkflow";
 import ToastContainer from "./components/ToastContainer";
+import StartupToasts, { startTaskToast } from "./components/StartupToasts";
 import GeneratedListingCard from "./components/GeneratedListingCard";
 import CompactListingRow from "./components/CompactListingRow";
 import ListingDetailModal from "./components/ListingDetailModal";
@@ -24,7 +25,7 @@ import NumberInput from "./components/NumberInput";
 import { MOCK_DATA, MOCK_GENERATED_TITLE, MOCK_GENERATED_DESCRIPTION } from "./mockData";
 import { createTestWorkflowState } from "./testWorkflowState";
 import { trimTransparentPadding } from "./utils/trimImage";
-import { isIncomplete, isUploaded } from "./utils/listingStatus";
+import { isDraft, isReadyToUpload, isUploaded } from "./utils/listingStatus";
 import { btnPill, btnPillSm } from "./styles/buttonPill";
 import { fetchWithProgress } from "./utils/fetchWithProgress";
 import { DEFAULT_TEXT_MODEL_OPTIONS, IMAGE_MODEL_OPTIONS, CLASSIFIER_MODEL_OPTIONS, PROVIDER_LABELS } from "./constants/models";
@@ -33,7 +34,8 @@ import { TAB_PATHS } from "./constants/routes";
 import { createPlaceholderImageDataUrl, renderPlaceholderImagePngBlob } from "./constants/placeholder";
 import type { TabName } from "./constants/routes";
 import { THREE_D_SITES, THREE_D_SITE_STATUS_STORAGE_KEY, THREE_D_SITE_TESTED_AT_STORAGE_KEY, THREE_D_SITES_ENABLED_STORAGE_KEY } from "./constants/files3d";
-import { DEFAULT_OPERATION_COOLDOWN_HOURS, IMPORT_SYNC_COOLDOWN_MS, MS_PER_HOUR, STOCK_QUANTITIES_STORAGE_KEY, STOCK_REFRESHED_AT_STORAGE_KEY } from "./constants/cooldown";
+import { DEFAULT_OPERATION_COOLDOWN_HOURS, EBAY_STARTUP_SYNCED_AT_STORAGE_KEY, EBAY_STARTUP_SYNC_EVENT, IMPORT_SYNC_COOLDOWN_MS, MS_PER_HOUR, STOCK_QUANTITIES_STORAGE_KEY, STOCK_REFRESHED_AT_STORAGE_KEY } from "./constants/cooldown";
+import type { EbayStartupSyncSummary } from "./constants/cooldown";
 import type { ThreeDSiteStatus } from "./constants/files3d";
 import type { DropResult } from "@hello-pangea/dnd";
 import type { Listing, ModelOption, ProgressState, ImageGenProgress } from "./types/listing";
@@ -331,6 +333,10 @@ function App() {
   const [makerworldPasswordInput, setMakerworldPasswordInput] = useState("");
   const [makerworldCredSaving, setMakerworldCredSaving] = useState(false);
   const [makerworldCredMessage, setMakerworldCredMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [makerworldSessionOpen, setMakerworldSessionOpen] = useState(false);
+  const [makerworldSessionMessage, setMakerworldSessionMessage] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
+  const [makerworldRetesting, setMakerworldRetesting] = useState(false);
+  const makerworldSessionPollRef = useRef<number | null>(null);
   const [autoPromoteEnabled, setAutoPromoteEnabled] = useState(true);
   const [promotedListingAdRate, setPromotedListingAdRate] = useState(7.0);
   const [bgRemovedPhotos, setBgRemovedPhotos] = useState<Record<string, string>>({});
@@ -349,13 +355,7 @@ function App() {
   const [isTestingUserToken, setIsTestingUserToken] = useState(false);
   const [allListings, setAllListings] = useState<Listing[]>([]);
   const [uploadListingsSearch, setUploadListingsSearch] = useState("");
-  const [uploadListingsShowIncomplete, setUploadListingsShowIncomplete] =
-    useState(false);
-  const [uploadListingsShowUnuploaded, setUploadListingsShowUnuploaded] =
-    useState(false);
-  const [uploadListingsShowManual, setUploadListingsShowManual] =
-    useState(true);
-  const [uploadListingsShowInactive, setUploadListingsShowInactive] =
+  const [uploadListingsShowDrafts, setUploadListingsShowDrafts] =
     useState(false);
   const [uploadListingsDateFrom, setUploadListingsDateFrom] = useState("");
   const [uploadListingsDateTo, setUploadListingsDateTo] = useState("");
@@ -852,10 +852,7 @@ function App() {
     const order = new Map(allListings.map((l, i) => [l.sku, i]));
     const q = uploadListingsSearch.trim().toLowerCase();
     const list = allListings.filter((l) => {
-      if (!uploadListingsShowIncomplete && isIncomplete(l)) return false;
-      if (!uploadListingsShowUnuploaded && !isUploaded(l) && !isIncomplete(l)) return false;
-      if (!uploadListingsShowManual && l.isManualListing) return false;
-      if (!uploadListingsShowInactive && (l.ebay_status as string | undefined) === 'not_found') return false;
+      if (!uploadListingsShowDrafts && isDraft(l)) return false;
       if (q && !(l.title || "").toLowerCase().includes(q)) return false;
       if (uploadListingsDateFrom || uploadListingsDateTo) {
         const raw = l.createdDateTime as string | undefined;
@@ -874,10 +871,10 @@ function App() {
       }
       return true;
     });
-    if (uploadListingsShowIncomplete || uploadListingsShowUnuploaded) {
+    if (uploadListingsShowDrafts) {
       list.sort((a, b) => {
-        const ia = isIncomplete(a) ? 2 : isUploaded(a) ? 0 : 1;
-        const ib = isIncomplete(b) ? 2 : isUploaded(b) ? 0 : 1;
+        const ia = isDraft(a) ? 1 : 0;
+        const ib = isDraft(b) ? 1 : 0;
         if (ia !== ib) return ia - ib;
         return (order.get(a.sku) ?? 0) - (order.get(b.sku) ?? 0);
       });
@@ -886,10 +883,7 @@ function App() {
   }, [
     allListings,
     uploadListingsSearch,
-    uploadListingsShowIncomplete,
-    uploadListingsShowUnuploaded,
-    uploadListingsShowManual,
-    uploadListingsShowInactive,
+    uploadListingsShowDrafts,
     uploadListingsDateFrom,
     uploadListingsDateTo,
   ]);
@@ -2334,9 +2328,24 @@ function App() {
       console.log("Loaded listings:", listings);
       if (!quantitiesFetchedRef.current) {
         quantitiesFetchedRef.current = true;
-        if (opts?.forceQuantities || isStockRefreshStale()) {
+        if (opts?.forceQuantities) {
+          // Manual refresh — the user already gets immediate button feedback.
           void fetchQuantitiesForPage(listings);
+        } else if (isStockRefreshStale()) {
+          const toast = startTaskToast("Refreshing eBay quantities…");
+          void fetchQuantitiesForPage(listings).then((result) => {
+            if (result.ok) {
+              toast.succeed(
+                result.count > 0
+                  ? `Quantities refreshed for ${result.count} listing(s)`
+                  : "Quantities up to date",
+              );
+            } else {
+              toast.fail(result.error || "Quantity refresh failed — eBay may be unreachable");
+            }
+          });
         } else {
+          // Within the cooldown window — restore the cache silently.
           loadCachedQuantities();
         }
       }
@@ -2348,11 +2357,11 @@ function App() {
     }
   };
 
-  const fetchQuantitiesForPage = async (listings: Listing[]): Promise<void> => {
+  const fetchQuantitiesForPage = async (listings: Listing[]): Promise<{ ok: boolean; count: number; error?: string }> => {
     const skus = listings
       .filter((l) => String(l.ebayListingId ?? "").trim())
       .map((l) => l.sku);
-    if (!skus.length) return;
+    if (!skus.length) return { ok: true, count: 0 };
 
     setLoadingQuantities(true);
     try {
@@ -2361,7 +2370,7 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ skus }),
       });
-      if (!res.ok) return;
+      if (!res.ok) return { ok: false, count: 0, error: `Quantity refresh failed (HTTP ${res.status})` };
       const data = await res.json();
       setListingQuantities((prev) => ({ ...prev, ...data }));
       persistQuantityUpdates(data);
@@ -2371,8 +2380,9 @@ function App() {
       } catch {
         // ignore
       }
-    } catch {
-      // silently ignore
+      return { ok: true, count: data && typeof data === "object" ? Object.keys(data).length : 0 };
+    } catch (err) {
+      return { ok: false, count: 0, error: (err as Error).message || "Quantity refresh request failed" };
     } finally {
       setLoadingQuantities(false);
     }
@@ -2620,6 +2630,77 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Startup eBay status sync: soft-deletes listings that were ended outside
+  // the app and heals ones that came back. Returns the summary and emits it
+  // as a window event for other consumers; the caller surfaces progress and
+  // result via the startup toast system. Never throws — startup must never break.
+  const runEbayStartupSync = async (): Promise<EbayStartupSyncSummary> => {
+    let summary: EbayStartupSyncSummary;
+    try {
+      const res = await fetch("/api/listings/sync-startup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json() as EbayStartupSyncSummary;
+      summary = data;
+      if (!res.ok && !data.error) {
+        summary = { removed: 0, healed: 0, aborted: true, error: `Startup sync failed (HTTP ${res.status})` };
+      }
+    } catch (err) {
+      summary = { removed: 0, healed: 0, aborted: true, error: (err as Error).message || "Startup sync request failed" };
+    }
+    console.log("[startup-sync] eBay status sync summary:", summary);
+    window.dispatchEvent(new CustomEvent<EbayStartupSyncSummary>(EBAY_STARTUP_SYNC_EVENT, { detail: summary }));
+    return summary;
+  };
+
+  // On mount (not per tab switch), run the startup eBay status sync at most
+  // once per operationCooldownHours. Fires asynchronously; rendering is not
+  // blocked. The manual "Sync with eBay" button bypasses this cooldown.
+  const startupSyncRanRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (startupSyncRanRef.current) return;
+    startupSyncRanRef.current = true;
+    let stale = true;
+    try {
+      const stored = localStorage.getItem(EBAY_STARTUP_SYNCED_AT_STORAGE_KEY);
+      if (stored) {
+        stale = Date.now() - parseInt(stored, 10) >= operationCooldownHoursRef.current * MS_PER_HOUR;
+      }
+    } catch {
+      stale = true;
+    }
+    if (!stale) return;
+    // Mark before firing so the cooldown applies to attempts (also guards
+    // against React StrictMode double-invoking the mount effect).
+    try {
+      localStorage.setItem(EBAY_STARTUP_SYNCED_AT_STORAGE_KEY, String(Date.now()));
+    } catch {
+      // ignore — cooldown persistence is best-effort
+    }
+    void (async () => {
+      const toast = startTaskToast("Syncing with eBay…");
+      const summary = await runEbayStartupSync();
+      if (summary.aborted) {
+        toast.fail(summary.reason || summary.error || "eBay is unreachable — startup sync skipped");
+        return;
+      }
+      if (summary.removed === 0 && summary.healed === 0) {
+        toast.succeed("eBay sync complete — up to date");
+        return;
+      }
+      const parts: string[] = [];
+      if (summary.removed > 0) parts.push(`${summary.removed} listing(s) removed from history`);
+      if (summary.healed > 0) parts.push(`${summary.healed} healed`);
+      toast.succeed(`eBay sync complete — ${parts.join(", ")}`);
+      if (summary.removed > 0) {
+        await fetchAllListings();
+      }
+    })();
+    // runs once on mount; fetchAllListings identity is stable enough for this purpose
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const savePromotedListingAdRate = (val: number): void => {
     if (isNaN(val) || val < 1) return;
     setPromotedListingAdRate(val);
@@ -2838,7 +2919,7 @@ function App() {
 
   useEffect(() => {
     setHistoryPage(0);
-  }, [uploadListingsSearch, uploadListingsDateFrom, uploadListingsDateTo, uploadListingsShowIncomplete, uploadListingsShowUnuploaded, uploadListingsShowManual]);
+  }, [uploadListingsSearch, uploadListingsDateFrom, uploadListingsDateTo, uploadListingsShowDrafts]);
 
   useEffect(() => {
     if (paginatedListings.length === 0) return;
@@ -3009,6 +3090,89 @@ function App() {
       setMakerworldCredSaving(false);
     }
   }, [makerworldEmailInput, makerworldPasswordInput, fetchMakerworldCredStatus]);
+
+  const stopMakerworldSessionPoll = useCallback((): void => {
+    if (makerworldSessionPollRef.current !== null) {
+      window.clearInterval(makerworldSessionPollRef.current);
+      makerworldSessionPollRef.current = null;
+    }
+  }, []);
+
+  const handleRetestMakerworld = useCallback(async (): Promise<void> => {
+    setMakerworldRetesting(true);
+    setMakerworldSessionMessage({ type: "info", text: "Re-testing the MakerWorld pipeline..." });
+    try {
+      const res = await fetch("/api/makerworld-probe", { method: "POST" });
+      const data = await res.json() as { ok: boolean; message: string };
+      setThreeDSiteStatus((prev) => {
+        const next = { ...prev, "makerworld.com": { ok: data.ok, message: data.message } };
+        try { localStorage.setItem(THREE_D_SITE_STATUS_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+        return next;
+      });
+      setMakerworldSessionMessage({
+        type: data.ok ? "success" : "error",
+        text: data.ok ? `Pipeline working — ${data.message}` : `Still broken: ${data.message}`,
+      });
+      void fetchMakerworldCredStatus();
+    } catch {
+      setMakerworldSessionMessage({ type: "error", text: "Re-test request failed" });
+    } finally {
+      setMakerworldRetesting(false);
+    }
+  }, [fetchMakerworldCredStatus]);
+
+  const handleOpenMakerworldBrowser = useCallback(async (): Promise<void> => {
+    setMakerworldSessionMessage(null);
+    try {
+      const res = await fetch("/api/makerworld-session/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json() as { error?: string; message?: string };
+      if (!res.ok || data.error) throw new Error(data.error || "Failed to open browser");
+      setMakerworldSessionOpen(true);
+      setMakerworldSessionMessage({ type: "info", text: data.message || "Browser open." });
+      stopMakerworldSessionPoll();
+      makerworldSessionPollRef.current = window.setInterval(() => {
+        void (async () => {
+          try {
+            const sres = await fetch("/api/makerworld-session/status");
+            const sdata = await sres.json() as { open: boolean; logged_in?: boolean | null };
+            if (sdata.open) {
+              if (sdata.logged_in === true) {
+                setMakerworldSessionMessage({ type: "info", text: "Logged in — close the window (or click Done) to save the session and re-test." });
+              }
+              return;
+            }
+            // The user closed the window — session ended; re-test the pipeline.
+            stopMakerworldSessionPoll();
+            setMakerworldSessionOpen(false);
+            void handleRetestMakerworld();
+          } catch {
+            // transient poll failure — keep polling
+          }
+        })();
+      }, 2000);
+    } catch (err) {
+      setMakerworldSessionMessage({ type: "error", text: (err as Error).message || "Failed to open browser" });
+    }
+  }, [stopMakerworldSessionPoll, handleRetestMakerworld]);
+
+  const handleCloseMakerworldBrowser = useCallback(async (): Promise<void> => {
+    try {
+      await fetch("/api/makerworld-session/close", { method: "POST" });
+    } catch { /* ignore */ }
+    stopMakerworldSessionPoll();
+    setMakerworldSessionOpen(false);
+    void handleRetestMakerworld();
+  }, [stopMakerworldSessionPoll, handleRetestMakerworld]);
+
+  useEffect(() => {
+    return () => {
+      if (makerworldSessionPollRef.current !== null) window.clearInterval(makerworldSessionPollRef.current);
+    };
+  }, []);
 
   const handleAutoLoadCults3dCookies = useCallback(async (): Promise<void> => {
     setCults3dAutoLoading(true);
@@ -3631,6 +3795,7 @@ function App() {
   return (
     <div className="flex min-h-screen bg-surface-app text-text-primary">
       <ToastContainer toasts={toasts} onRemove={removeToast} />
+      <StartupToasts />
       <aside
         className={`sticky top-0 flex h-screen shrink-0 flex-col border-r border-border-default bg-surface-panel shadow-sm transition-[width] duration-200 ease-out ${
           sidebarCollapsed ? "w-[4.25rem]" : "w-60"
@@ -3944,14 +4109,8 @@ function App() {
               <UploadListingsToolbar
                 searchQuery={uploadListingsSearch}
                 onSearchChange={setUploadListingsSearch}
-                showIncompleteListings={uploadListingsShowIncomplete}
-                onShowIncompleteListingsChange={setUploadListingsShowIncomplete}
-                showUnuploadedListings={uploadListingsShowUnuploaded}
-                onShowUnuploadedListingsChange={setUploadListingsShowUnuploaded}
-                showManualListings={uploadListingsShowManual}
-                onShowManualListingsChange={setUploadListingsShowManual}
-                showInactiveListings={uploadListingsShowInactive}
-                onToggleShowInactiveListings={setUploadListingsShowInactive}
+                showDrafts={uploadListingsShowDrafts}
+                onShowDraftsChange={setUploadListingsShowDrafts}
                 dateFrom={uploadListingsDateFrom}
                 dateTo={uploadListingsDateTo}
                 onDateFromChange={setUploadListingsDateFrom}
@@ -4030,6 +4189,8 @@ function App() {
                           isSelectMode={historySelectMode}
                           isSelected={historySelectedSkus.has(listing.sku!)}
                           onToggleSelect={() => toggleHistorySkuSelection(listing.sku!)}
+                          isDraft={isDraft(listing)}
+                          isReady={isReadyToUpload(listing)}
                           isInactive={(listing.ebay_status as string | undefined) === 'not_found'}
                         />
                       ) : (
@@ -4046,6 +4207,8 @@ function App() {
                           isSelectMode={historySelectMode}
                           isSelected={historySelectedSkus.has(listing.sku!)}
                           onToggleSelect={() => toggleHistorySkuSelection(listing.sku!)}
+                          isDraft={isDraft(listing)}
+                          isReady={isReadyToUpload(listing)}
                           isInactive={(listing.ebay_status as string | undefined) === 'not_found'}
                         />
                       )
@@ -4669,6 +4832,17 @@ function App() {
                                   {(isCults3d ? cults3dCredFormOpen : makerworldCredFormOpen) ? "Cancel" : credStatus?.has_credentials ? "Update" : "Configure"}
                                 </button>
                               )}
+                              {isMakerworld && (
+                                <button
+                                  type="button"
+                                  className="cursor-pointer rounded px-2 py-0.5 text-xs font-semibold text-text-secondary underline-offset-2 hover:text-text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+                                  onClick={() => void (makerworldSessionOpen ? handleCloseMakerworldBrowser() : handleOpenMakerworldBrowser())}
+                                  disabled={makerworldRetesting}
+                                  title="Opens a headed browser at the step the pipeline is stuck on so you can fix it yourself — the session is saved when you close it"
+                                >
+                                  {makerworldRetesting ? "Re-testing..." : makerworldSessionOpen ? "Done — close & re-test" : "Open browser"}
+                                </button>
+                              )}
                             </div>
                           </div>
                           {isCults3d && cults3dCredFormOpen && (
@@ -4792,6 +4966,11 @@ function App() {
                           )}
                           {isMakerworld && !makerworldCredFormOpen && makerworldCredMessage?.type === "success" && (
                             <span className="text-xs font-medium text-emerald-600">{makerworldCredMessage.text}</span>
+                          )}
+                          {isMakerworld && makerworldSessionMessage && (
+                            <span className={`text-xs font-medium ${makerworldSessionMessage.type === "success" ? "text-emerald-600" : makerworldSessionMessage.type === "error" ? "text-red-600" : "text-text-muted"}`}>
+                              {makerworldSessionMessage.text}
+                            </span>
                           )}
                         </div>
                       );

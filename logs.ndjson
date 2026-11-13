@@ -83,3 +83,8 @@
 {"timestamp": "2026-11-06T19:05:38.320500+00:00", "event": "draft_created", "status": "success", "sku": "AXIS_109", "sourceListingId": "126828603644"}
 {"timestamp": "2026-11-06T19:24:21.988936+00:00", "event": "import", "status": "error", "error": "HTTPSConnectionPool(host='api.ebay.com', port=443): Max retries exceeded with url: /ws/api.dll (Caused by NameResolutionError(\"HTTPSConnection(host='api.ebay.com', port=443): Failed to resolve 'api.ebay.com' ([Errno 11001] getaddrinfo failed)\"))"}
 {"timestamp": "2026-11-11T16:22:16.775227+00:00", "event": "restock", "status": "success", "source": "auto", "quantity": 15, "skus": ["AXIS_agn_20"]}
+{"timestamp": "2026-11-13T20:29:21.564942+00:00", "event": "sync_active", "status": "success", "active": 18, "newly_inactive": 2, "updated": 6}
+{"timestamp": "2026-11-13T21:22:50.156644+00:00", "event": "sync_active", "status": "success", "active": 18, "newly_inactive": 0, "updated": 0}
+{"timestamp": "2026-11-13T21:23:13.643525+00:00", "event": "upload", "status": "error", "sku": "AXIS_107", "error": "eBay inventory item API error 400: {\"errors\": [{\"errorId\": 25721, \"domain\": \"API_INVENTORY\", \"subdomain\": \"Selling\", \"category\": \"Request\", \"message\": \"Invalid value for imageUrl. Incorrect URL format.\", \"parameters\": [{\"name\": \"url\", \"value\": \"data:image/svg+xml,%3Csvg%20xmlns%3D%22h...\"}]}]}"}
+{"timestamp": "2026-11-13T22:24:27.866762+00:00", "event": "sync_active", "status": "success", "active": 18, "newly_inactive": 0, "updated": 4}
+{"timestamp": "2026-11-13T22:41:33.974110+00:00", "event": "sync_active", "status": "success", "active": 18, "newly_inactive": 0, "updated": 0}
