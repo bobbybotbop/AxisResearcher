@@ -10,10 +10,12 @@ DEFAULT_RENDER_ROUGHNESS = 0.3
 DEFAULT_RENDER_RESOLUTION = 1024
 RENDER_RESOLUTIONS: tuple[int, ...] = (512, 1024, 2048)
 
-# Camera Intent defaults (spec: FOV slider 20-80 deg, default 40; the fixed
-# azimuth/elevation used when the request carries no preview camera)
+# Camera Intent / persisted FOV (spec: FOV slider 20-80 deg, default 40; the
+# fixed azimuth/elevation used when the request carries no preview camera)
 DEFAULT_RENDER_FOV = 40.0
-RENDER_FOV_RANGE: tuple[float, float] = (20.0, 80.0)
+RENDER_FOV_MIN = 20.0
+RENDER_FOV_MAX = 80.0
+RENDER_FOV_RANGE: tuple[float, float] = (RENDER_FOV_MIN, RENDER_FOV_MAX)
 DEFAULT_RENDER_AZIMUTH = 45.0
 DEFAULT_RENDER_ELEVATION = 28.0
 

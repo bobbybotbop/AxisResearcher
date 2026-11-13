@@ -170,7 +170,9 @@ def setup_white_compositor(scene):
     """Composite the transparent render over pure white (255) background.
 
     A highlight clip pushes near-whites (soft floor gradient) to pure 255 white
-    while leaving the model and its contact shadow untouched.
+    while leaving the model and its contact shadow untouched. The ramp drives a
+    mix factor toward white so the model's color survives (feeding the image
+    through the ramp directly would map everything to grayscale).
     """
     scene.use_nodes = True
     nodes = scene.node_tree.nodes
@@ -187,10 +189,15 @@ def setup_white_compositor(scene):
     # compositor values are linear: 0.83 linear ~= sRGB 230
     hold = clip.color_ramp.elements.new(0.83)
     hold.color = (0.83, 0.83, 0.83, 1.0)
+    whiten = nodes.new("CompositorNodeMixRGB")
+    whiten.blend_type = "MIX"
+    whiten.inputs[2].default_value = (1.0, 1.0, 1.0, 1.0)
     composite = nodes.new("CompositorNodeComposite")
     links.new(render_layers.outputs["Image"], alpha_over.inputs[2])
     links.new(alpha_over.outputs["Image"], clip.inputs["Fac"])
-    links.new(clip.outputs["Image"], composite.inputs["Image"])
+    links.new(alpha_over.outputs["Image"], whiten.inputs[1])
+    links.new(clip.outputs["Image"], whiten.inputs[0])
+    links.new(whiten.outputs["Image"], composite.inputs["Image"])
 
 
 def main():
