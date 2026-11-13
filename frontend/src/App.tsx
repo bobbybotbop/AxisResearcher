@@ -4578,9 +4578,17 @@ function App() {
                       const isMakerworld = site === "makerworld.com";
                       const credStatus = isCults3d ? cults3dCredStatus : isMakerworld ? makerworldCredStatus : null;
                       return (
-                        <div key={site} className="flex flex-col gap-2 rounded-lg border border-border-default bg-surface-panel px-3 py-2">
+                        <div key={site} className={`flex flex-col gap-2 rounded-lg border border-border-default bg-surface-panel px-3 py-2 transition-opacity ${(threeDSitesEnabled[site] ?? true) ? "" : "opacity-50"}`}>
                           <div className="flex items-center justify-between gap-3">
-                            <span className="font-mono text-sm text-text-primary">{site}</span>
+                            <label className="flex cursor-pointer items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={threeDSitesEnabled[site] ?? true}
+                                onChange={() => handleToggleThreeDSite(site)}
+                                className="h-4 w-4 cursor-pointer accent-primary"
+                              />
+                              <span className="font-mono text-sm text-text-primary">{site}</span>
+                            </label>
                             <div className="flex items-center gap-2">
                               {supported ? (
                                 threeDSiteTesting && !testResult ? (
