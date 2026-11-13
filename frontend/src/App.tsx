@@ -2518,7 +2518,7 @@ function App() {
     try { localStorage.setItem("axisThreeDDownloadDelay", String(parsed)); } catch { /* ignore */ }
   };
 
-  const handleToggleThreeDSite = (site: string) => {
+  const handleToggleThreeDSite = (site: string): void => {
     setThreeDSitesEnabled(prev => {
       const next = { ...prev, [site]: !(prev[site] ?? true) };
       try { localStorage.setItem(THREE_D_SITES_ENABLED_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
@@ -3104,6 +3104,31 @@ function App() {
 
     try {
       const response = await fetch(`/api/listings/${listing.sku}`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to fetch listing details");
+      }
+
+      if (data.error) {
+        throw new Error(data.error);
+      }
+
+      setListingDetailData(data.listing_data);
+    } catch (err) {
+      console.error("Error fetching listing details:", err);
+      addToast("error", (err as Error).message || "An error occurred while fetching listing details");
+    } finally {
+      setLoadingListingDetail(false);
+    }
+  };
+
+  const handleListingClickBySku = async (sku: string): Promise<void> => {
+    setSelectedListing({ sku } as Listing);
+    setLoadingListingDetail(true);
+
+    try {
+      const response = await fetch(`/api/listings/${sku}`);
       const data = await response.json();
 
       if (!response.ok) {
