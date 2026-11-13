@@ -2615,49 +2615,172 @@ def api_restock_listings():
 @app.route('/api/listings/sync-active', methods=['POST'])
 def api_sync_active_listings():
     """
-    Compare all local listings against eBay and mark any that are no longer
-    active on eBay as ebay_status: "not_found".
+    Use GetSellerList as the single source of truth for active listings.
 
-    Optionally accepts { "skus": [...] } to check a subset.
-    Returns { "checked": N, "not_found": [...] }
+    Skips drafts (no ebayListingId and no SKU match in the active set).
+    Merges eBay data into active listings and heals stale not_found status.
+    Marks listings as inactive when no longer found on eBay.
+
+    Returns { "active": N, "newly_inactive": M, "updated": K, "not_found": [...] }
     """
-    body = request.get_json(silent=True) or {}
-    requested_skus = body.get('skus')  # optional subset
-
     base_dir = os.path.dirname(os.path.abspath(__file__))
     output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
 
-    # Build the list of SKUs to check
-    if requested_skus:
-        skus_to_check = [str(s).strip() for s in requested_skus if str(s).strip()]
-    else:
-        skus_to_check = []
-        if os.path.exists(output_dir):
-            for fname in os.listdir(output_dir):
-                if fname.endswith('.json'):
-                    sku = fname[:-5]  # strip .json
-                    skus_to_check.append(sku)
-
-    if not skus_to_check:
-        return jsonify({'checked': 0, 'not_found': []}), 200
-
-    failed_manual = [s for s in skus_to_check if s.startswith(MANUAL_SKU_PREFIX)]
-    failed_axis = [s for s in skus_to_check if not s.startswith(MANUAL_SKU_PREFIX)]
-
+    # Step 1: Fetch all active eBay listings via GetSellerList (single call)
     try:
-        confirmed_not_found = _verify_failed_skus(failed_manual, failed_axis)
+        ebay_items = get_seller_list()
     except Exception as e:
-        return jsonify({'error': f'eBay check failed: {e}'}), 500
+        return jsonify({'error': f'GetSellerList failed: {e}'}), 500
 
-    newly_marked = []
-    for sku in confirmed_not_found:
-        if set_listing_ebay_status(sku, EBAY_STATUS_NOT_FOUND):
-            newly_marked.append(sku)
-            print(f"[sync-active] Marked not_found: {sku}")
+    if not ebay_items:
+        # Safety guard: an empty result likely means an auth or network issue,
+        # not that the seller has zero listings. Abort to avoid mass deactivation.
+        print("[sync-active] GetSellerList returned no items; aborting to prevent false deactivation")
+        return jsonify({'error': 'GetSellerList returned no active listings; aborting sync to prevent false deactivation'}), 500
 
+    active_by_item_id = {str(item['item_id']): item for item in ebay_items}
+    active_by_seller_sku = {
+        item['seller_sku']: item
+        for item in ebay_items
+        if item.get('seller_sku')
+    }
+
+    # Step 2: Scan all local listing JSON files
+    active_count = 0
+    newly_inactive = 0
+    updated_count = 0
+    not_found_skus = []
+
+    if not os.path.exists(output_dir):
+        return jsonify({'active': 0, 'newly_inactive': 0, 'updated': 0, 'not_found': []}), 200
+
+    for fname in os.listdir(output_dir):
+        if not fname.endswith('.json'):
+            continue
+        sku = fname[:-5]
+        fpath = os.path.join(output_dir, fname)
+        try:
+            with open(fpath, 'r', encoding='utf-8') as f:
+                local_data = json.load(f)
+        except Exception as e:
+            print(f"[sync-active] Failed to read {fname}: {e}")
+            continue
+
+        ebay_listing_id = str(local_data.get('ebayListingId') or '').strip()
+        ebay_status = local_data.get('ebay_status', '')
+
+        # Determine if this listing matches any active eBay listing
+        matched_item = None
+        matched_via = None
+        if ebay_listing_id and ebay_listing_id in active_by_item_id:
+            matched_item = active_by_item_id[ebay_listing_id]
+            matched_via = 'item_id'
+        elif sku in active_by_seller_sku:
+            matched_item = active_by_seller_sku[sku]
+            matched_via = 'seller_sku'
+
+        # No ebayListingId and no SKU match: draft or already-inactive, skip
+        if not ebay_listing_id and matched_item is None:
+            continue
+
+        if matched_item is not None:
+            # Listing is confirmed active on eBay
+            is_manual = sku.startswith(MANUAL_SKU_PREFIX)
+            was_not_found = ebay_status == EBAY_STATUS_NOT_FOUND
+
+            if is_manual:
+                file_changed = write_manual_listing_json(matched_item)
+                if was_not_found:
+                    set_listing_ebay_status(sku, 'active')
+                active_count += 1
+                if file_changed or was_not_found:
+                    updated_count += 1
+            else:
+                # AXIS_ listing: merge only the fields GetSellerList provides
+                data_changed = False
+
+                inv = local_data.setdefault('inventoryItem', {})
+                product = inv.setdefault('product', {})
+                avail = inv.setdefault('availability', {})
+                ship_avail = avail.setdefault('shipToLocationAvailability', {})
+                offer = local_data.setdefault('offer', {})
+                pricing = offer.setdefault('pricingSummary', {})
+                price_obj = pricing.setdefault('price', {})
+
+                new_title = matched_item['title']
+                new_description = matched_item['description']
+                new_image_urls = matched_item['image_urls']
+                new_condition = matched_item['condition']
+                new_quantity = matched_item['quantity']
+                new_price = matched_item['price']
+
+                if product.get('title') != new_title:
+                    product['title'] = new_title
+                    data_changed = True
+                if product.get('description') != new_description:
+                    product['description'] = new_description
+                    data_changed = True
+                if product.get('imageUrls') != new_image_urls:
+                    product['imageUrls'] = new_image_urls
+                    data_changed = True
+                if inv.get('condition') != new_condition:
+                    inv['condition'] = new_condition
+                    data_changed = True
+                if ship_avail.get('quantity') != new_quantity:
+                    ship_avail['quantity'] = new_quantity
+                    data_changed = True
+                if price_obj.get('value') != new_price:
+                    price_obj['value'] = new_price
+                    data_changed = True
+                if offer.get('quantity') != new_quantity:
+                    offer['quantity'] = new_quantity
+                    data_changed = True
+
+                # Heal missing ebayListingId when matched via seller_sku
+                if matched_via == 'seller_sku' and not ebay_listing_id:
+                    local_data['ebayListingId'] = matched_item['item_id']
+                    data_changed = True
+
+                if data_changed:
+                    try:
+                        with open(fpath, 'w', encoding='utf-8') as f:
+                            json.dump(local_data, f, indent=2, ensure_ascii=False)
+                    except Exception as e:
+                        print(f"[sync-active] Failed to write {fname}: {e}")
+
+                if was_not_found:
+                    set_listing_ebay_status(sku, 'active')
+                    data_changed = True
+
+                active_count += 1
+                if data_changed:
+                    updated_count += 1
+
+        else:
+            # Has ebayListingId but not found in active maps: mark as inactive
+            local_data['ebayListingId'] = ''
+            try:
+                with open(fpath, 'w', encoding='utf-8') as f:
+                    json.dump(local_data, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                print(f"[sync-active] Failed to write {fname}: {e}")
+            set_listing_ebay_status(sku, EBAY_STATUS_NOT_FOUND)
+            not_found_skus.append(sku)
+            newly_inactive += 1
+            print(f"[sync-active] Marked newly inactive: {sku}")
+
+    # Step 4: Log the sync event
+    log_event("sync_active", "success",
+              active=active_count,
+              newly_inactive=newly_inactive,
+              updated=updated_count)
+
+    # Step 3: Return response
     return jsonify({
-        'checked': len(skus_to_check),
-        'not_found': newly_marked,
+        'active': active_count,
+        'newly_inactive': newly_inactive,
+        'updated': updated_count,
+        'not_found': not_found_skus,
     }), 200
 
 
