@@ -2720,7 +2720,7 @@ def serp_lens_search():
     Reverse-image-search an eBay listing photo via SerpAPI Google reverse image,
     filtered to 3D-print file hosting sites.
 
-    Expects JSON: {"image_url": "https://..."}
+    Expects JSON: {"image_url": "https://...", "enabled_sites": ["printables.com", ...] (optional)}
     Returns JSON: {"results": [{"title", "link", "source", "thumbnail"}, ...]}
     """
     try:
@@ -2730,6 +2730,8 @@ def serp_lens_search():
 
         image_url = data["image_url"]
         enabled_sites = data.get("enabled_sites")  # list[str] | None; None means all sites
+        if enabled_sites is not None and not isinstance(enabled_sites, list):
+            return jsonify({"error": "enabled_sites must be a list of strings"}), 400
         print(f"[API] SerpAPI reverse image search for: {image_url}")
 
         raw = search_by_image(image_url)
