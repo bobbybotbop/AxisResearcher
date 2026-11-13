@@ -75,7 +75,7 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [filter, setFilter] = useState("all");
-  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -99,13 +99,13 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
   const filtered =
     filter === "all" ? logs : logs.filter((e) => e.event === filter);
 
-  function toggleRow(i: number) {
+  function toggleRow(timestamp: string) {
     setExpandedRows((prev) => {
       const next = new Set(prev);
-      if (next.has(i)) {
-        next.delete(i);
+      if (next.has(timestamp)) {
+        next.delete(timestamp);
       } else {
-        next.add(i);
+        next.add(timestamp);
       }
       return next;
     });
@@ -158,13 +158,13 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
           const isError = entry.status === "error";
           const isRestock = entry.event === "restock";
           const hasSku = !!entry.sku;
-          const isExpanded = expandedRows.has(i);
+          const isExpanded = expandedRows.has(entry.timestamp);
 
           const isClickable = isRestock || (hasSku && !!onNavigateToSku);
 
           const handleRowClick = () => {
             if (isRestock) {
-              toggleRow(i);
+              toggleRow(entry.timestamp);
             } else if (hasSku && onNavigateToSku) {
               onNavigateToSku(entry.sku!);
             }
