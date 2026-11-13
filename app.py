@@ -2569,21 +2569,20 @@ def api_restock_listings():
         if updated:
             restock_kwargs["skus"] = updated
             # Build parallel ebay_ids array (same length as skus)
-            _base_dir = os.path.dirname(os.path.abspath(__file__))
             ebay_ids = []
-            for _sku in updated:
-                if _sku.startswith(MANUAL_SKU_PREFIX):
-                    ebay_ids.append(_sku[len(MANUAL_SKU_PREFIX):])
+            for restocked_sku in updated:
+                if restocked_sku.startswith(MANUAL_SKU_PREFIX):
+                    ebay_ids.append(restocked_sku[len(MANUAL_SKU_PREFIX):])
                 else:
-                    _ebay_id = ""
-                    _fpath = os.path.join(_base_dir, GENERATED_LISTINGS_DIR, f'{_sku}.json')
+                    ebay_id = ""
+                    fpath = resolve_listing_json_path(sku=restocked_sku)
                     try:
-                        with open(_fpath, 'r', encoding='utf-8') as _f:
-                            _d = json.load(_f)
-                        _ebay_id = _d.get('ebayListingId', '') or ''
-                    except Exception:
-                        pass
-                    ebay_ids.append(_ebay_id)
+                        with open(fpath, 'r', encoding='utf-8') as f:
+                            d = json.load(f)
+                        ebay_id = d.get('ebayListingId', '') or ''
+                    except Exception as e:
+                        print(f"[restock] could not read ebayListingId for {restocked_sku}: {e}")
+                    ebay_ids.append(ebay_id)
             restock_kwargs["ebay_ids"] = ebay_ids
         all_failed = failed + not_found_skus
         if all_failed:
