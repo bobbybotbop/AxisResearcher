@@ -23,6 +23,7 @@ interface CompactListingRowProps {
   isSelectMode?: boolean;
   isSelected?: boolean;
   onToggleSelect?: () => void;
+  isInactive?: boolean;
 }
 
 function LinkIcon() {
@@ -65,6 +66,7 @@ export default function CompactListingRow({
   isSelectMode = false,
   isSelected = false,
   onToggleSelect,
+  isInactive = false,
 }: CompactListingRowProps) {
   const urls = Array.isArray(listing.imageUrls) ? listing.imageUrls : [];
   const [imageIndex, setImageIndex] = useState(0);
@@ -93,7 +95,7 @@ export default function CompactListingRow({
           isSelectMode ? onToggleSelect?.() : onCardClick?.(listing);
         }
       }}
-      className={`flex w-full cursor-pointer overflow-hidden rounded-xl bg-surface-panel shadow-sm transition-shadow hover:shadow-md ${isSelected ? "ring-2 ring-inset ring-blue-500" : ""} ${isManual ? "border-2 border-border-default" : "border border-border-default"}`}
+      className={`flex w-full cursor-pointer overflow-hidden rounded-xl bg-surface-panel shadow-sm transition-shadow hover:shadow-md ${isSelected ? "ring-2 ring-inset ring-blue-500" : ""} ${isManual ? "border-2 border-border-default" : "border border-border-default"} ${isInactive ? "opacity-50" : ""}`}
     >
       {/* Select checkbox */}
       {isSelectMode && (
@@ -253,14 +255,14 @@ export default function CompactListingRow({
                   )}
                 </>
               ) : null}
-              {(listing.ebay_status as string) === 'not_found' && (
+              {isInactive && (
                 <>
                   <span className="text-text-muted">·</span>
                   <span
-                    className="whitespace-nowrap rounded bg-danger/10 px-1.5 py-0.5 text-xs font-medium text-danger"
+                    className="bg-danger/10 text-danger text-xs rounded-full px-2 py-0.5 font-medium border border-danger/20 shrink-0"
                     title="This listing was deleted or renewed on eBay"
                   >
-                    Not on eBay
+                    Inactive
                   </span>
                 </>
               )}

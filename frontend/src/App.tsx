@@ -355,6 +355,8 @@ function App() {
     useState(false);
   const [uploadListingsShowManual, setUploadListingsShowManual] =
     useState(true);
+  const [uploadListingsShowInactive, setUploadListingsShowInactive] =
+    useState(false);
   const [uploadListingsDateFrom, setUploadListingsDateFrom] = useState("");
   const [uploadListingsDateTo, setUploadListingsDateTo] = useState("");
   const [loadingListings, setLoadingListings] = useState(false);
@@ -853,6 +855,7 @@ function App() {
       if (!uploadListingsShowIncomplete && isIncomplete(l)) return false;
       if (!uploadListingsShowUnuploaded && !isUploaded(l) && !isIncomplete(l)) return false;
       if (!uploadListingsShowManual && l.isManualListing) return false;
+      if (!uploadListingsShowInactive && (l.ebay_status as string | undefined) === 'not_found') return false;
       if (q && !(l.title || "").toLowerCase().includes(q)) return false;
       if (uploadListingsDateFrom || uploadListingsDateTo) {
         const raw = l.createdDateTime as string | undefined;
@@ -886,6 +889,7 @@ function App() {
     uploadListingsShowIncomplete,
     uploadListingsShowUnuploaded,
     uploadListingsShowManual,
+    uploadListingsShowInactive,
     uploadListingsDateFrom,
     uploadListingsDateTo,
   ]);
@@ -3947,6 +3951,8 @@ function App() {
                 onShowUnuploadedListingsChange={setUploadListingsShowUnuploaded}
                 showManualListings={uploadListingsShowManual}
                 onShowManualListingsChange={setUploadListingsShowManual}
+                showInactiveListings={uploadListingsShowInactive}
+                onToggleShowInactiveListings={setUploadListingsShowInactive}
                 dateFrom={uploadListingsDateFrom}
                 dateTo={uploadListingsDateTo}
                 onDateFromChange={setUploadListingsDateFrom}
@@ -4025,6 +4031,7 @@ function App() {
                           isSelectMode={historySelectMode}
                           isSelected={historySelectedSkus.has(listing.sku!)}
                           onToggleSelect={() => toggleHistorySkuSelection(listing.sku!)}
+                          isInactive={(listing.ebay_status as string | undefined) === 'not_found'}
                         />
                       ) : (
                         <GeneratedListingCard
@@ -4040,6 +4047,7 @@ function App() {
                           isSelectMode={historySelectMode}
                           isSelected={historySelectedSkus.has(listing.sku!)}
                           onToggleSelect={() => toggleHistorySkuSelection(listing.sku!)}
+                          isInactive={(listing.ebay_status as string | undefined) === 'not_found'}
                         />
                       )
                     )}

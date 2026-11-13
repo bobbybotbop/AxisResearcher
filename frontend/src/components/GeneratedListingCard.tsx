@@ -27,6 +27,7 @@ interface GeneratedListingCardProps {
   isSelectMode?: boolean;
   isSelected?: boolean;
   onToggleSelect?: () => void;
+  isInactive?: boolean;
 }
 
 interface RestGalleryStripProps {
@@ -135,6 +136,7 @@ export default function GeneratedListingCard({
   isSelectMode,
   isSelected,
   onToggleSelect,
+  isInactive = false,
 }: GeneratedListingCardProps) {
   const urls = Array.isArray(listing.imageUrls) ? listing.imageUrls : [];
   const [imageIndex, setImageIndex] = useState(0);
@@ -167,7 +169,7 @@ export default function GeneratedListingCard({
           onCardClick?.(listing);
         }
       }}
-      className={`flex w-full cursor-pointer flex-col overflow-hidden rounded-xl bg-surface-panel shadow-sm transition-shadow hover:shadow-md md:flex-row md:items-stretch ${isManual ? "border-2 border-border-default" : "border border-border-default"}`}
+      className={`flex w-full cursor-pointer flex-col overflow-hidden rounded-xl bg-surface-panel shadow-sm transition-shadow hover:shadow-md md:flex-row md:items-stretch ${isManual ? "border-2 border-border-default" : "border border-border-default"} ${isInactive ? "opacity-50" : ""}`}
     >
       {/* Image column */}
       <div className="flex w-full shrink-0 flex-col border-b border-border-default md:w-[30%] md:max-w-md md:border-b-0 md:border-r md:border-border-default">
@@ -328,14 +330,14 @@ export default function GeneratedListingCard({
                   )}
                 </>
               ) : null}
-              {(listing.ebay_status as string) === 'not_found' && (
+              {isInactive && (
                 <>
                   <span className="text-text-muted">·</span>
                   <span
-                    className="whitespace-nowrap rounded bg-danger/10 px-1.5 py-0.5 text-xs font-medium text-danger"
+                    className="bg-danger/10 text-danger text-xs rounded-full px-2 py-0.5 font-medium border border-danger/20 shrink-0"
                     title="This listing was deleted or renewed on eBay"
                   >
-                    Not on eBay
+                    Inactive
                   </span>
                 </>
               )}

@@ -13,6 +13,8 @@ interface UploadListingsToolbarProps {
   onShowUnuploadedListingsChange: (checked: boolean) => void;
   showManualListings: boolean;
   onShowManualListingsChange: (checked: boolean) => void;
+  showInactiveListings: boolean;
+  onToggleShowInactiveListings: (checked: boolean) => void;
   dateFrom: string;
   dateTo: string;
   onDateFromChange: (value: string) => void;
@@ -40,6 +42,8 @@ export default function UploadListingsToolbar({
   onShowUnuploadedListingsChange,
   showManualListings,
   onShowManualListingsChange,
+  showInactiveListings,
+  onToggleShowInactiveListings,
   dateFrom,
   dateTo,
   onDateFromChange,
@@ -64,6 +68,7 @@ export default function UploadListingsToolbar({
     showIncompleteListings ||
     showUnuploadedListings ||
     !showManualListings ||
+    showInactiveListings ||
     Boolean(dateFrom?.trim()) ||
     Boolean(dateTo?.trim());
 
@@ -190,6 +195,17 @@ export default function UploadListingsToolbar({
                     className="h-3.5 w-3.5 rounded border-border-default text-text-primary focus:ring-border-default"
                   />
                   <span className="leading-snug">Show manually listed items</span>
+                </label>
+                <label className="mt-2 flex cursor-pointer items-center gap-3 text-sm text-text-primary">
+                  <input
+                    type="checkbox"
+                    checked={showInactiveListings}
+                    onChange={(e) =>
+                      onToggleShowInactiveListings(e.target.checked)
+                    }
+                    className="h-3.5 w-3.5 rounded border-border-default text-text-primary focus:ring-border-default"
+                  />
+                  <span className="leading-snug">Show inactive listings</span>
                 </label>
               </div>
 
