@@ -39,7 +39,7 @@ from flask import Flask, jsonify, request, Response, stream_with_context
 from flask_cors import CORS
 from werkzeug.serving import WSGIRequestHandler
 from backend.copyScripts.CopyListingMain import copy_listing_main, testing_function
-from backend.serp import search_by_image, extract_top_links
+from backend.serp import search_by_image, extract_top_links, filter_links_by_enabled_sites
 from backend.downloaders.thingiverse import extract_thing_id, stream_zip as tv_stream_zip, probe as probe_thingiverse
 from backend.downloaders.printables import extract_model_id as printables_model_id, build_zip as printables_build_zip, probe as probe_printables
 from backend.downloaders.makerworld import extract_model_info as mw_extract_model_info, download_3mf as mw_download_3mf, probe as probe_makerworld
@@ -2729,10 +2729,12 @@ def serp_lens_search():
             return jsonify({"error": "image_url is required"}), 400
 
         image_url = data["image_url"]
+        enabled_sites = data.get("enabled_sites")  # list[str] | None; None means all sites
         print(f"[API] SerpAPI reverse image search for: {image_url}")
 
         raw = search_by_image(image_url)
         links = extract_top_links(raw, limit=10)
+        links = filter_links_by_enabled_sites(links, enabled_sites)
 
         print(f"[API] SerpAPI returned {len(links)} results")
         return jsonify({"results": links}), 200
