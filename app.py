@@ -2639,11 +2639,13 @@ def api_sync_active_listings():
         return jsonify({'error': 'GetSellerList returned no active listings; aborting sync to prevent false deactivation'}), 500
 
     active_by_item_id = {str(item['item_id']): item for item in ebay_items}
-    active_by_seller_sku = {
-        item['seller_sku']: item
-        for item in ebay_items
-        if item.get('seller_sku')
-    }
+    active_by_seller_sku = {}
+    for item in ebay_items:
+        seller_sku = item.get('seller_sku')
+        if seller_sku:
+            if seller_sku in active_by_seller_sku:
+                print(f"[sync-active] Duplicate seller_sku '{seller_sku}' in eBay results; SKU fallback unreliable")
+            active_by_seller_sku[seller_sku] = item
 
     # Step 2: Scan all local listing JSON files
     active_count = 0
@@ -2741,16 +2743,16 @@ def api_sync_active_listings():
                     local_data['ebayListingId'] = matched_item['item_id']
                     data_changed = True
 
+                if was_not_found:
+                    local_data['ebay_status'] = 'active'
+                    data_changed = True
+
                 if data_changed:
                     try:
                         with open(fpath, 'w', encoding='utf-8') as f:
                             json.dump(local_data, f, indent=2, ensure_ascii=False)
                     except Exception as e:
                         print(f"[sync-active] Failed to write {fname}: {e}")
-
-                if was_not_found:
-                    set_listing_ebay_status(sku, 'active')
-                    data_changed = True
 
                 active_count += 1
                 if data_changed:
@@ -2759,23 +2761,23 @@ def api_sync_active_listings():
         else:
             # Has ebayListingId but not found in active maps: mark as inactive
             local_data['ebayListingId'] = ''
+            local_data['ebay_status'] = EBAY_STATUS_NOT_FOUND
             try:
                 with open(fpath, 'w', encoding='utf-8') as f:
-                    json.dump(local_data, f, indent=2, ensure_ascii=False)
+                    json.dump(local_data, f, ensure_ascii=False, indent=2)
             except Exception as e:
                 print(f"[sync-active] Failed to write {fname}: {e}")
-            set_listing_ebay_status(sku, EBAY_STATUS_NOT_FOUND)
             not_found_skus.append(sku)
             newly_inactive += 1
             print(f"[sync-active] Marked newly inactive: {sku}")
 
-    # Step 4: Log the sync event
+    # Step 3: Log the sync event
     log_event("sync_active", "success",
               active=active_count,
               newly_inactive=newly_inactive,
               updated=updated_count)
 
-    # Step 3: Return response
+    # Step 4: Return response
     return jsonify({
         'active': active_count,
         'newly_inactive': newly_inactive,
