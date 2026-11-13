@@ -124,3 +124,23 @@ def test_render_produces_studio_shot(tmp_path):
         if max(pixels[x, y]) < 100
     )
     assert dark > 20, "expected the near-black model in the center"
+
+
+def test_render_applies_model_color(tmp_path):
+    mesh = tmp_path / "cube.stl"
+    mesh.write_text(CUBE_STL)
+    output = tmp_path / "render_red.png"
+
+    render_model(mesh, output, color="#ff0000", resolution=256, timeout=90)
+
+    assert output.exists()
+    image = Image.open(output).convert("RGB")
+    pixels = image.load()
+    # a red model must survive the white-background compositor with its hue intact
+    red = sum(
+        1
+        for x in range(64, 192, 4)
+        for y in range(64, 192, 4)
+        if pixels[x, y][0] > pixels[x, y][1] + 40 and pixels[x, y][0] > pixels[x, y][2] + 40
+    )
+    assert red > 20, "expected the red model in the center"

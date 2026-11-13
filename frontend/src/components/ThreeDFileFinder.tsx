@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
 import MessageBarInput from "./MessageBarInput";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
@@ -50,6 +50,16 @@ const pickRenderEntry = (entries: UnzippedEntry[]): File | null => {
 
 const pickRenderFile = async (blob: Blob, filename: string): Promise<File | null> =>
   pickRenderEntry(await unzipBlob(blob, filename));
+
+// Render Settings (persisted via /api/render-settings; spec defaults as fallback)
+// "Glossiness" in the UI is the Principled roughness value sent to Blender.
+const RENDER_SETTINGS_DEFAULTS = { color: "#1a1a1a", roughness: 0.3, resolution: 1024 };
+const RENDER_RESOLUTION_OPTIONS = [512, 1024, 2048];
+interface RenderSettingsPatch {
+  color?: string;
+  roughness?: number;
+  resolution?: number;
+}
 
 // Unzip a blob into flat entries; non-zip blobs (e.g. MakerWorld .3mf) become a single entry
 const unzipBlob = async (blob: Blob, filename: string): Promise<UnzippedEntry[]> => {
@@ -139,6 +149,39 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
   const [step4Loading, setStep4Loading] = useState(false);
   const [step4Image, setStep4Image] = useState<{ url: string; filename: string } | null>(null);
   const [step4Error, setStep4Error] = useState<string | null>(null);
+
+  // Step 4 — Render Settings (persisted in listingPreferences.json via /api/render-settings)
+  const [renderColor, setRenderColor] = useState(RENDER_SETTINGS_DEFAULTS.color);
+  const [renderRoughness, setRenderRoughness] = useState(RENDER_SETTINGS_DEFAULTS.roughness);
+  const [renderResolution, setRenderResolution] = useState(RENDER_SETTINGS_DEFAULTS.resolution);
+  const renderSettingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load persisted Render Settings once on mount; fall back to spec defaults on failure
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/render-settings")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        if (typeof data.color === "string") setRenderColor(data.color);
+        if (typeof data.roughness === "number") setRenderRoughness(data.roughness);
+        if (typeof data.resolution === "number") setRenderResolution(data.resolution);
+      })
+      .catch(() => { /* keep spec defaults */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Persist changes debounced (slider/color input fire many events while dragging)
+  const persistRenderSettings = (patch: RenderSettingsPatch) => {
+    if (renderSettingsSaveTimer.current) clearTimeout(renderSettingsSaveTimer.current);
+    renderSettingsSaveTimer.current = setTimeout(() => {
+      fetch("/api/render-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      }).catch(() => { /* persistence is best-effort; the control still applies to renders */ });
+    }, 400);
+  };
 
   const resetStep4 = () => {
     setRenderFile(null);
@@ -295,10 +338,9 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
     try {
       const form = new FormData();
       form.append("file", renderFile);
-      // Spec defaults; the controls panel (color/resolution UI) lands in ticket 05
-      form.append("color", "#1a1a1a");
-      form.append("roughness", "0.3");
-      form.append("resolution", "1024");
+      form.append("color", renderColor);
+      form.append("roughness", String(renderRoughness));
+      form.append("resolution", String(renderResolution));
       const res = await fetch("/api/render", { method: "POST", body: form });
       const data = await res.json() as { task_id?: string; error?: string };
       if (!res.ok || data.error || !data.task_id) throw new Error(data.error || "Failed to start the render");
@@ -549,6 +591,56 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       {/* Step 4 — Studio Render */}
       <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
         <p className="text-sm font-semibold text-text-primary">Step 4 — Studio Render</p>
+        {/* Render Settings — persisted; camera/preview controls land separately (ticket 03) */}
+        <div className="flex flex-wrap items-end gap-x-6 gap-y-3 rounded-lg border border-border-default p-3">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-muted">Color</span>
+            <input
+              type="color"
+              aria-label="Model color"
+              value={renderColor}
+              onChange={(e) => {
+                setRenderColor(e.target.value);
+                persistRenderSettings({ color: e.target.value });
+              }}
+              className="h-8 w-14 cursor-pointer rounded border border-border-default bg-surface-panel"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-muted">Glossiness ({renderRoughness.toFixed(2)})</span>
+            <input
+              type="range"
+              aria-label="Glossiness"
+              min={0}
+              max={1}
+              step={0.05}
+              value={renderRoughness}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                setRenderRoughness(value);
+                persistRenderSettings({ roughness: value });
+              }}
+              className="w-40 accent-primary"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-muted">Resolution</span>
+            <select
+              aria-label="Resolution"
+              value={renderResolution}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                setRenderResolution(value);
+                persistRenderSettings({ resolution: value });
+              }}
+              className="rounded border border-border-default bg-surface-panel px-2 py-1 text-sm text-text-primary"
+            >
+              {RENDER_RESOLUTION_OPTIONS.map((size) => (
+                <option key={size} value={size}>{size} × {size}</option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className="flex items-center gap-3">
           <button
             type="button"

@@ -54,7 +54,7 @@ from backend.copyScripts.create_image import (
     _openrouter_response_dict_to_image_bytes_and_mime,
     upload_image_bytes_to_ebay,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, get_render_settings, save_render_settings
 from backend.helper_functions import remove_html_tags
 import os
 import json
@@ -3496,6 +3496,35 @@ def serve_render_image(filename):
         return jsonify({"error": "Image not found"}), 404
     with open(filepath, 'rb') as f:
         return Response(f.read(), mimetype='image/png')
+
+
+@app.route('/api/render-settings', methods=['GET', 'POST'])
+def api_render_settings():
+    """
+    Read or update persisted Render Settings (Step 4 Studio Render).
+
+    GET:        returns {"color", "roughness", "resolution", "fov"}
+    POST:       JSON body with any subset of those keys; persists and returns
+                the saved state. Camera angle/target are ephemeral by design.
+    """
+    if request.method == 'GET':
+        try:
+            return jsonify(get_render_settings()), 200
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    body = request.get_json(silent=True) or {}
+    try:
+        settings = save_render_settings(
+            color=body.get('color'),
+            roughness=body.get('roughness'),
+            resolution=body.get('resolution'),
+            fov=body.get('fov'),
+        )
+        return jsonify(settings), 200
+    except (TypeError, ValueError) as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/upload-image', methods=['POST'])

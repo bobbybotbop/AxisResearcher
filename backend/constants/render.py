@@ -10,6 +10,11 @@ DEFAULT_RENDER_ROUGHNESS = 0.3
 DEFAULT_RENDER_RESOLUTION = 1024
 RENDER_RESOLUTIONS: tuple[int, ...] = (512, 1024, 2048)
 
+# Preview FOV (degrees) is a persisted Render Setting too; the slider UI is ticket 03
+DEFAULT_RENDER_FOV = 40.0
+RENDER_FOV_MIN = 20.0
+RENDER_FOV_MAX = 80.0
+
 # Soft target ~30s; hard kill is hang protection only (ADR 0001)
 RENDER_TIMEOUT_SECONDS = 90
 
