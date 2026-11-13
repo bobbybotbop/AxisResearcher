@@ -77,7 +77,12 @@ from backend.constants.listing import (
     CATEGORY_TO_IMAGE_TYPE, MANUAL_SKU_PREFIX, EBAY_STATUS_NOT_FOUND,
 )
 from backend.constants.ebay import EBAY_MARKETPLACE_ID, EBAY_BROWSE_API_BASE, EBAY_INVENTORY_API_BASE
-from backend.constants.paths import GENERATED_LISTINGS_DIR
+from backend.constants.paths import GENERATED_LISTINGS_DIR, GENERATED_IMAGES_DIR
+from backend.constants.render import (
+    DEFAULT_RENDER_COLOR, DEFAULT_RENDER_ROUGHNESS, DEFAULT_RENDER_RESOLUTION,
+    NATIVE_RENDER_EXTENSIONS, RENDER_OUTPUT_PREFIX, RENDER_RESOLUTIONS,
+)
+from backend.render import render_model, RenderError
 import re
 import requests
 from dotenv import load_dotenv
@@ -90,6 +95,11 @@ CORS(app, origins=["http://localhost:3000", "http://localhost:5173", "http://loc
 # Structure: {task_id: {"status": "running|completed|failed", "total": N, "completed": M, "results": [], "errors": []}}
 image_generation_tasks = {}
 image_generation_lock = threading.Lock()
+
+# In-memory storage for Render Job (Step 4 Studio Render) progress
+# Structure: {task_id: {"status": "running|completed|failed", "image": url|None, "filename": str|None, "error": str|None}}
+render_tasks = {}
+render_tasks_lock = threading.Lock()
 
 
 def _verify_failed_skus(
@@ -3353,6 +3363,135 @@ def serve_bg_removed_image(filename):
     if not re.match(r'^bg_removed_[\w\-]+_\d+\.png$', filename):
         return jsonify({"error": "Invalid filename"}), 400
     filepath = os.path.join("generated-images", filename)
+    if not os.path.exists(filepath):
+        return jsonify({"error": "Image not found"}), 404
+    with open(filepath, 'rb') as f:
+        return Response(f.read(), mimetype='image/png')
+
+
+@app.route('/api/render', methods=['POST'])
+def start_render():
+    """
+    Start a Render Job (Step 4 Studio Render) for an uploaded 3D model.
+
+    Accepts multipart/form-data:
+        file:       model file, native formats only (.stl/.obj/.ply)
+        color:      optional hex color (default near-black #1a1a1a)
+        roughness:  optional 0..1 (default 0.3)
+        resolution: optional square size, one of RENDER_RESOLUTIONS (default 1024)
+
+    Returns:
+        JSON {task_id} for polling /api/render-status/<task_id>, or a friendly error
+    """
+    try:
+        print("[API] /api/render endpoint called")
+        file = request.files.get('file')
+        if not file or not file.filename:
+            return jsonify({"error": "A model file is required", "task_id": None}), 400
+
+        extension = os.path.splitext(file.filename)[1].lower()
+        if extension not in NATIVE_RENDER_EXTENSIONS:
+            return jsonify({
+                "error": f"'{extension or file.filename}' files are not supported for rendering yet. "
+                         f"Supported formats: {', '.join(NATIVE_RENDER_EXTENSIONS)}",
+                "task_id": None,
+            }), 400
+
+        # Optional Render Settings — the controls UI lands in ticket 05; defaults per spec
+        color = request.form.get("color", DEFAULT_RENDER_COLOR)
+        try:
+            roughness = float(request.form.get("roughness", DEFAULT_RENDER_ROUGHNESS))
+        except (TypeError, ValueError):
+            return jsonify({"error": "roughness must be a number between 0 and 1", "task_id": None}), 400
+        if not 0.0 <= roughness <= 1.0:
+            return jsonify({"error": "roughness must be between 0 and 1", "task_id": None}), 400
+        try:
+            resolution = int(request.form.get("resolution", DEFAULT_RENDER_RESOLUTION))
+        except (TypeError, ValueError):
+            return jsonify({"error": f"resolution must be one of {list(RENDER_RESOLUTIONS)}", "task_id": None}), 400
+        if resolution not in RENDER_RESOLUTIONS:
+            return jsonify({"error": f"resolution must be one of {list(RENDER_RESOLUTIONS)}", "task_id": None}), 400
+
+        os.makedirs(GENERATED_IMAGES_DIR, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{RENDER_OUTPUT_PREFIX}{timestamp}.png"
+        suffix = 1
+        while os.path.exists(os.path.join(GENERATED_IMAGES_DIR, filename)):
+            filename = f"{RENDER_OUTPUT_PREFIX}{timestamp}_{suffix}.png"
+            suffix += 1
+        output_path = os.path.join(GENERATED_IMAGES_DIR, filename)
+
+        import tempfile
+        fd, input_path = tempfile.mkstemp(prefix="render_upload_", suffix=extension)
+        os.close(fd)
+        file.save(input_path)
+
+        task_id = str(uuid.uuid4())
+        with render_tasks_lock:
+            render_tasks[task_id] = {"status": "running", "image": None, "filename": None, "error": None}
+
+        def run_render():
+            try:
+                render_model(
+                    input_path, output_path,
+                    color=color, roughness=roughness, resolution=resolution,
+                )
+                with render_tasks_lock:
+                    render_tasks[task_id].update(
+                        status="completed",
+                        filename=filename,
+                        image=f"/api/render-image/{filename}",
+                    )
+            except RenderError as e:
+                print(f"[API] /api/render task {task_id} failed: {e}")
+                with render_tasks_lock:
+                    render_tasks[task_id].update(status="failed", error=str(e))
+            except Exception as e:
+                print(f"[API] /api/render task {task_id} unexpected error: {e}")
+                with render_tasks_lock:
+                    render_tasks[task_id].update(status="failed", error=f"Unexpected render error: {e}")
+            finally:
+                try:
+                    os.remove(input_path)
+                except OSError:
+                    pass
+
+        threading.Thread(target=run_render, daemon=True).start()
+        return jsonify({"task_id": task_id}), 200
+
+    except Exception as e:
+        return jsonify({"error": f"An error occurred while starting the render: {str(e)}", "task_id": None}), 500
+
+
+@app.route('/api/render-status/<task_id>', methods=['GET'])
+def get_render_status(task_id):
+    """
+    Get status of a Render Job.
+
+    Returns:
+        JSON with status, and the image URL when completed or a friendly error when failed
+    """
+    try:
+        with render_tasks_lock:
+            if task_id not in render_tasks:
+                return jsonify({"error": f"Task {task_id} not found", "status": None}), 404
+            task = render_tasks[task_id]
+            response_data = {"status": task["status"], "error": task["error"]}
+            if task["status"] == "completed":
+                response_data["image"] = task["image"]
+                response_data["filename"] = task["filename"]
+            return jsonify(response_data), 200
+    except Exception as e:
+        return jsonify({"error": f"An error occurred while checking status: {str(e)}", "status": None}), 500
+
+
+@app.route('/api/render-image/<filename>', methods=['GET'])
+def serve_render_image(filename):
+    """Serve a rendered PNG from the generated-images dir. Validates filename pattern."""
+    import re
+    if not re.match(rf'^{RENDER_OUTPUT_PREFIX}\d{{8}}_\d{{6}}(_\d+)?\.png$', filename):
+        return jsonify({"error": "Invalid filename"}), 400
+    filepath = os.path.join(GENERATED_IMAGES_DIR, filename)
     if not os.path.exists(filepath):
         return jsonify({"error": "Image not found"}), 404
     with open(filepath, 'rb') as f:

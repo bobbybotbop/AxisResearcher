@@ -1,0 +1,125 @@
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+import io
+import time
+
+import pytest
+
+import app as app_module
+from app import app
+
+MINIMAL_STL = b"solid x\nendsolid x\n"
+PNG_BYTES = (
+    b"\x89PNG\r\n\x1a\n"  # enough for the route tests; pixel checks live in test_render_studio.py
+)
+
+
+@pytest.fixture()
+def client():
+    return app.test_client()
+
+
+@pytest.fixture()
+def fake_render(tmp_path, monkeypatch):
+    """Patch out Blender: render_model writes a stub PNG instantly."""
+    monkeypatch.setattr(app_module, "GENERATED_IMAGES_DIR", str(tmp_path))
+    calls = {}
+
+    def fake_render_model(input_path, output_path, **kwargs):
+        calls["input"] = input_path
+        calls["kwargs"] = kwargs
+        with open(output_path, "wb") as f:
+            f.write(PNG_BYTES)
+        return output_path
+
+    monkeypatch.setattr(app_module, "render_model", fake_render_model)
+    return calls
+
+
+def _post_render(client, filename="model.stl", data=MINIMAL_STL, extra=None):
+    form = {"file": (io.BytesIO(data), filename)}
+    if extra:
+        form.update(extra)
+    return client.post("/api/render", data=form, content_type="multipart/form-data")
+
+
+def _wait_for_status(client, task_id, timeout=10):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        res = client.get(f"/api/render-status/{task_id}")
+        assert res.status_code == 200
+        payload = res.get_json()
+        if payload["status"] in ("completed", "failed"):
+            return payload
+        time.sleep(0.05)
+    raise AssertionError(f"task {task_id} did not finish in {timeout}s")
+
+
+def test_render_requires_a_file(client):
+    res = client.post("/api/render", data={}, content_type="multipart/form-data")
+    assert res.status_code == 400
+    assert "file" in res.get_json()["error"].lower()
+
+
+def test_render_rejects_unsupported_format(client):
+    res = _post_render(client, filename="model.amf", data=b"<amf/>")
+    assert res.status_code == 400
+    error = res.get_json()["error"].lower()
+    assert "not supported" in error or ".amf" in error
+
+
+def test_render_rejects_bad_resolution(client, fake_render):
+    res = _post_render(client, extra={"resolution": "1000"})
+    assert res.status_code == 400
+    assert "resolution" in res.get_json()["error"].lower()
+
+
+def test_render_job_roundtrip(client, fake_render):
+    res = _post_render(client, extra={"color": "#1a1a1a", "roughness": "0.3", "resolution": "1024"})
+    assert res.status_code == 200
+    task_id = res.get_json()["task_id"]
+    assert task_id
+
+    payload = _wait_for_status(client, task_id)
+    assert payload["status"] == "completed"
+    assert payload["error"] is None
+    assert payload["image"].startswith("/api/render-image/generated_render_")
+    assert payload["image"].endswith(".png")
+
+    # settings were forwarded to the renderer
+    assert fake_render["kwargs"]["color"] == "#1a1a1a"
+    assert fake_render["kwargs"]["roughness"] == pytest.approx(0.3)
+    assert fake_render["kwargs"]["resolution"] == 1024
+
+    image_res = client.get(payload["image"])
+    assert image_res.status_code == 200
+    assert image_res.mimetype == "image/png"
+    assert image_res.data == PNG_BYTES
+
+
+def test_render_status_unknown_task(client):
+    res = client.get("/api/render-status/no-such-task")
+    assert res.status_code == 404
+
+
+def test_render_failure_surfaces_friendly_error(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(app_module, "GENERATED_IMAGES_DIR", str(tmp_path))
+
+    def broken_render(input_path, output_path, **kwargs):
+        from backend.render import BlenderNotFoundError
+        raise BlenderNotFoundError("Blender was not found. Set the BLENDER_PATH environment variable.")
+
+    monkeypatch.setattr(app_module, "render_model", broken_render)
+    res = _post_render(client)
+    assert res.status_code == 200
+    payload = _wait_for_status(client, res.get_json()["task_id"])
+    assert payload["status"] == "failed"
+    assert "Blender" in payload["error"]
+
+
+def test_render_image_rejects_bad_filename(client):
+    res = client.get("/api/render-image/..%2F..%2Fapp.py")
+    assert res.status_code in (400, 404)
+    res = client.get("/api/render-image/evil.png")
+    assert res.status_code == 400
