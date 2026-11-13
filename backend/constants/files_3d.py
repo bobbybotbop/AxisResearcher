@@ -3,7 +3,6 @@ PREFERRED_3D_EXTENSIONS: list[str] = [
     ".3mf",
     ".step",
     ".stp",
-    ".amf",
     ".obj",
     ".stl",
     ".ply",
