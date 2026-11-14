@@ -88,6 +88,7 @@ from backend.render import render_model, RenderError
 from backend.render.normalize import normalize_to_render_mesh
 from backend.render.camera import compute_blender_camera
 import re
+import tempfile
 import requests
 from dotenv import load_dotenv
 
@@ -3321,7 +3322,6 @@ def api_remove_backgrounds_batch():
     { "bgRemovedPhotos": { "<originalUrl>": "/api/bg-removed-image/<file>", ... } }
     Failed images are silently skipped (omitted from the result map).
     """
-    import re
     data = request.get_json()
     if not data:
         return jsonify({"error": "Invalid or missing JSON body"}), 400
@@ -3363,7 +3363,6 @@ def api_remove_backgrounds_batch():
 @app.route('/api/bg-removed-image/<filename>', methods=['GET'])
 def serve_bg_removed_image(filename):
     """Serve a bg-removed PNG from generated-images/. Validates filename pattern."""
-    import re
     if not re.match(r'^bg_removed_[\w\-]+_\d+\.png$', filename):
         return jsonify({"error": "Invalid filename"}), 400
     filepath = os.path.join("generated-images", filename)
@@ -3463,7 +3462,6 @@ def start_render():
             suffix += 1
         output_path = os.path.join(GENERATED_IMAGES_DIR, filename)
 
-        import tempfile
         fd, input_path = tempfile.mkstemp(prefix="render_upload_", suffix=extension)
         os.close(fd)
         file.save(input_path)
@@ -3526,7 +3524,6 @@ def render_preview():
         if not file or not file.filename:
             return jsonify({"error": "A model file is required"}), 400
 
-        import tempfile
         extension = os.path.splitext(file.filename)[1].lower()
         fd, input_path = tempfile.mkstemp(prefix="render_preview_", suffix=extension or ".bin")
         os.close(fd)
@@ -3571,7 +3568,6 @@ def get_render_status(task_id):
 @app.route('/api/render-image/<filename>', methods=['GET'])
 def serve_render_image(filename):
     """Serve a rendered PNG from the generated-images dir. Validates filename pattern."""
-    import re
     if not re.match(rf'^{RENDER_OUTPUT_PREFIX}\d{{8}}_\d{{6}}(_\d+)?\.png$', filename):
         return jsonify({"error": "Invalid filename"}), 400
     filepath = os.path.join(GENERATED_IMAGES_DIR, filename)

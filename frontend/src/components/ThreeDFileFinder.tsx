@@ -4,6 +4,19 @@ import MessageBarInput from "./MessageBarInput";
 import StudioRenderPreview, { type StudioRenderPreviewHandle } from "./StudioRenderPreview";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { DOWNLOAD_MODE_FILES, DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, threeDSiteKeyFromLink, type DownloadMode, type ThreeDSiteStatus } from "../constants/files3d";
+import {
+  modelExtensionOf,
+  NATIVE_RENDER_EXTENSIONS,
+  RENDER_CANDIDATE_EXTENSIONS,
+  RENDER_FOV_MAX,
+  RENDER_FOV_MIN,
+  RENDER_RESOLUTION_OPTIONS,
+  RENDER_SETTINGS_DEFAULTS,
+  RENDER_SETTINGS_SAVE_DEBOUNCE_MS,
+  RENDER_STATUS_POLL_DEADLINE_MS,
+  RENDER_STATUS_POLL_INTERVAL_MS,
+  RENDERABLE_FORMATS_HINT,
+} from "../constants/render";
 
 interface SearchResult {
   site_type?: string;
@@ -31,29 +44,18 @@ interface UnzippedEntry {
   data: Blob;
 }
 
-// Formats Blender imports natively — everything else the backend normalizes to
-// an STL Render Mesh (.step/.stp via gmsh, .3mf via trimesh) before rendering.
-const NATIVE_RENDER_EXTENSIONS = [".obj", ".stl", ".ply"];
-// Renderable candidates, mirrors backend PREFERRED_3D_EXTENSIONS order
-const RENDER_CANDIDATE_EXTENSIONS = [".3mf", ".step", ".stp", ".obj", ".stl", ".ply"];
-const extOf = (name: string) => name.slice(name.lastIndexOf(".")).toLowerCase();
-
 // All renderable entries (zip contents or a single file), best-ranked first.
 // Empty when nothing renderable is inside.
 const pickRenderCandidates = (entries: UnzippedEntry[]): File[] =>
   entries
-    .filter((e) => RENDER_CANDIDATE_EXTENSIONS.includes(extOf(e.path[e.path.length - 1])))
+    .filter((e) => RENDER_CANDIDATE_EXTENSIONS.includes(modelExtensionOf(e.path[e.path.length - 1])))
     .sort(
       (a, b) =>
-        RENDER_CANDIDATE_EXTENSIONS.indexOf(extOf(a.path[a.path.length - 1])) -
-        RENDER_CANDIDATE_EXTENSIONS.indexOf(extOf(b.path[b.path.length - 1])),
+        RENDER_CANDIDATE_EXTENSIONS.indexOf(modelExtensionOf(a.path[a.path.length - 1])) -
+        RENDER_CANDIDATE_EXTENSIONS.indexOf(modelExtensionOf(b.path[b.path.length - 1])),
     )
     .map((e) => new File([e.data], e.path[e.path.length - 1]));
 
-// Render Settings (persisted via /api/render-settings; spec defaults as fallback)
-// "Glossiness" in the UI is the Principled roughness value sent to Blender.
-const RENDER_SETTINGS_DEFAULTS = { color: "#1a1a1a", roughness: 0.3, resolution: 1024, fov: 40 };
-const RENDER_RESOLUTION_OPTIONS = [512, 1024, 2048];
 interface RenderSettingsPatch {
   color?: string;
   roughness?: number;
@@ -149,6 +151,9 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
   const [renderFile, setRenderFile] = useState<File | null>(null);
   const [renderCandidates, setRenderCandidates] = useState<File[]>([]);
   const [renderFileChecked, setRenderFileChecked] = useState(false);
+  // True when the Step 3 download contained .amf files (unsupported, but worth
+  // calling out explicitly in the Step 4 empty state)
+  const [downloadHasAmf, setDownloadHasAmf] = useState(false);
   const [previewFile, setPreviewFile] = useState<File | null>(null);
   const [previewConverting, setPreviewConverting] = useState(false);
   const [renderFov, setRenderFov] = useState(RENDER_SETTINGS_DEFAULTS.fov);
@@ -189,13 +194,14 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(patch),
       }).catch(() => { /* persistence is best-effort; the control still applies to renders */ });
-    }, 400);
+    }, RENDER_SETTINGS_SAVE_DEBOUNCE_MS);
   };
 
   const resetStep4 = () => {
     setRenderFile(null);
     setRenderCandidates([]);
     setRenderFileChecked(false);
+    setDownloadHasAmf(false);
     setPreviewFile(null);
     setPreviewConverting(false);
     setPreviewReady(false);
@@ -208,7 +214,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
   // converted Render Mesh that Blender renders (the backend caches it, so the
   // Render request below doesn't convert twice)
   useEffect(() => {
-    if (!renderFile || NATIVE_RENDER_EXTENSIONS.includes(extOf(renderFile.name))) {
+    if (!renderFile || NATIVE_RENDER_EXTENSIONS.includes(modelExtensionOf(renderFile.name))) {
       setPreviewFile(renderFile);
       setPreviewConverting(false);
       return;
@@ -362,6 +368,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       const blob = await res.blob();
       if (mode === DOWNLOAD_MODE_FILES) {
         const entries = await unzipBlob(blob, filename);
+        setDownloadHasAmf(entries.some((e) => modelExtensionOf(e.path[e.path.length - 1]) === ".amf"));
         applyRenderCandidates(pickRenderCandidates(entries));
         const savedToFolder = await saveEntriesToFolder(entries);
         if (savedToFolder === null) return; // user cancelled the folder picker
@@ -378,7 +385,9 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       a.download = filename;
       a.click();
       URL.revokeObjectURL(downloadUrl);
-      applyRenderCandidates(pickRenderCandidates(await unzipBlob(blob, filename)));
+      const entries = await unzipBlob(blob, filename);
+      setDownloadHasAmf(entries.some((e) => modelExtensionOf(e.path[e.path.length - 1]) === ".amf"));
+      applyRenderCandidates(pickRenderCandidates(entries));
       setStep3Result({ filename, bytes: blob.size });
     } catch (err) {
       setStep3Error((err as Error).message || "Download failed");
@@ -409,9 +418,9 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       const data = await res.json() as { task_id?: string; error?: string };
       if (!res.ok || data.error || !data.task_id) throw new Error(data.error || "Failed to start the render");
 
-      const deadline = Date.now() + 120_000; // backend hard-kills at 90s
+      const deadline = Date.now() + RENDER_STATUS_POLL_DEADLINE_MS;
       for (;;) {
-        await new Promise((r) => setTimeout(r, 1000));
+        await new Promise((r) => setTimeout(r, RENDER_STATUS_POLL_INTERVAL_MS));
         const statusRes = await fetch(`/api/render-status/${data.task_id}`);
         const status = await statusRes.json() as { status?: string; image?: string; filename?: string; error?: string };
         if (!statusRes.ok) throw new Error(status.error || "Lost track of the render job");
@@ -671,18 +680,20 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
             />
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">Glossiness ({renderRoughness.toFixed(2)})</span>
+            <span className="text-xs text-text-muted">Glossiness ({(1 - renderRoughness).toFixed(2)})</span>
+            {/* Slider shows glossiness; the persisted/wire value is Principled
+                roughness (glossiness = 1 − roughness), so dragging up = glossier */}
             <input
               type="range"
               aria-label="Glossiness"
               min={0}
               max={1}
               step={0.05}
-              value={renderRoughness}
+              value={1 - renderRoughness}
               onChange={(e) => {
-                const value = Number(e.target.value);
-                setRenderRoughness(value);
-                persistRenderSettings({ roughness: value });
+                const roughness = 1 - Number(e.target.value);
+                setRenderRoughness(roughness);
+                persistRenderSettings({ roughness });
               }}
               className="w-40 accent-primary"
             />
@@ -722,7 +733,9 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
                   ? `Ready to render: ${renderFile.name} (${formatBytes(renderFile.size)})`
                   : "Loading preview..."
               : renderFileChecked
-                ? "No renderable file (.stl/.obj/.ply/.step/.stp/.3mf) in this download"
+                ? downloadHasAmf
+                  ? `.amf is not supported — this download contains .amf 3D files but no supported model (supported: ${RENDERABLE_FORMATS_HINT})`
+                  : `No renderable file (${RENDERABLE_FORMATS_HINT}) in this download`
                 : "Download a model in Step 3 to enable rendering"}
           </p>
         </div>
@@ -758,8 +771,8 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
               <span className="shrink-0">Field of view: {renderFov}°</span>
               <input
                 type="range"
-                min={20}
-                max={80}
+                min={RENDER_FOV_MIN}
+                max={RENDER_FOV_MAX}
                 step={1}
                 value={renderFov}
                 onChange={(e) => {
