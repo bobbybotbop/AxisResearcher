@@ -44,3 +44,21 @@ def test_unsupported_extension_rejected(tmp_path):
     mesh.write_text("<amf/>")
     with pytest.raises(UnsupportedFormatError, match="\\.amf"):
         render_model(mesh, tmp_path / "out.png")
+
+
+def test_hung_blender_is_killed_with_friendly_timeout(tmp_path, monkeypatch):
+    """A Blender process exceeding the hard kill surfaces a friendly error."""
+    import subprocess
+
+    from backend.render import get_blender_path
+
+    def hang(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout"))
+
+    monkeypatch.setattr(subprocess, "run", hang)
+    mesh = tmp_path / "model.stl"
+    mesh.write_text("solid x\nendsolid x\n")
+    if not os.path.exists(get_blender_path()):
+        pytest.skip("Blender not installed on this machine")
+    with pytest.raises(RenderError, match="too long"):
+        render_model(mesh, tmp_path / "out.png")
