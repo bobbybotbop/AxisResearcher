@@ -7,7 +7,7 @@
 Scene per .scratch/studio-render/spec.md: white sweep + shadow-catcher ground,
 3-point area-light rig, single Principled BSDF, Cycles CPU + OIDN denoise.
 Camera params (--azimuth/--elevation/--fov) come from the preview's Camera
-Intent (converted to Z-up by backend.render.camera); --target defaults to the
+Intent (converted to Z-up by backend.render.camera); the camera looks at the
 normalized model center and distance is auto-computed to frame the whole model.
 """
 
@@ -31,11 +31,10 @@ def parse_args():
     parser.add_argument("--color", type=float, nargs=3, default=[0.102, 0.102, 0.102])
     parser.add_argument("--roughness", type=float, default=0.3)
     parser.add_argument("--resolution", type=int, default=1024)
-    # Camera Intent (ticket 03): direction + target + FOV
+    # Camera Intent (ticket 03): viewing direction + FOV
     parser.add_argument("--azimuth", type=float, default=45.0)
     parser.add_argument("--elevation", type=float, default=28.0)
     parser.add_argument("--fov", type=float, default=40.0)
-    parser.add_argument("--target", type=float, nargs=3, default=None)
     return parser.parse_args(argv)
 
 
@@ -127,7 +126,12 @@ def add_area_light(name, location, energy, size, color=(1.0, 1.0, 1.0), target=V
     return obj
 
 
-def add_ground():
+def setup_shadow_catcher_ground():
+    """Add the ground plane; return True when it's a real shadow catcher.
+
+    Blender builds without shadow-catcher support get a plain white floor
+    instead (returned False so the caller can skip the transparent-film path).
+    """
     mesh = bpy.data.meshes.new("Ground")
     half = 50.0
     mesh.from_pydata(
@@ -210,8 +214,8 @@ def main():
     center, radius = normalize(model)
     apply_material(model, args.color, args.roughness)
 
-    has_shadow_catcher = add_ground()
-    target = args.target if args.target else (0.0, 0.0, center.z)
+    has_shadow_catcher = setup_shadow_catcher_ground()
+    target = (0.0, 0.0, center.z)
 
     # 3-point area-light rig (key / fill / rim); only the key casts a shadow so
     # the floor gets one clean soft contact shadow

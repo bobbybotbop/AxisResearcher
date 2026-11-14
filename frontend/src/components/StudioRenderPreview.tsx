@@ -5,6 +5,13 @@ import * as THREE from "three";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { PLYLoader } from "three/examples/jsm/loaders/PLYLoader.js";
+import {
+  DEFAULT_VIEW_DIRECTION,
+  modelExtensionOf,
+  PREVIEW_FRAME_MARGIN,
+  PREVIEW_INITIAL_CAMERA,
+  PREVIEW_MATERIAL_DEFAULTS,
+} from "../constants/render";
 
 // Camera Intent (GLOSSARY.md): the preview camera state captured on Render —
 // position + look-at target + FOV in three.js (Y-up) coordinates.
@@ -18,20 +25,15 @@ export interface StudioRenderPreviewHandle {
   getCameraIntent: () => CameraIntent | null;
 }
 
-// Blender's default studio angle (azimuth 45, elevation 28) expressed in
-// three.js (Y-up) coordinates: blender (x,y,z) maps to three (x,z,-y).
-const DEFAULT_VIEW_DIRECTION = new THREE.Vector3(0.6243, 0.4695, -0.6243).normalize();
-const FRAME_MARGIN = 1.15; // matches blender_studio.py so the preview frames like the render
-
-const extOf = (name: string) => name.slice(name.lastIndexOf(".")).toLowerCase();
+const defaultViewDirection = new THREE.Vector3(...DEFAULT_VIEW_DIRECTION).normalize();
 
 // Build the preview object so it matches what Blender shows for the same file:
 // STL/PLY are imported raw (Z-up) by Blender, so rotate them upright in the
 // Y-up preview; Blender's OBJ importer converts Y-up -> Z-up itself, and
 // three.js loads OBJ raw, so OBJ needs no rotation.
 const loadModel = async (file: File): Promise<THREE.Object3D> => {
-  const material = new THREE.MeshStandardMaterial({ color: "#1a1a1a", roughness: 0.3, metalness: 0 });
-  const ext = extOf(file.name);
+  const material = new THREE.MeshStandardMaterial(PREVIEW_MATERIAL_DEFAULTS);
+  const ext = modelExtensionOf(file.name);
   if (ext === ".stl" || ext === ".ply") {
     const buffer = await file.arrayBuffer();
     const geometry = ext === ".stl" ? new STLLoader().parse(buffer) : new PLYLoader().parse(buffer);
@@ -88,9 +90,9 @@ function PreviewScene({ file, fov, controlsRef, onReady, onError }: PreviewScene
         // Frame the whole model from the default studio angle, mirroring the
         // render's auto-framing (bounding sphere + FOV + margin)
         const sphere = new THREE.Box3().setFromObject(obj).getBoundingSphere(new THREE.Sphere());
-        const distance = (sphere.radius / Math.tan(THREE.MathUtils.degToRad(fov) / 2)) * FRAME_MARGIN;
+        const distance = (sphere.radius / Math.tan(THREE.MathUtils.degToRad(fov) / 2)) * PREVIEW_FRAME_MARGIN;
         if (camera instanceof THREE.PerspectiveCamera) {
-          camera.position.copy(sphere.center).addScaledVector(DEFAULT_VIEW_DIRECTION, distance);
+          camera.position.copy(sphere.center).addScaledVector(defaultViewDirection, distance);
           camera.near = Math.max(distance / 100, 0.0001);
           camera.far = distance * 100;
           camera.fov = fov;
@@ -162,20 +164,20 @@ const StudioRenderPreview = forwardRef<StudioRenderPreviewHandle, StudioRenderPr
       <div className="flex flex-col gap-1">
         <div className="overflow-hidden rounded-lg border border-border-default">
           <Canvas
-            camera={{ fov, position: [3, 2.3, -3], near: 0.01, far: 1000 }}
+            camera={{ fov, ...PREVIEW_INITIAL_CAMERA }}
             style={{ height: 320, background: "#ffffff" }}
           >
             <ambientLight intensity={0.7} />
             <directionalLight position={[4, 6, 3]} intensity={1.2} />
             <directionalLight position={[-4, 2, -3]} intensity={0.4} />
             <PreviewScene file={file} fov={fov} controlsRef={controlsRef} onReady={() => onReady?.()} onError={setLoadError} />
-            <OrbitControls ref={controlsRef} makeDefault maxPolarAngle={Math.PI / 2} />
+            <OrbitControls ref={controlsRef} makeDefault />
           </Canvas>
         </div>
         {loadError ? (
           <p className="text-xs text-red-400">{loadError}</p>
         ) : (
-          <p className="text-xs text-text-muted">Drag to orbit · scroll to zoom · the render matches this angle</p>
+          <p className="text-xs text-text-muted">Drag to orbit to choose the render angle · field of view is adjusted below</p>
         )}
       </div>
     );
