@@ -234,8 +234,14 @@ def main():
 
     scene.render.engine = "CYCLES"
     scene.cycles.device = "CPU"
-    scene.cycles.samples = 64
+    # Tuned for the 10-25s band at 1024px on a Ryzen 9 5900HS (spec: 30s soft
+    # target): a uniform-color model on a white sweep converges fast, so few
+    # samples + an aggressive adaptive threshold + shallow bounces + OIDN
+    # denoising lose nothing visible. Measured 38.7s before tuning.
+    scene.cycles.samples = 48
     scene.cycles.use_adaptive_sampling = True
+    scene.cycles.adaptive_threshold = 0.02
+    scene.cycles.max_bounces = 4
     scene.cycles.use_denoising = True
     try:
         scene.view_layers[0].cycles.denoiser = "OPENIMAGEDENOISE"
