@@ -31,19 +31,22 @@ interface UnzippedEntry {
   data: Blob;
 }
 
-// Formats Blender imports natively (ticket 02 scope); mirrors backend PREFERRED_3D_EXTENSIONS order
+// Formats Blender imports natively — everything else the backend normalizes to
+// an STL Render Mesh (.step/.stp via gmsh, .3mf via trimesh) before rendering.
 const NATIVE_RENDER_EXTENSIONS = [".obj", ".stl", ".ply"];
+// Renderable candidates, mirrors backend PREFERRED_3D_EXTENSIONS order
+const RENDER_CANDIDATE_EXTENSIONS = [".3mf", ".step", ".stp", ".obj", ".stl", ".ply"];
 const extOf = (name: string) => name.slice(name.lastIndexOf(".")).toLowerCase();
 
-// All natively renderable entries (zip contents or a single file), best-ranked
-// first. Empty when nothing renderable is inside (format conversion lands in ticket 04).
+// All renderable entries (zip contents or a single file), best-ranked first.
+// Empty when nothing renderable is inside.
 const pickRenderCandidates = (entries: UnzippedEntry[]): File[] =>
   entries
-    .filter((e) => NATIVE_RENDER_EXTENSIONS.includes(extOf(e.path[e.path.length - 1])))
+    .filter((e) => RENDER_CANDIDATE_EXTENSIONS.includes(extOf(e.path[e.path.length - 1])))
     .sort(
       (a, b) =>
-        NATIVE_RENDER_EXTENSIONS.indexOf(extOf(a.path[a.path.length - 1])) -
-        NATIVE_RENDER_EXTENSIONS.indexOf(extOf(b.path[b.path.length - 1])),
+        RENDER_CANDIDATE_EXTENSIONS.indexOf(extOf(a.path[a.path.length - 1])) -
+        RENDER_CANDIDATE_EXTENSIONS.indexOf(extOf(b.path[b.path.length - 1])),
     )
     .map((e) => new File([e.data], e.path[e.path.length - 1]));
 
@@ -140,10 +143,14 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
   const [step3Result, setStep3Result] = useState<{ filename: string; bytes: number; fileCount?: number } | null>(null);
   const [step3Error, setStep3Error] = useState<string | null>(null);
 
-  // Step 4 — Studio Render (renderFile = best native-format file from the Step 3 download)
+  // Step 4 — Studio Render (renderFile = best renderable file from the Step 3 download;
+  // previewFile = the Render Mesh the preview shows — the upload itself for native
+  // formats, otherwise the STL the backend normalized it to)
   const [renderFile, setRenderFile] = useState<File | null>(null);
   const [renderCandidates, setRenderCandidates] = useState<File[]>([]);
   const [renderFileChecked, setRenderFileChecked] = useState(false);
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [previewConverting, setPreviewConverting] = useState(false);
   const [renderFov, setRenderFov] = useState(RENDER_SETTINGS_DEFAULTS.fov);
   const [previewReady, setPreviewReady] = useState(false);
   const previewRef = useRef<StudioRenderPreviewHandle>(null);
@@ -189,11 +196,50 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
     setRenderFile(null);
     setRenderCandidates([]);
     setRenderFileChecked(false);
+    setPreviewFile(null);
+    setPreviewConverting(false);
     setPreviewReady(false);
     setStep4Loading(false);
     setStep4Image(null);
     setStep4Error(null);
   };
+
+  // Normalize non-native formats server-side so the preview shows the same
+  // converted Render Mesh that Blender renders (the backend caches it, so the
+  // Render request below doesn't convert twice)
+  useEffect(() => {
+    if (!renderFile || NATIVE_RENDER_EXTENSIONS.includes(extOf(renderFile.name))) {
+      setPreviewFile(renderFile);
+      setPreviewConverting(false);
+      return;
+    }
+    let cancelled = false;
+    setPreviewFile(null);
+    setPreviewConverting(true);
+    setStep4Error(null);
+    const form = new FormData();
+    form.append("file", renderFile);
+    fetch("/api/render-preview", { method: "POST", body: form })
+      .then(async (res) => {
+        if (!res.ok) {
+          const data = (await res.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(data?.error || "Could not convert the model for preview");
+        }
+        return res.blob();
+      })
+      .then((blob) => {
+        if (cancelled) return;
+        const stlName = renderFile.name.replace(/\.[^.]+$/, "") + ".stl";
+        setPreviewFile(new File([blob], stlName));
+        setPreviewConverting(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setPreviewConverting(false);
+        setStep4Error((err as Error).message || "Could not convert the model for preview");
+      });
+    return () => { cancelled = true; };
+  }, [renderFile]);
 
   // Auto-pick the best-ranked model; the dropdown lets the user switch when
   // a download contains several renderable candidates
@@ -609,7 +655,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       {/* Step 4 — Studio Render */}
       <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
         <p className="text-sm font-semibold text-text-primary">Step 4 — Studio Render</p>
-        {/* Render Settings — persisted; camera/preview controls land separately (ticket 03) */}
+        {/* Render Settings — persisted; camera angle is captured from the preview below */}
         <div className="flex flex-wrap items-end gap-x-6 gap-y-3 rounded-lg border border-border-default p-3">
           <label className="flex flex-col gap-1">
             <span className="text-xs text-text-muted">Color</span>
@@ -664,17 +710,19 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
             type="button"
             className={btnPill}
             onClick={handleStep4Render}
-            disabled={!renderFile || !previewReady || step4Loading}
+            disabled={!renderFile || !previewFile || !previewReady || step4Loading}
           >
             {step4Loading ? "Rendering..." : "Render"}
           </button>
           <p className="text-xs text-text-muted">
             {renderFile
-              ? previewReady
-                ? `Ready to render: ${renderFile.name} (${formatBytes(renderFile.size)})`
-                : "Loading preview..."
+              ? previewConverting
+                ? `Converting ${renderFile.name} for preview...`
+                : previewReady
+                  ? `Ready to render: ${renderFile.name} (${formatBytes(renderFile.size)})`
+                  : "Loading preview..."
               : renderFileChecked
-                ? "No renderable .stl/.obj/.ply file in this download — other formats are not supported yet"
+                ? "No renderable file (.stl/.obj/.ply/.step/.stp/.3mf) in this download"
                 : "Download a model in Step 3 to enable rendering"}
           </p>
         </div>
@@ -698,11 +746,11 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
             </select>
           </label>
         )}
-        {renderFile && (
+        {renderFile && previewFile && (
           <>
             <StudioRenderPreview
               ref={previewRef}
-              file={renderFile}
+              file={previewFile}
               fov={renderFov}
               onReady={() => setPreviewReady(true)}
             />

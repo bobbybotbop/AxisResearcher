@@ -1,8 +1,15 @@
 # Studio Render (Step 4) constants. See .scratch/studio-render/spec.md and
 # docs/adr/0001-studio-render-pipeline.md.
 
-# Formats Blender 3.6 imports natively; others are normalized in a later ticket.
+# Formats Blender 3.6 imports natively; others are normalized to STL first
+# (backend/render/normalize.py) so preview and render share one Render Mesh.
 NATIVE_RENDER_EXTENSIONS: tuple[str, ...] = (".stl", ".obj", ".ply")
+
+# Uploads normalized to STL before Blender sees them: .step/.stp via the gmsh
+# pip wheel, .3mf via trimesh (ADR 0001). .amf is unsupported everywhere.
+CONVERTIBLE_RENDER_EXTENSIONS: tuple[str, ...] = (".3mf", ".step", ".stp")
+
+SUPPORTED_RENDER_EXTENSIONS: tuple[str, ...] = NATIVE_RENDER_EXTENSIONS + CONVERTIBLE_RENDER_EXTENSIONS
 
 # Render Settings defaults (spec: near-black, slightly glossy, 1024x1024)
 DEFAULT_RENDER_COLOR = "#1a1a1a"

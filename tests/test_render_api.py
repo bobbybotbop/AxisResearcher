@@ -184,3 +184,78 @@ def test_render_image_rejects_bad_filename(client):
     assert res.status_code in (400, 404)
     res = client.get("/api/render-image/evil.png")
     assert res.status_code == 400
+
+
+@pytest.fixture(scope="module")
+def box_3mf_bytes():
+    import trimesh
+    return trimesh.creation.box(extents=(10, 10, 10)).export(file_type="3mf")
+
+
+@pytest.fixture(scope="module")
+def box_step_bytes(tmp_path_factory):
+    import gmsh
+    path = tmp_path_factory.mktemp("meshes") / "box.step"
+    gmsh.initialize()
+    try:
+        gmsh.option.setNumber("General.Terminal", 0)
+        gmsh.model.add("box")
+        gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)
+        gmsh.model.occ.synchronize()
+        gmsh.write(str(path))
+    finally:
+        gmsh.finalize()
+    return path.read_bytes()
+
+
+def test_render_accepts_3mf_and_renders_the_converted_stl(client, fake_render, box_3mf_bytes):
+    res = _post_render(client, filename="model.3mf", data=box_3mf_bytes)
+    assert res.status_code == 200
+    payload = _wait_for_status(client, res.get_json()["task_id"])
+    assert payload["status"] == "completed"
+    # Blender only ever sees the normalized Render Mesh
+    assert str(fake_render["input"]).lower().endswith(".stl")
+
+
+def test_render_accepts_step_and_renders_the_converted_stl(client, fake_render, box_step_bytes):
+    res = _post_render(client, filename="model.step", data=box_step_bytes)
+    assert res.status_code == 200
+    payload = _wait_for_status(client, res.get_json()["task_id"])
+    assert payload["status"] == "completed"
+    assert str(fake_render["input"]).lower().endswith(".stl")
+
+
+def test_preview_then_render_converts_only_once(client, fake_render, tmp_path, monkeypatch):
+    import trimesh
+    import backend.render.normalize as normalize
+
+    data = trimesh.creation.box(extents=(7, 7, 7)).export(file_type="3mf")
+    calls = []
+    original = normalize._convert_3mf_to_stl
+
+    def counting(src, dst):
+        calls.append(src)
+        return original(src, dst)
+
+    monkeypatch.setattr(normalize, "_convert_3mf_to_stl", counting)
+
+    preview_res = client.post(
+        "/api/render-preview",
+        data={"file": (io.BytesIO(data), "model.3mf")},
+        content_type="multipart/form-data",
+    )
+    assert preview_res.status_code == 200
+
+    render_res = _post_render(client, filename="model.3mf", data=data)
+    assert render_res.status_code == 200
+    payload = _wait_for_status(client, render_res.get_json()["task_id"])
+    assert payload["status"] == "completed"
+    assert len(calls) == 1
+
+
+def test_render_corrupt_3mf_fails_with_friendly_error(client, fake_render):
+    res = _post_render(client, filename="model.3mf", data=b"not a real archive")
+    assert res.status_code == 200
+    payload = _wait_for_status(client, res.get_json()["task_id"])
+    assert payload["status"] == "failed"
+    assert "Traceback" not in payload["error"]
