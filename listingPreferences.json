@@ -15,10 +15,11 @@
   "auto_restock_enabled": true,
   "auto_restock_quantity": 15,
   "minimum_images_per_listing": 2,
-  "manual_listings_last_refreshed": "2026-11-17T19:08:38.410858+00:00",
+  "manual_listings_last_refreshed": "2026-11-17T19:31:56.207300+00:00",
   "auto_promote_enabled": true,
   "promoted_listing_ad_rate": 9.0,
   "promoted_listing_campaign_id": "",
   "promoted_listing_ad_group_id": "",
-  "operation_cooldown_hours": 24
+  "operation_cooldown_hours": 24,
+  "render_fov": 40.0
 }

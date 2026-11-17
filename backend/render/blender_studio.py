@@ -66,7 +66,11 @@ def join_objects(objects):
 
 
 def normalize(model):
-    """Center on origin, base on z=0, largest dimension = STANDARD_SIZE."""
+    """Center on origin, base on z=0, largest dimension = STANDARD_SIZE.
+
+    Returns (center, radius, model_top_z) where model_top_z is the z-coordinate
+    of the model's highest point after normalization.
+    """
     bpy.context.view_layer.objects.active = model
     bpy.ops.object.select_all(action="DESELECT")
     model.select_set(True)
@@ -88,7 +92,8 @@ def normalize(model):
     bbox = [Vector(c) for c in model.bound_box]
     center = sum(bbox, Vector()) / 8
     radius = max((c - center).length for c in bbox)
-    return center, radius
+    model_top_z = max(c.z for c in bbox)
+    return center, radius, model_top_z
 
 
 def apply_material(model, color, roughness):
@@ -126,8 +131,8 @@ def add_area_light(name, location, energy, size, color=(1.0, 1.0, 1.0), target=V
     return obj
 
 
-def setup_shadow_catcher_ground():
-    """Add the ground plane; return True when it's a real shadow catcher.
+def setup_shadow_catcher_ground(z=0.0):
+    """Add the ground plane at height z; return True when it's a real shadow catcher.
 
     Blender builds without shadow-catcher support get a plain white floor
     instead (returned False so the caller can skip the transparent-film path).
@@ -135,7 +140,7 @@ def setup_shadow_catcher_ground():
     mesh = bpy.data.meshes.new("Ground")
     half = 50.0
     mesh.from_pydata(
-        [(-half, -half, 0), (half, -half, 0), (half, half, 0), (-half, half, 0)],
+        [(-half, -half, z), (half, -half, z), (half, half, z), (-half, half, z)],
         [],
         [(0, 1, 2, 3)],
     )
@@ -211,17 +216,27 @@ def main():
     scene = bpy.context.scene
 
     model = join_objects(import_mesh(args.input))
-    center, radius = normalize(model)
+    center, radius, model_top_z = normalize(model)
     apply_material(model, args.color, args.roughness)
 
-    has_shadow_catcher = setup_shadow_catcher_ground()
+    # When the camera is below the model (negative elevation), the ground plane
+    # at z=0 would block the view of the model's underside. Flip it to the top
+    # so the camera sees the model, not the ground plane's underside.
+    ground_z = model_top_z if args.elevation < 0 else 0.0
+    has_shadow_catcher = setup_shadow_catcher_ground(z=ground_z)
     target = (0.0, 0.0, center.z)
 
     # 3-point area-light rig (key / fill / rim); only the key casts a shadow so
-    # the floor gets one clean soft contact shadow
-    add_area_light("Key", (4, -3, 6), energy=150, size=1.5)
-    add_area_light("Fill", (-4, -2, 3), energy=60, size=4.0, shadow=False)
-    add_area_light("Rim", (1, 5, 7), energy=250, size=3.0, shadow=False)
+    # the floor gets one clean soft contact shadow. When the camera is below,
+    # mirror the rig to negative z so the underside is lit.
+    if args.elevation < 0:
+        add_area_light("Key", (4, -3, -6), energy=150, size=1.5)
+        add_area_light("Fill", (-4, -2, -3), energy=60, size=4.0, shadow=False)
+        add_area_light("Rim", (1, 5, -7), energy=250, size=3.0, shadow=False)
+    else:
+        add_area_light("Key", (4, -3, 6), energy=150, size=1.5)
+        add_area_light("Fill", (-4, -2, 3), energy=60, size=4.0, shadow=False)
+        add_area_light("Rim", (1, 5, 7), energy=250, size=3.0, shadow=False)
 
     add_camera(target, radius, args.azimuth, args.elevation, args.fov)
 
