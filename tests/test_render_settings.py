@@ -48,6 +48,8 @@ SPEC_DEFAULTS = {
     "shadow": True,
     "shadow_softness": 1.5,
     "exposure": 1.0,
+    "shot_mode": "single",
+    "rig": [],
 }
 
 
@@ -60,7 +62,8 @@ def test_get_render_settings_returns_spec_defaults(config_file):
 
 def test_render_settings_schema_has_no_camera_keys(config_file):
     # Camera angle/target stay ephemeral (spec); the persisted schema is the
-    # full Render Settings surface: material, lighting, shadows, exposure, fov.
+    # full Render Settings surface: material, lighting, shadows, exposure, fov,
+    # plus Shot Mode and its Camera Rig.
     assert set(combine_data.get_render_settings()) == set(SPEC_DEFAULTS)
 
 

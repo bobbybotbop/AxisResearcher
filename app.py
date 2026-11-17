@@ -54,7 +54,7 @@ from backend.copyScripts.create_image import (
     _openrouter_response_dict_to_image_bytes_and_mime,
     upload_image_bytes_to_ebay,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, migrate_hide_not_found_listings, get_render_settings, save_render_settings, get_render_profiles, save_render_profile, delete_render_profile, get_active_render_profile, set_active_render_profile
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, migrate_hide_not_found_listings, get_render_settings, save_render_settings, get_render_profiles, save_render_profile, delete_render_profile, get_active_render_profile, set_active_render_profile, _validate_rig
 from backend.helper_functions import remove_html_tags
 import os
 import json
@@ -91,6 +91,7 @@ from backend.constants.render import (
     RENDER_LAYER_HEIGHT_MM_MAX, RENDER_LAYER_HEIGHT_MM_MIN,
     RENDER_OUTPUT_PREFIX, RENDER_RESOLUTIONS,
     RENDER_SHADOW_SOFTNESS_MAX, RENDER_SHADOW_SOFTNESS_MIN,
+    DEFAULT_RENDER_SHOT_MODE, RENDER_SHOT_MODES,
     SUPPORTED_RENDER_EXTENSIONS,
 )
 from backend.render import render_model, RenderError
@@ -3742,14 +3743,38 @@ def start_render():
         else:
             azimuth, elevation = DEFAULT_RENDER_AZIMUTH, DEFAULT_RENDER_ELEVATION
 
+        # Shot Mode + Camera Rig: multi runs one sequential Render Job per rig
+        # camera (Cycles CPU saturates the machine — never parallel). An empty
+        # rig in multi mode falls back to the single camera above.
+        shot_mode = request.form.get("shot_mode", DEFAULT_RENDER_SHOT_MODE)
+        if shot_mode not in RENDER_SHOT_MODES:
+            return jsonify({"error": f"shot_mode must be one of {list(RENDER_SHOT_MODES)}", "task_id": None}), 400
+        rig = []
+        raw_rig = request.form.get("rig")
+        if raw_rig is not None:
+            try:
+                rig = _validate_rig(json.loads(raw_rig))
+            except (ValueError, TypeError):
+                return jsonify({"error": "rig must be a JSON list of cameras like [{\"azimuth\": 0, \"elevation\": 0}]", "task_id": None}), 400
+        cameras = rig if (shot_mode == "multi" and rig) else [{"azimuth": azimuth, "elevation": elevation}]
+
         os.makedirs(GENERATED_IMAGES_DIR, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{RENDER_OUTPUT_PREFIX}{timestamp}.png"
-        suffix = 1
-        while os.path.exists(os.path.join(GENERATED_IMAGES_DIR, filename)):
-            filename = f"{RENDER_OUTPUT_PREFIX}{timestamp}_{suffix}.png"
-            suffix += 1
-        output_path = os.path.join(GENERATED_IMAGES_DIR, filename)
+
+        def claim_filename(name):
+            suffix = 1
+            while os.path.exists(os.path.join(GENERATED_IMAGES_DIR, name)):
+                stem, dot, ext = name.rpartition(".")
+                base = stem.rsplit("_", 1)[0] if suffix > 1 else stem
+                name = f"{base}_{suffix}{dot}{ext}"
+                suffix += 1
+            return name
+
+        if shot_mode == "multi":
+            filenames = [claim_filename(f"{RENDER_OUTPUT_PREFIX}{timestamp}_shot{i + 1}.png")
+                         for i in range(len(cameras))]
+        else:
+            filenames = [claim_filename(f"{RENDER_OUTPUT_PREFIX}{timestamp}.png")]
 
         fd, input_path = tempfile.mkstemp(prefix="render_upload_", suffix=extension)
         os.close(fd)
@@ -3757,33 +3782,41 @@ def start_render():
 
         task_id = str(uuid.uuid4())
         with render_tasks_lock:
-            render_tasks[task_id] = {"status": "running", "image": None, "filename": None, "error": None}
+            render_tasks[task_id] = {
+                "status": "running", "image": None, "filename": None, "error": None,
+                "images": [], "shots_completed": 0, "shots_total": len(cameras),
+                "multi": shot_mode == "multi",
+            }
 
         def run_render():
             try:
                 # Normalize to the Render Mesh first (native formats pass through).
                 # The converted STL is cache-owned — only the uploaded temp is removed below.
                 mesh_path = normalize_to_render_mesh(input_path)
-                render_model(
-                    mesh_path, output_path,
-                    color=color, roughness=roughness, resolution=resolution,
-                    azimuth=azimuth, elevation=elevation, fov=fov,
-                    finish=finish,
-                    layer_height_mm=expanded["layer_height_mm"],
-                    layer_depth=expanded["layer_depth"],
-                    key_energy=expanded["key_energy"],
-                    fill_energy=expanded["fill_energy"],
-                    rim_energy=expanded["rim_energy"],
-                    ambient=expanded["ambient"],
-                    shadow=shadow,
-                    shadow_softness=expanded["shadow_softness"],
-                    exposure=expanded["exposure"],
-                )
+                for camera, shot_filename in zip(cameras, filenames):
+                    render_model(
+                        mesh_path, os.path.join(GENERATED_IMAGES_DIR, shot_filename),
+                        color=color, roughness=roughness, resolution=resolution,
+                        azimuth=camera["azimuth"], elevation=camera["elevation"], fov=fov,
+                        finish=finish,
+                        layer_height_mm=expanded["layer_height_mm"],
+                        layer_depth=expanded["layer_depth"],
+                        key_energy=expanded["key_energy"],
+                        fill_energy=expanded["fill_energy"],
+                        rim_energy=expanded["rim_energy"],
+                        ambient=expanded["ambient"],
+                        shadow=shadow,
+                        shadow_softness=expanded["shadow_softness"],
+                        exposure=expanded["exposure"],
+                    )
+                    with render_tasks_lock:
+                        render_tasks[task_id]["images"].append(f"/api/render-image/{shot_filename}")
+                        render_tasks[task_id]["shots_completed"] += 1
                 with render_tasks_lock:
                     render_tasks[task_id].update(
                         status="completed",
-                        filename=filename,
-                        image=f"/api/render-image/{filename}",
+                        filename=filenames[0],
+                        image=f"/api/render-image/{filenames[0]}",
                     )
             except RenderError as e:
                 print(f"[API] /api/render task {task_id} failed: {e}")
@@ -3859,6 +3892,12 @@ def get_render_status(task_id):
             if task["status"] == "completed":
                 response_data["image"] = task["image"]
                 response_data["filename"] = task["filename"]
+            # Multi-shot progress: images completed so far. Single-shot renders
+            # keep the original payload shape (no images list).
+            if task.get("multi"):
+                response_data["images"] = list(task.get("images", []))
+                response_data["shots_completed"] = task.get("shots_completed", 0)
+                response_data["shots_total"] = task.get("shots_total", 1)
             return jsonify(response_data), 200
     except Exception as e:
         return jsonify({"error": f"An error occurred while checking status: {str(e)}", "status": None}), 500
@@ -3867,7 +3906,7 @@ def get_render_status(task_id):
 @app.route('/api/render-image/<filename>', methods=['GET'])
 def serve_render_image(filename):
     """Serve a rendered PNG from the generated-images dir. Validates filename pattern."""
-    if not re.match(rf'^{RENDER_OUTPUT_PREFIX}\d{{8}}_\d{{6}}(_\d+)?\.png$', filename):
+    if not re.match(rf'^{RENDER_OUTPUT_PREFIX}\d{{8}}_\d{{6}}(_(shot)?\d+)?\.png$', filename):
         return jsonify({"error": "Invalid filename"}), 400
     filepath = os.path.join(GENERATED_IMAGES_DIR, filename)
     if not os.path.exists(filepath):
@@ -3882,7 +3921,7 @@ def api_render_settings():
     Read or update persisted Render Settings (Step 4 Studio Render).
 
     GET:        returns the full Render Settings surface (material, lighting,
-                shadows, exposure, resolution, fov)
+                shadows, exposure, resolution, fov, shot mode, camera rig)
     POST:       JSON body with any subset of those keys; persists and returns
                 the saved state. Camera angle/target are ephemeral by design.
     """
@@ -3908,6 +3947,8 @@ def api_render_settings():
             shadow=body.get('shadow'),
             shadow_softness=body.get('shadow_softness'),
             exposure=body.get('exposure'),
+            shot_mode=body.get('shot_mode'),
+            rig=body.get('rig'),
         )
         return jsonify(settings), 200
     except (TypeError, ValueError) as e:

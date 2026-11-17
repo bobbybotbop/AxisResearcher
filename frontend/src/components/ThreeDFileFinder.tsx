@@ -16,12 +16,9 @@ import {
   RENDER_FINISH_OPTIONS,
   RENDER_FOV_MAX,
   RENDER_FOV_MIN,
-<<<<<<< HEAD
   RENDER_LAYER_HEIGHT_MM_MAX,
   RENDER_LAYER_HEIGHT_MM_MIN,
   RENDER_RESOLUTION_OPTIONS,
-=======
->>>>>>> integration/render-profiles
   RENDER_SETTINGS_DEFAULTS,
   RENDER_SETTINGS_SAVE_DEBOUNCE_MS,
   RENDER_SHADOW_SOFTNESS_MAX,
@@ -29,11 +26,8 @@ import {
   RENDER_STATUS_POLL_DEADLINE_MS,
   RENDER_STATUS_POLL_INTERVAL_MS,
   RENDERABLE_FORMATS_HINT,
-<<<<<<< HEAD
   type RenderFinish,
-=======
   type RenderProfileSettings,
->>>>>>> integration/render-profiles
 } from "../constants/render";
 
 interface SearchResult {
@@ -780,6 +774,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
         ) : (
           /* Render Profile — selecting one copies its values into Current
              Settings (the flat settings); camera angle is captured from the preview below */
+          <>
           <div className="flex items-center gap-3 rounded-lg border border-border-default p-3">
             <RenderProfileDropdown
               onSelect={handleProfileSelect}
@@ -789,8 +784,9 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
               }}
               addToast={addToast}
             />
-<<<<<<< HEAD
-          </label>
+          </div>
+          {/* Render Settings — persisted; camera angle is captured from the preview below */}
+          <div className="flex flex-wrap items-end gap-x-6 gap-y-3 rounded-lg border border-border-default p-3">
           <label className="flex flex-col gap-1">
             <span className="text-xs text-text-muted">Glossiness ({(1 - renderRoughness).toFixed(2)})</span>
             {/* Slider shows glossiness; the persisted/wire value is Principled
@@ -1000,10 +996,8 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
             </label>
           )}
         </div>
-=======
-          </div>
+          </>
         )}
->>>>>>> integration/render-profiles
         <div className="flex items-center gap-3">
           <button
             type="button"
