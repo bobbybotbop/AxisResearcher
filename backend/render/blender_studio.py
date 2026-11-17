@@ -22,6 +22,13 @@ from mathutils import Vector
 STANDARD_SIZE = 2.0
 FRAME_MARGIN = 1.15  # breathing room around the model in frame
 
+# Layer Lines finish: --layer-height-mm is a real FDM layer height, so it only
+# translates to a wave scale against a known real-world part size. The model is
+# normalized to STANDARD_SIZE scene units; we treat that as a 60mm-tall part
+# (the 3DBenchy reference from .scratch/studio-render/layer-lines-research.md),
+# so 0.2mm layers give 60/0.2 = 300 bands across the Generated bbox.
+ASSUMED_MODEL_HEIGHT_MM = 60.0
+
 
 def parse_args():
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
@@ -35,6 +42,10 @@ def parse_args():
     parser.add_argument("--azimuth", type=float, default=45.0)
     parser.add_argument("--elevation", type=float, default=28.0)
     parser.add_argument("--fov", type=float, default=40.0)
+    # Surface Finish: smooth (plain Principled) or layer-lines (FDM bump)
+    parser.add_argument("--finish", choices=["smooth", "layer-lines"], default="smooth")
+    parser.add_argument("--layer-height-mm", type=float, default=0.2)
+    parser.add_argument("--layer-depth", type=float, default=0.4)
     return parser.parse_args(argv)
 
 
@@ -96,7 +107,7 @@ def normalize(model):
     return center, radius, model_top_z
 
 
-def apply_material(model, color, roughness):
+def apply_material(model, color, roughness, finish="smooth", layer_height_mm=0.2, layer_depth=0.4):
     def srgb_to_linear(c):
         return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
@@ -106,6 +117,29 @@ def apply_material(model, color, roughness):
     bsdf.inputs["Base Color"].default_value = (
         srgb_to_linear(color[0]), srgb_to_linear(color[1]), srgb_to_linear(color[2]), 1.0)
     bsdf.inputs["Roughness"].default_value = roughness
+
+    if finish == "layer-lines":
+        # Procedural FDM layer lines (research: technique 1): Wave Texture
+        # bands perpendicular to the Z print axis feed a Bump node into the
+        # Principled Normal. Generated coordinates need no UVs (STL imports
+        # have none) and span 0-1 over the normalized 2.0-unit bbox, so the
+        # wave Scale is the band count across the model.
+        nt = material.node_tree
+        tex_coord = nt.nodes.new("ShaderNodeTexCoord")
+        wave = nt.nodes.new("ShaderNodeTexWave")
+        wave.wave_type = 'BANDS'
+        wave.bands_direction = 'Z'
+        wave.wave_profile = 'SIN'
+        wave.inputs["Scale"].default_value = ASSUMED_MODEL_HEIGHT_MM / layer_height_mm
+        bump = nt.nodes.new("ShaderNodeBump")
+        bump.inputs["Strength"].default_value = layer_depth
+        # Groove depth in scene units: about half the layer spacing
+        # (spacing = STANDARD_SIZE / band count), per the research.
+        bump.inputs["Distance"].default_value = 0.5 * STANDARD_SIZE * layer_height_mm / ASSUMED_MODEL_HEIGHT_MM
+        nt.links.new(tex_coord.outputs["Generated"], wave.inputs["Vector"])
+        nt.links.new(wave.outputs["Fac"], bump.inputs["Height"])
+        nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+
     if model.data.materials:
         model.data.materials[0] = material
     else:
@@ -217,7 +251,10 @@ def main():
 
     model = join_objects(import_mesh(args.input))
     center, radius, model_top_z = normalize(model)
-    apply_material(model, args.color, args.roughness)
+    apply_material(model, args.color, args.roughness,
+                   finish=args.finish,
+                   layer_height_mm=args.layer_height_mm,
+                   layer_depth=args.layer_depth)
 
     # When the camera is below the model (negative elevation), the ground plane
     # at z=0 would block the view of the model's underside. Flip it to the top
