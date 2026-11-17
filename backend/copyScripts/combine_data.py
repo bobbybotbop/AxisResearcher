@@ -4,12 +4,22 @@ Module for creating eBay inventory and offer objects and saving them to JSON fil
 
 import os
 import json
+import re
 import requests
 from dotenv import load_dotenv
 from datetime import datetime
 from backend.constants.ebay import EBAY_INVENTORY_API_BASE
 from backend.constants.paths import CONFIG_FILE, GENERATED_LISTINGS_DIR
 from backend.constants.listing import SKU_PREFIX, MANUAL_SKU_PREFIX, DEFAULT_OPERATION_COOLDOWN_HOURS, EBAY_STATUS_NOT_FOUND
+from backend.constants.render import (
+    DEFAULT_RENDER_COLOR,
+    DEFAULT_RENDER_FOV,
+    DEFAULT_RENDER_RESOLUTION,
+    DEFAULT_RENDER_ROUGHNESS,
+    RENDER_FOV_MAX,
+    RENDER_FOV_MIN,
+    RENDER_RESOLUTIONS,
+)
 
 # Load environment variables
 load_dotenv()
@@ -1257,6 +1267,74 @@ def update_listing_with_aspects(sku, localizedAspects=None, pre_fetched_aspects=
     except Exception as e:
         print(f"❌ Error updating listing data file: {e}")
         return False
+
+
+def get_render_settings():
+    """
+    Read Studio Render (Step 4) settings from listingPreferences.json.
+
+    Returns:
+        dict: {"color": str, "roughness": float, "resolution": int, "fov": float}
+              Camera angle/target are ephemeral and deliberately not included.
+    """
+    config = load_config()
+    return {
+        "color": str(config.get("render_color", DEFAULT_RENDER_COLOR)),
+        "roughness": float(config.get("render_roughness", DEFAULT_RENDER_ROUGHNESS)),
+        "resolution": int(config.get("render_resolution", DEFAULT_RENDER_RESOLUTION)),
+        "fov": float(config.get("render_fov", DEFAULT_RENDER_FOV)),
+    }
+
+
+def save_render_settings(color=None, roughness=None, resolution=None, fov=None):
+    """
+    Persist Studio Render (Step 4) settings to listingPreferences.json.
+
+    Args:
+        color (str, optional): Hex color like "#1a1a1a". Unchanged if None.
+        roughness (float, optional): Principled roughness 0..1. Unchanged if None.
+        resolution (int, optional): Square size, one of RENDER_RESOLUTIONS. Unchanged if None.
+        fov (float, optional): Preview field of view in degrees. Unchanged if None.
+
+    Returns:
+        dict: {"color": str, "roughness": float, "resolution": int, "fov": float}
+              reflecting the saved state.
+
+    Raises:
+        ValueError: If any provided value is invalid.
+    """
+    config = load_config()
+    if color is not None:
+        color = str(color).strip().lower()
+        if not re.match(r"^#[0-9a-f]{6}$", color):
+            raise ValueError(f"color must be a hex value like #1a1a1a, got '{color}'")
+        config["render_color"] = color
+    if roughness is not None:
+        try:
+            roughness = float(roughness)
+        except (TypeError, ValueError):
+            raise ValueError("roughness must be a number between 0 and 1")
+        if not 0.0 <= roughness <= 1.0:
+            raise ValueError("roughness must be between 0 and 1")
+        config["render_roughness"] = roughness
+    if resolution is not None:
+        try:
+            resolution = int(resolution)
+        except (TypeError, ValueError):
+            raise ValueError(f"resolution must be one of {list(RENDER_RESOLUTIONS)}")
+        if resolution not in RENDER_RESOLUTIONS:
+            raise ValueError(f"resolution must be one of {list(RENDER_RESOLUTIONS)}")
+        config["render_resolution"] = resolution
+    if fov is not None:
+        try:
+            fov = float(fov)
+        except (TypeError, ValueError):
+            raise ValueError(f"fov must be a number between {RENDER_FOV_MIN} and {RENDER_FOV_MAX}")
+        if not RENDER_FOV_MIN <= fov <= RENDER_FOV_MAX:
+            raise ValueError(f"fov must be between {RENDER_FOV_MIN} and {RENDER_FOV_MAX}")
+        config["render_fov"] = fov
+    save_config(config)
+    return get_render_settings()
 
 
 def get_manual_import_last_refreshed():

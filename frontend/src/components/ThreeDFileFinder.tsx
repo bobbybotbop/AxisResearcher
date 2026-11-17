@@ -1,8 +1,22 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
 import MessageBarInput from "./MessageBarInput";
+import StudioRenderPreview, { type StudioRenderPreviewHandle } from "./StudioRenderPreview";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { DOWNLOAD_MODE_FILES, DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, threeDSiteKeyFromLink, type DownloadMode, type ThreeDSiteStatus } from "../constants/files3d";
+import {
+  modelExtensionOf,
+  NATIVE_RENDER_EXTENSIONS,
+  RENDER_CANDIDATE_EXTENSIONS,
+  RENDER_FOV_MAX,
+  RENDER_FOV_MIN,
+  RENDER_RESOLUTION_OPTIONS,
+  RENDER_SETTINGS_DEFAULTS,
+  RENDER_SETTINGS_SAVE_DEBOUNCE_MS,
+  RENDER_STATUS_POLL_DEADLINE_MS,
+  RENDER_STATUS_POLL_INTERVAL_MS,
+  RENDERABLE_FORMATS_HINT,
+} from "../constants/render";
 
 interface SearchResult {
   site_type?: string;
@@ -28,6 +42,25 @@ interface WindowWithDirPicker {
 interface UnzippedEntry {
   path: string[]; // sanitized path segments, filename last
   data: Blob;
+}
+
+// All renderable entries (zip contents or a single file), best-ranked first.
+// Empty when nothing renderable is inside.
+const pickRenderCandidates = (entries: UnzippedEntry[]): File[] =>
+  entries
+    .filter((e) => RENDER_CANDIDATE_EXTENSIONS.includes(modelExtensionOf(e.path[e.path.length - 1])))
+    .sort(
+      (a, b) =>
+        RENDER_CANDIDATE_EXTENSIONS.indexOf(modelExtensionOf(a.path[a.path.length - 1])) -
+        RENDER_CANDIDATE_EXTENSIONS.indexOf(modelExtensionOf(b.path[b.path.length - 1])),
+    )
+    .map((e) => new File([e.data], e.path[e.path.length - 1]));
+
+interface RenderSettingsPatch {
+  color?: string;
+  roughness?: number;
+  resolution?: number;
+  fov?: number;
 }
 
 // Unzip a blob into flat entries; non-zip blobs (e.g. MakerWorld .3mf) become a single entry
@@ -111,6 +144,130 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
   const [step3LoadingMode, setStep3LoadingMode] = useState<DownloadMode | null>(null);
   const [step3Result, setStep3Result] = useState<{ filename: string; bytes: number; fileCount?: number } | null>(null);
   const [step3Error, setStep3Error] = useState<string | null>(null);
+
+  // Step 4 — Studio Render (renderFile = best renderable file from the Step 3 download;
+  // previewFile = the Render Mesh the preview shows — the upload itself for native
+  // formats, otherwise the STL the backend normalized it to)
+  const [renderFile, setRenderFile] = useState<File | null>(null);
+  const [renderCandidates, setRenderCandidates] = useState<File[]>([]);
+  const [renderFileChecked, setRenderFileChecked] = useState(false);
+  // True when the Step 3 download contained .amf files (unsupported, but worth
+  // calling out explicitly in the Step 4 empty state)
+  const [downloadHasAmf, setDownloadHasAmf] = useState(false);
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
+  const [previewConverting, setPreviewConverting] = useState(false);
+  const [renderFov, setRenderFov] = useState(RENDER_SETTINGS_DEFAULTS.fov);
+  const [previewReady, setPreviewReady] = useState(false);
+  const previewRef = useRef<StudioRenderPreviewHandle>(null);
+  const [step4Loading, setStep4Loading] = useState(false);
+  const [step4Image, setStep4Image] = useState<{ url: string; filename: string } | null>(null);
+  const [step4Error, setStep4Error] = useState<string | null>(null);
+
+  // Step 4 — Render Settings (persisted in listingPreferences.json via /api/render-settings)
+  const [renderColor, setRenderColor] = useState(RENDER_SETTINGS_DEFAULTS.color);
+  const [renderRoughness, setRenderRoughness] = useState(RENDER_SETTINGS_DEFAULTS.roughness);
+  const [renderResolution, setRenderResolution] = useState(RENDER_SETTINGS_DEFAULTS.resolution);
+  const renderSettingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load persisted Render Settings once on mount; fall back to spec defaults on failure
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/render-settings")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        if (typeof data.color === "string") setRenderColor(data.color);
+        if (typeof data.roughness === "number") setRenderRoughness(data.roughness);
+        if (typeof data.resolution === "number") setRenderResolution(data.resolution);
+        if (typeof data.fov === "number") setRenderFov(data.fov);
+      })
+      .catch(() => { /* keep spec defaults */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Persist changes debounced (slider/color input fire many events while dragging)
+  const persistRenderSettings = (patch: RenderSettingsPatch) => {
+    if (renderSettingsSaveTimer.current) clearTimeout(renderSettingsSaveTimer.current);
+    renderSettingsSaveTimer.current = setTimeout(() => {
+      fetch("/api/render-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      }).catch(() => { /* persistence is best-effort; the control still applies to renders */ });
+    }, RENDER_SETTINGS_SAVE_DEBOUNCE_MS);
+  };
+
+  const resetStep4 = () => {
+    setRenderFile(null);
+    setRenderCandidates([]);
+    setRenderFileChecked(false);
+    setDownloadHasAmf(false);
+    setPreviewFile(null);
+    setPreviewConverting(false);
+    setPreviewReady(false);
+    setStep4Loading(false);
+    setStep4Image(null);
+    setStep4Error(null);
+  };
+
+  // Normalize non-native formats server-side so the preview shows the same
+  // converted Render Mesh that Blender renders (the backend caches it, so the
+  // Render request below doesn't convert twice)
+  useEffect(() => {
+    if (!renderFile || NATIVE_RENDER_EXTENSIONS.includes(modelExtensionOf(renderFile.name))) {
+      setPreviewFile(renderFile);
+      setPreviewConverting(false);
+      return;
+    }
+    let cancelled = false;
+    setPreviewFile(null);
+    setPreviewConverting(true);
+    setStep4Error(null);
+    const form = new FormData();
+    form.append("file", renderFile);
+    fetch("/api/render-preview", { method: "POST", body: form })
+      .then(async (res) => {
+        if (!res.ok) {
+          const data = (await res.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(data?.error || "Could not convert the model for preview");
+        }
+        return res.blob();
+      })
+      .then((blob) => {
+        if (cancelled) return;
+        const stlName = renderFile.name.replace(/\.[^.]+$/, "") + ".stl";
+        setPreviewFile(new File([blob], stlName));
+        setPreviewConverting(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setPreviewConverting(false);
+        setStep4Error((err as Error).message || "Could not convert the model for preview");
+      });
+    return () => { cancelled = true; };
+  }, [renderFile]);
+
+  // Auto-pick the best-ranked model; the dropdown lets the user switch when
+  // a download contains several renderable candidates
+  const applyRenderCandidates = (candidates: File[]) => {
+    setRenderCandidates(candidates);
+    setRenderFile(candidates[0] ?? null);
+    setRenderFileChecked(true);
+    setPreviewReady(false);
+  };
+
+  // Load a user-chosen local file (single model or zip) into Step 4 through
+  // the same pipeline as a Step 3 download
+  const handleCustomRenderFile = async (file: File) => {
+    setStep4Error(null);
+    try {
+      const entries = await unzipBlob(file, file.name);
+      setDownloadHasAmf(entries.some((e) => modelExtensionOf(e.path[e.path.length - 1]) === ".amf"));
+      applyRenderCandidates(pickRenderCandidates(entries));
+    } catch (err) {
+      setStep4Error((err as Error).message || "Could not read that file");
+    }
+  };
 
   // True when a result link can be forwarded to Step 3
   const canForwardToStep3 = (link: string) =>
@@ -201,6 +358,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
     setStep3LoadingMode(mode);
     setStep3Result(null);
     setStep3Error(null);
+    resetStep4();
     try {
       // "files" mode reuses the full-zip response; unzipping happens client-side
       const wireMode = mode === DOWNLOAD_MODE_FILES ? DOWNLOAD_MODE_FULL_ZIP : mode;
@@ -223,6 +381,8 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       const blob = await res.blob();
       if (mode === DOWNLOAD_MODE_FILES) {
         const entries = await unzipBlob(blob, filename);
+        setDownloadHasAmf(entries.some((e) => modelExtensionOf(e.path[e.path.length - 1]) === ".amf"));
+        applyRenderCandidates(pickRenderCandidates(entries));
         const savedToFolder = await saveEntriesToFolder(entries);
         if (savedToFolder === null) return; // user cancelled the folder picker
         if (!savedToFolder) {
@@ -238,11 +398,56 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       a.download = filename;
       a.click();
       URL.revokeObjectURL(downloadUrl);
+      const entries = await unzipBlob(blob, filename);
+      setDownloadHasAmf(entries.some((e) => modelExtensionOf(e.path[e.path.length - 1]) === ".amf"));
+      applyRenderCandidates(pickRenderCandidates(entries));
       setStep3Result({ filename, bytes: blob.size });
     } catch (err) {
       setStep3Error((err as Error).message || "Download failed");
     } finally {
       setStep3LoadingMode(null);
+    }
+  };
+
+  const handleStep4Render = async () => {
+    if (!renderFile || step4Loading) return;
+    setStep4Loading(true);
+    setStep4Error(null);
+    setStep4Image(null);
+    try {
+      const form = new FormData();
+      form.append("file", renderFile);
+      form.append("color", renderColor);
+      form.append("roughness", String(renderRoughness));
+      form.append("resolution", String(renderResolution));
+      // Camera Intent: the angle the user framed in the preview
+      const intent = previewRef.current?.getCameraIntent();
+      if (intent) {
+        form.append("camera_position", intent.position.join(","));
+        form.append("camera_target", intent.target.join(","));
+      }
+      form.append("fov", String(renderFov));
+      const res = await fetch("/api/render", { method: "POST", body: form });
+      const data = await res.json() as { task_id?: string; error?: string };
+      if (!res.ok || data.error || !data.task_id) throw new Error(data.error || "Failed to start the render");
+
+      const deadline = Date.now() + RENDER_STATUS_POLL_DEADLINE_MS;
+      for (;;) {
+        await new Promise((r) => setTimeout(r, RENDER_STATUS_POLL_INTERVAL_MS));
+        const statusRes = await fetch(`/api/render-status/${data.task_id}`);
+        const status = await statusRes.json() as { status?: string; image?: string; filename?: string; error?: string };
+        if (!statusRes.ok) throw new Error(status.error || "Lost track of the render job");
+        if (status.status === "completed" && status.image && status.filename) {
+          setStep4Image({ url: status.image, filename: status.filename });
+          break;
+        }
+        if (status.status === "failed") throw new Error(status.error || "Render failed");
+        if (Date.now() > deadline) throw new Error("Render is taking too long — check that Blender is installed and the backend is running");
+      }
+    } catch (err) {
+      setStep4Error((err as Error).message || "Render failed");
+    } finally {
+      setStep4Loading(false);
     }
   };
 
@@ -392,6 +597,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
                           setStep3Url(r.link);
                           setStep3Result(null);
                           setStep3Error(null);
+                          resetStep4();
                         }}
                       >
                         Use →
@@ -418,6 +624,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
                 setStep3Url(val);
                 setStep3Result(null);
                 setStep3Error(null);
+                resetStep4();
               }}
               placeholder="Paste printables.com, thingiverse.com, makerworld.com, or cults3d.com URL..."
               disabled={step3LoadingMode !== null}
@@ -465,6 +672,164 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
         )}
         {step3Error && (
           <p className="text-sm text-red-400">{step3Error}</p>
+        )}
+      </div>
+      {/* Step 4 — Studio Render */}
+      <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
+        <p className="text-sm font-semibold text-text-primary">Step 4 — Studio Render</p>
+        {/* Render Settings — persisted; camera angle is captured from the preview below */}
+        <div className="flex flex-wrap items-end gap-x-6 gap-y-3 rounded-lg border border-border-default p-3">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-muted">Color</span>
+            <input
+              type="color"
+              aria-label="Model color"
+              value={renderColor}
+              onChange={(e) => {
+                setRenderColor(e.target.value);
+                persistRenderSettings({ color: e.target.value });
+              }}
+              className="h-8 w-14 cursor-pointer rounded border border-border-default bg-surface-panel"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-muted">Glossiness ({(1 - renderRoughness).toFixed(2)})</span>
+            {/* Slider shows glossiness; the persisted/wire value is Principled
+                roughness (glossiness = 1 − roughness), so dragging up = glossier */}
+            <input
+              type="range"
+              aria-label="Glossiness"
+              min={0}
+              max={1}
+              step={0.05}
+              value={1 - renderRoughness}
+              onChange={(e) => {
+                const roughness = 1 - Number(e.target.value);
+                setRenderRoughness(roughness);
+                persistRenderSettings({ roughness });
+              }}
+              className="w-40 accent-primary"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-muted">Resolution</span>
+            <select
+              aria-label="Resolution"
+              value={renderResolution}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                setRenderResolution(value);
+                persistRenderSettings({ resolution: value });
+              }}
+              className="rounded border border-border-default bg-surface-panel px-2 py-1 text-sm text-text-primary"
+            >
+              {RENDER_RESOLUTION_OPTIONS.map((size) => (
+                <option key={size} value={size}>{size} × {size}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            className={btnPill}
+            onClick={handleStep4Render}
+            disabled={!renderFile || !previewFile || !previewReady || step4Loading}
+          >
+            {step4Loading ? "Rendering..." : "Render"}
+          </button>
+          <p className="text-xs text-text-muted">
+            {renderFile
+              ? previewConverting
+                ? `Converting ${renderFile.name} for preview...`
+                : previewReady
+                  ? `Ready to render: ${renderFile.name} (${formatBytes(renderFile.size)})`
+                  : "Loading preview..."
+              : renderFileChecked
+                ? downloadHasAmf
+                  ? `.amf is not supported — this download contains .amf 3D files but no supported model (supported: ${RENDERABLE_FORMATS_HINT})`
+                  : `No renderable file (${RENDERABLE_FORMATS_HINT}) in this download`
+                : "Download a model in Step 3, or test with your own file"}
+          </p>
+        </div>
+        <label className="flex items-center gap-2 text-xs text-text-muted">
+          Test your own file:
+          <input
+            type="file"
+            accept=".stl,.obj,.ply,.step,.stp,.3mf,.zip"
+            aria-label="Test with your own 3D file"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleCustomRenderFile(file);
+              e.target.value = ""; // allow re-picking the same file
+            }}
+            className="text-xs text-text-muted file:mr-2 file:rounded-full file:border file:border-border-default file:bg-surface-panel file:px-3 file:py-1 file:text-xs file:text-text-primary"
+          />
+        </label>
+        {renderCandidates.length > 1 && renderFile && (
+          <label className="flex items-center gap-2 text-xs text-text-muted">
+            Model to render:
+            <select
+              className="rounded border border-border-default bg-surface-panel px-2 py-1 text-xs text-text-primary"
+              value={renderCandidates.indexOf(renderFile)}
+              onChange={(e) => {
+                setRenderFile(renderCandidates[Number(e.target.value)]);
+                setPreviewReady(false);
+              }}
+              aria-label="Model to render"
+            >
+              {renderCandidates.map((candidate, i) => (
+                <option key={`${i}-${candidate.name}`} value={i}>
+                  {candidate.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {renderFile && previewFile && (
+          <>
+            <StudioRenderPreview
+              ref={previewRef}
+              file={previewFile}
+              fov={renderFov}
+              onReady={() => setPreviewReady(true)}
+            />
+            <label className="flex items-center gap-3 text-xs text-text-muted">
+              <span className="shrink-0">Field of view: {renderFov}°</span>
+              <input
+                type="range"
+                min={RENDER_FOV_MIN}
+                max={RENDER_FOV_MAX}
+                step={1}
+                value={renderFov}
+                onChange={(e) => {
+                  const value = Number(e.target.value);
+                  setRenderFov(value);
+                  persistRenderSettings({ fov: value });
+                }}
+                className="flex-1 accent-primary"
+                aria-label="Field of view"
+              />
+            </label>
+          </>
+        )}
+        {step4Loading && (
+          <p className="text-xs text-text-muted">Rendering in Blender — this usually takes 10–30 seconds...</p>
+        )}
+        {step4Image && (
+          <div className="flex flex-col items-start gap-2">
+            <img
+              src={step4Image.url}
+              alt="Studio render"
+              className="max-h-80 rounded-lg border border-border-default"
+            />
+            <a href={step4Image.url} download={step4Image.filename} className={btnPillSm}>
+              Download {step4Image.filename}
+            </a>
+          </div>
+        )}
+        {step4Error && (
+          <p className="text-sm text-red-400">{step4Error}</p>
         )}
       </div>
     </div>

@@ -1,0 +1,37 @@
+# Studio Render (Step 4) constants. See .scratch/studio-render/spec.md and
+# docs/adr/0001-studio-render-pipeline.md.
+
+# Formats Blender 3.6 imports natively; others are normalized to STL first
+# (backend/render/normalize.py) so preview and render share one Render Mesh.
+NATIVE_RENDER_EXTENSIONS: tuple[str, ...] = (".stl", ".obj", ".ply")
+
+# Uploads normalized to STL before Blender sees them: .step/.stp via the gmsh
+# pip wheel, .3mf via trimesh (ADR 0001). .amf is unsupported everywhere.
+CONVERTIBLE_RENDER_EXTENSIONS: tuple[str, ...] = (".3mf", ".step", ".stp")
+
+SUPPORTED_RENDER_EXTENSIONS: tuple[str, ...] = NATIVE_RENDER_EXTENSIONS + CONVERTIBLE_RENDER_EXTENSIONS
+
+# Render Settings defaults (spec: near-black, slightly glossy, 1024x1024)
+DEFAULT_RENDER_COLOR = "#1a1a1a"
+DEFAULT_RENDER_ROUGHNESS = 0.3
+DEFAULT_RENDER_RESOLUTION = 1024
+RENDER_RESOLUTIONS: tuple[int, ...] = (512, 1024, 2048)
+
+# Camera Intent / persisted FOV (spec: FOV slider 20-80 deg, default 40; the
+# fixed azimuth/elevation used when the request carries no preview camera)
+DEFAULT_RENDER_FOV = 40.0
+RENDER_FOV_MIN = 20.0
+RENDER_FOV_MAX = 80.0
+RENDER_FOV_RANGE: tuple[float, float] = (RENDER_FOV_MIN, RENDER_FOV_MAX)
+DEFAULT_RENDER_AZIMUTH = 45.0
+DEFAULT_RENDER_ELEVATION = 28.0
+
+# Soft target ~30s; hard kill is hang protection only (ADR 0001)
+RENDER_TIMEOUT_SECONDS = 90
+
+# Blender 3.6.1 is the one external install; override with the BLENDER_PATH env var.
+BLENDER_PATH_ENV_VAR = "BLENDER_PATH"
+DEFAULT_BLENDER_PATH = r"C:\Program Files\Blender Foundation\Blender 3.6\blender.exe"
+
+# Output naming mirrors the existing generated-images convention
+RENDER_OUTPUT_PREFIX = "generated_render_"

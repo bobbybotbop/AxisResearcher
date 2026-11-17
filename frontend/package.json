@@ -12,6 +12,8 @@
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",
     "@mynaui/icons-react": "^0.4.2",
+    "@react-three/drei": "^9.122.0",
+    "@react-three/fiber": "^8.18.0",
     "fabric": "^7.1.0",
     "jszip": "^3.10.2",
     "lucide-react": "^1.7.0",
@@ -19,12 +21,14 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^7.13.2",
-    "styled-components": "^6.3.12"
+    "styled-components": "^6.3.12",
+    "three": "^0.187.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.1",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
+    "@types/three": "^0.187.0",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.27",
     "postcss": "^8.5.8",

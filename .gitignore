@@ -27,6 +27,7 @@ downloaded_files/
 *.3mf
 *.stl
 *.lock
+*.crdownload
 
 # Generated listings & collected data
 /Generated_Listings/

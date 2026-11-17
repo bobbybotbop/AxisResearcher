@@ -54,7 +54,7 @@ from backend.copyScripts.create_image import (
     _openrouter_response_dict_to_image_bytes_and_mime,
     upload_image_bytes_to_ebay,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, migrate_hide_not_found_listings
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, migrate_hide_not_found_listings, get_render_settings, save_render_settings
 from backend.helper_functions import remove_html_tags
 import os
 import json
@@ -77,8 +77,18 @@ from backend.constants.listing import (
     CATEGORY_TO_IMAGE_TYPE, EBAY_STATUS_NOT_FOUND,
 )
 from backend.constants.ebay import EBAY_MARKETPLACE_ID, EBAY_BROWSE_API_BASE, EBAY_INVENTORY_API_BASE
-from backend.constants.paths import GENERATED_LISTINGS_DIR
+from backend.constants.paths import GENERATED_LISTINGS_DIR, GENERATED_IMAGES_DIR
+from backend.constants.render import (
+    DEFAULT_RENDER_AZIMUTH, DEFAULT_RENDER_COLOR, DEFAULT_RENDER_ELEVATION,
+    DEFAULT_RENDER_FOV, DEFAULT_RENDER_ROUGHNESS, DEFAULT_RENDER_RESOLUTION,
+    RENDER_FOV_RANGE, RENDER_OUTPUT_PREFIX, RENDER_RESOLUTIONS,
+    SUPPORTED_RENDER_EXTENSIONS,
+)
+from backend.render import render_model, RenderError
+from backend.render.normalize import normalize_to_render_mesh
+from backend.render.camera import compute_blender_camera
 import re
+import tempfile
 import requests
 from dotenv import load_dotenv
 
@@ -90,6 +100,11 @@ CORS(app, origins=["http://localhost:3000", "http://localhost:5173", "http://loc
 # Structure: {task_id: {"status": "running|completed|failed", "total": N, "completed": M, "results": [], "errors": []}}
 image_generation_tasks = {}
 image_generation_lock = threading.Lock()
+
+# In-memory storage for Render Job (Step 4 Studio Render) progress
+# Structure: {task_id: {"status": "running|completed|failed", "image": url|None, "filename": str|None, "error": str|None}}
+render_tasks = {}
+render_tasks_lock = threading.Lock()
 
 
 def _load_listing_file(sku):
@@ -3534,7 +3549,6 @@ def api_remove_backgrounds_batch():
     { "bgRemovedPhotos": { "<originalUrl>": "/api/bg-removed-image/<file>", ... } }
     Failed images are silently skipped (omitted from the result map).
     """
-    import re
     data = request.get_json()
     if not data:
         return jsonify({"error": "Invalid or missing JSON body"}), 400
@@ -3576,7 +3590,6 @@ def api_remove_backgrounds_batch():
 @app.route('/api/bg-removed-image/<filename>', methods=['GET'])
 def serve_bg_removed_image(filename):
     """Serve a bg-removed PNG from generated-images/. Validates filename pattern."""
-    import re
     if not re.match(r'^bg_removed_[\w\-]+_\d+\.png$', filename):
         return jsonify({"error": "Invalid filename"}), 400
     filepath = os.path.join("generated-images", filename)
@@ -3584,6 +3597,240 @@ def serve_bg_removed_image(filename):
         return jsonify({"error": "Image not found"}), 404
     with open(filepath, 'rb') as f:
         return Response(f.read(), mimetype='image/png')
+
+
+@app.route('/api/render', methods=['POST'])
+def start_render():
+    """
+    Start a Render Job (Step 4 Studio Render) for an uploaded 3D model.
+
+    Accepts multipart/form-data:
+        file:       model file (.stl/.obj/.ply used as-is; .step/.stp/.3mf are
+                    normalized to an STL Render Mesh before Blender sees them)
+        color:      optional hex color (default near-black #1a1a1a)
+        roughness:  optional 0..1 (default 0.3)
+        resolution: optional square size, one of RENDER_RESOLUTIONS (default 1024)
+        fov:        optional vertical field of view in degrees (default 40, range 20-80)
+        camera_position / camera_target:
+                    optional "x,y,z" in three.js (Y-up) preview coordinates; both or
+                    neither. Converted to Blender (Z-up) azimuth/elevation; distance
+                    is auto-computed to frame the whole model (Camera Intent).
+
+    Returns:
+        JSON {task_id} for polling /api/render-status/<task_id>, or a friendly error
+    """
+    try:
+        print("[API] /api/render endpoint called")
+        file = request.files.get('file')
+        if not file or not file.filename:
+            return jsonify({"error": "A model file is required", "task_id": None}), 400
+
+        extension = os.path.splitext(file.filename)[1].lower()
+        if extension not in SUPPORTED_RENDER_EXTENSIONS:
+            return jsonify({
+                "error": f"'{extension or file.filename}' files are not supported for rendering. "
+                         f"Supported formats: {', '.join(SUPPORTED_RENDER_EXTENSIONS)}",
+                "task_id": None,
+            }), 400
+
+        # Optional Render Settings — the controls UI lands in ticket 05; defaults per spec
+        color = request.form.get("color", DEFAULT_RENDER_COLOR)
+        try:
+            roughness = float(request.form.get("roughness", DEFAULT_RENDER_ROUGHNESS))
+        except (TypeError, ValueError):
+            return jsonify({"error": "roughness must be a number between 0 and 1", "task_id": None}), 400
+        if not 0.0 <= roughness <= 1.0:
+            return jsonify({"error": "roughness must be between 0 and 1", "task_id": None}), 400
+        try:
+            resolution = int(request.form.get("resolution", DEFAULT_RENDER_RESOLUTION))
+        except (TypeError, ValueError):
+            return jsonify({"error": f"resolution must be one of {list(RENDER_RESOLUTIONS)}", "task_id": None}), 400
+        if resolution not in RENDER_RESOLUTIONS:
+            return jsonify({"error": f"resolution must be one of {list(RENDER_RESOLUTIONS)}", "task_id": None}), 400
+
+        # Camera Intent: preview camera (three.js coords) -> Blender azimuth/elevation
+        try:
+            fov = float(request.form.get("fov", DEFAULT_RENDER_FOV))
+        except (TypeError, ValueError):
+            return jsonify({"error": f"fov must be a number between {RENDER_FOV_RANGE[0]:.0f} and {RENDER_FOV_RANGE[1]:.0f}", "task_id": None}), 400
+        if not RENDER_FOV_RANGE[0] <= fov <= RENDER_FOV_RANGE[1]:
+            return jsonify({"error": f"fov must be between {RENDER_FOV_RANGE[0]:.0f} and {RENDER_FOV_RANGE[1]:.0f} degrees", "task_id": None}), 400
+
+        def parse_vec3(field):
+            raw = request.form.get(field)
+            if raw is None:
+                return None
+            parts = raw.split(",")
+            if len(parts) != 3:
+                raise ValueError
+            return tuple(float(p) for p in parts)
+
+        try:
+            camera_position = parse_vec3("camera_position")
+            camera_target = parse_vec3("camera_target")
+        except (TypeError, ValueError):
+            return jsonify({"error": "camera_position and camera_target must be \"x,y,z\" numbers", "task_id": None}), 400
+        if (camera_position is None) != (camera_target is None):
+            return jsonify({"error": "camera_position and camera_target must be sent together", "task_id": None}), 400
+        if camera_position is not None:
+            try:
+                azimuth, elevation = compute_blender_camera(camera_position, camera_target)
+            except ValueError:
+                return jsonify({"error": "camera position and target must differ", "task_id": None}), 400
+        else:
+            azimuth, elevation = DEFAULT_RENDER_AZIMUTH, DEFAULT_RENDER_ELEVATION
+
+        os.makedirs(GENERATED_IMAGES_DIR, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{RENDER_OUTPUT_PREFIX}{timestamp}.png"
+        suffix = 1
+        while os.path.exists(os.path.join(GENERATED_IMAGES_DIR, filename)):
+            filename = f"{RENDER_OUTPUT_PREFIX}{timestamp}_{suffix}.png"
+            suffix += 1
+        output_path = os.path.join(GENERATED_IMAGES_DIR, filename)
+
+        fd, input_path = tempfile.mkstemp(prefix="render_upload_", suffix=extension)
+        os.close(fd)
+        file.save(input_path)
+
+        task_id = str(uuid.uuid4())
+        with render_tasks_lock:
+            render_tasks[task_id] = {"status": "running", "image": None, "filename": None, "error": None}
+
+        def run_render():
+            try:
+                # Normalize to the Render Mesh first (native formats pass through).
+                # The converted STL is cache-owned — only the uploaded temp is removed below.
+                mesh_path = normalize_to_render_mesh(input_path)
+                render_model(
+                    mesh_path, output_path,
+                    color=color, roughness=roughness, resolution=resolution,
+                    azimuth=azimuth, elevation=elevation, fov=fov,
+                )
+                with render_tasks_lock:
+                    render_tasks[task_id].update(
+                        status="completed",
+                        filename=filename,
+                        image=f"/api/render-image/{filename}",
+                    )
+            except RenderError as e:
+                print(f"[API] /api/render task {task_id} failed: {e}")
+                with render_tasks_lock:
+                    render_tasks[task_id].update(status="failed", error=str(e))
+            except Exception as e:
+                print(f"[API] /api/render task {task_id} unexpected error: {e}")
+                with render_tasks_lock:
+                    render_tasks[task_id].update(status="failed", error=f"Unexpected render error: {e}")
+            finally:
+                try:
+                    os.remove(input_path)
+                except OSError:
+                    pass
+
+        threading.Thread(target=run_render, daemon=True).start()
+        return jsonify({"task_id": task_id}), 200
+
+    except Exception as e:
+        return jsonify({"error": f"An error occurred while starting the render: {str(e)}", "task_id": None}), 500
+
+
+@app.route('/api/render-preview', methods=['POST'])
+def render_preview():
+    """
+    Return the normalized Render Mesh (STL bytes) for an uploaded model.
+
+    Accepts multipart/form-data with a 'file' field (.stl/.obj/.ply pass
+    through; .step/.stp/.3mf are converted server-side). The Step 4 panel
+    previews exactly these bytes, so preview and render show identical geometry.
+
+    Returns:
+        STL bytes (model/stl), or a JSON friendly error
+    """
+    try:
+        file = request.files.get('file')
+        if not file or not file.filename:
+            return jsonify({"error": "A model file is required"}), 400
+
+        extension = os.path.splitext(file.filename)[1].lower()
+        fd, input_path = tempfile.mkstemp(prefix="render_preview_", suffix=extension or ".bin")
+        os.close(fd)
+        try:
+            file.save(input_path)
+            mesh_path = normalize_to_render_mesh(input_path)
+            with open(mesh_path, 'rb') as f:
+                return Response(f.read(), mimetype='model/stl')
+        finally:
+            try:
+                os.remove(input_path)
+            except OSError:
+                pass
+    except RenderError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": f"An error occurred while preparing the preview: {str(e)}"}), 500
+
+
+@app.route('/api/render-status/<task_id>', methods=['GET'])
+def get_render_status(task_id):
+    """
+    Get status of a Render Job.
+
+    Returns:
+        JSON with status, and the image URL when completed or a friendly error when failed
+    """
+    try:
+        with render_tasks_lock:
+            if task_id not in render_tasks:
+                return jsonify({"error": f"Task {task_id} not found", "status": None}), 404
+            task = render_tasks[task_id]
+            response_data = {"status": task["status"], "error": task["error"]}
+            if task["status"] == "completed":
+                response_data["image"] = task["image"]
+                response_data["filename"] = task["filename"]
+            return jsonify(response_data), 200
+    except Exception as e:
+        return jsonify({"error": f"An error occurred while checking status: {str(e)}", "status": None}), 500
+
+
+@app.route('/api/render-image/<filename>', methods=['GET'])
+def serve_render_image(filename):
+    """Serve a rendered PNG from the generated-images dir. Validates filename pattern."""
+    if not re.match(rf'^{RENDER_OUTPUT_PREFIX}\d{{8}}_\d{{6}}(_\d+)?\.png$', filename):
+        return jsonify({"error": "Invalid filename"}), 400
+    filepath = os.path.join(GENERATED_IMAGES_DIR, filename)
+    if not os.path.exists(filepath):
+        return jsonify({"error": "Image not found"}), 404
+    with open(filepath, 'rb') as f:
+        return Response(f.read(), mimetype='image/png')
+
+
+@app.route('/api/render-settings', methods=['GET', 'POST'])
+def api_render_settings():
+    """
+    Read or update persisted Render Settings (Step 4 Studio Render).
+
+    GET:        returns {"color", "roughness", "resolution", "fov"}
+    POST:       JSON body with any subset of those keys; persists and returns
+                the saved state. Camera angle/target are ephemeral by design.
+    """
+    if request.method == 'GET':
+        try:
+            return jsonify(get_render_settings()), 200
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    body = request.get_json(silent=True) or {}
+    try:
+        settings = save_render_settings(
+            color=body.get('color'),
+            roughness=body.get('roughness'),
+            resolution=body.get('resolution'),
+            fov=body.get('fov'),
+        )
+        return jsonify(settings), 200
+    except (TypeError, ValueError) as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/upload-image', methods=['POST'])
