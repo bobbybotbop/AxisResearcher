@@ -54,7 +54,7 @@ from backend.copyScripts.create_image import (
     _openrouter_response_dict_to_image_bytes_and_mime,
     upload_image_bytes_to_ebay,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, migrate_hide_not_found_listings, get_render_settings, save_render_settings
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, migrate_hide_not_found_listings, get_render_settings, save_render_settings, get_render_profiles, save_render_profile, delete_render_profile, get_active_render_profile, set_active_render_profile
 from backend.helper_functions import remove_html_tags
 import os
 import json
@@ -3827,6 +3827,83 @@ def api_render_settings():
             fov=body.get('fov'),
         )
         return jsonify(settings), 200
+    except (TypeError, ValueError) as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/render-profiles', methods=['GET', 'POST'])
+def api_render_profiles():
+    """
+    List or create Render Profiles (named snapshots of the full Render Settings).
+
+    GET:        returns {"profiles": {name: settings}, "active": name|null}.
+                active=null means "Current Settings" (the flat render settings),
+                which is the implicit default and never a stored profile.
+    POST:       JSON body {"name": str, "settings": {...}}; creates the profile
+                and returns it. Duplicate names are rejected with 400 — use
+                POST/PUT /api/render-profiles/<name> to overwrite.
+    """
+    if request.method == 'GET':
+        try:
+            return jsonify({
+                'profiles': get_render_profiles(),
+                'active': get_active_render_profile(),
+            }), 200
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    body = request.get_json(silent=True) or {}
+    name = body.get('name')
+    try:
+        if name is not None and str(name).strip() in get_render_profiles():
+            return jsonify({'error': f"A render profile named '{str(name).strip()}' already exists"}), 400
+        profile = save_render_profile(name, body.get('settings'))
+        return jsonify(profile), 201
+    except (TypeError, ValueError) as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/render-profiles/<name>', methods=['POST', 'PUT', 'DELETE'])
+def api_render_profile_by_name(name):
+    """
+    Update (overwrite) or delete one Render Profile by name.
+
+    POST/PUT:   JSON body {"settings": {...}}; overwrites the stored snapshot.
+    DELETE:     removes the profile; if it was active, active resets to null
+                ("Current Settings").
+    """
+    if request.method == 'DELETE':
+        try:
+            if delete_render_profile(name):
+                return jsonify({'deleted': name}), 200
+            return jsonify({'error': f"No render profile named '{name}'"}), 404
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    if name not in get_render_profiles():
+        return jsonify({'error': f"No render profile named '{name}'"}), 404
+    body = request.get_json(silent=True) or {}
+    try:
+        profile = save_render_profile(name, body.get('settings'))
+        return jsonify(profile), 200
+    except (TypeError, ValueError) as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/render-profiles/active', methods=['POST'])
+def api_render_profile_active():
+    """
+    Set the active Render Profile. JSON body {"name": str|null}; null selects
+    "Current Settings" (the flat render settings).
+    """
+    body = request.get_json(silent=True) or {}
+    try:
+        active = set_active_render_profile(body.get('name'))
+        return jsonify({'active': active}), 200
     except (TypeError, ValueError) as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:
