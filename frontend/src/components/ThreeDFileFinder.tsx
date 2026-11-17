@@ -256,6 +256,19 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
     setPreviewReady(false);
   };
 
+  // Load a user-chosen local file (single model or zip) into Step 4 through
+  // the same pipeline as a Step 3 download
+  const handleCustomRenderFile = async (file: File) => {
+    setStep4Error(null);
+    try {
+      const entries = await unzipBlob(file, file.name);
+      setDownloadHasAmf(entries.some((e) => modelExtensionOf(e.path[e.path.length - 1]) === ".amf"));
+      applyRenderCandidates(pickRenderCandidates(entries));
+    } catch (err) {
+      setStep4Error((err as Error).message || "Could not read that file");
+    }
+  };
+
   // True when a result link can be forwarded to Step 3
   const canForwardToStep3 = (link: string) =>
     /thingiverse\.com\/thing[:/]\d+/.test(link) ||
@@ -736,9 +749,23 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
                 ? downloadHasAmf
                   ? `.amf is not supported — this download contains .amf 3D files but no supported model (supported: ${RENDERABLE_FORMATS_HINT})`
                   : `No renderable file (${RENDERABLE_FORMATS_HINT}) in this download`
-                : "Download a model in Step 3 to enable rendering"}
+                : "Download a model in Step 3, or test with your own file"}
           </p>
         </div>
+        <label className="flex items-center gap-2 text-xs text-text-muted">
+          Test your own file:
+          <input
+            type="file"
+            accept=".stl,.obj,.ply,.step,.stp,.3mf,.zip"
+            aria-label="Test with your own 3D file"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleCustomRenderFile(file);
+              e.target.value = ""; // allow re-picking the same file
+            }}
+            className="text-xs text-text-muted file:mr-2 file:rounded-full file:border file:border-border-default file:bg-surface-panel file:px-3 file:py-1 file:text-xs file:text-text-primary"
+          />
+        </label>
         {renderCandidates.length > 1 && renderFile && (
           <label className="flex items-center gap-2 text-xs text-text-muted">
             Model to render:
