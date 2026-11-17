@@ -33,19 +33,35 @@ def client():
 
 # --- persistence seam: get_render_settings / save_render_settings ---
 
+SPEC_DEFAULTS = {
+    "color": "#1a1a1a",
+    "roughness": 0.3,
+    "resolution": 1024,
+    "fov": 40,
+    "finish": "smooth",
+    "layer_height_mm": 0.2,
+    "layer_depth": 0.4,
+    "key_energy": 150.0,
+    "fill_energy": 60.0,
+    "rim_energy": 250.0,
+    "ambient": 0.35,
+    "shadow": True,
+    "shadow_softness": 1.5,
+    "exposure": 1.0,
+}
+
+
 def test_get_render_settings_returns_spec_defaults(config_file):
     settings = combine_data.get_render_settings()
-    assert settings == {
-        "color": "#1a1a1a",
-        "roughness": pytest.approx(0.3),
-        "resolution": 1024,
-        "fov": pytest.approx(40),
-    }
+    for key, expected in SPEC_DEFAULTS.items():
+        actual = settings[key]
+        assert actual == (pytest.approx(expected) if isinstance(expected, float) else expected), key
 
 
 def test_render_settings_schema_has_no_camera_keys(config_file):
-    # Camera angle/target stay ephemeral (spec); only color/roughness/resolution/fov persist
-    assert set(combine_data.get_render_settings()) == {"color", "roughness", "resolution", "fov"}
+    # Camera angle/target stay ephemeral (spec); the persisted schema is the
+    # full Render Settings surface: material, lighting, shadows, exposure, fov.
+    assert set(combine_data.get_render_settings()) == set(SPEC_DEFAULTS)
 
 
 def test_save_render_settings_roundtrip(config_file):
@@ -75,6 +91,58 @@ def test_save_render_settings_partial_update(config_file):
     assert settings["fov"] == pytest.approx(40)
 
 
+def test_save_render_settings_roundtrips_new_fields(config_file):
+    saved = combine_data.save_render_settings(
+        finish="layer-lines", layer_height_mm=0.12, layer_depth=0.7,
+        key_energy=300, fill_energy=20, rim_energy=500,
+        ambient=0.8, shadow=False, shadow_softness=3.0, exposure=1.5,
+    )
+    assert saved["finish"] == "layer-lines"
+    assert saved["layer_height_mm"] == pytest.approx(0.12)
+    assert saved["layer_depth"] == pytest.approx(0.7)
+    assert saved["key_energy"] == pytest.approx(300)
+    assert saved["fill_energy"] == pytest.approx(20)
+    assert saved["rim_energy"] == pytest.approx(500)
+    assert saved["ambient"] == pytest.approx(0.8)
+    assert saved["shadow"] is False
+    assert saved["shadow_softness"] == pytest.approx(3.0)
+    assert saved["exposure"] == pytest.approx(1.5)
+
+    reread = combine_data.get_render_settings()
+    assert reread == saved
+
+    on_disk = json.loads(config_file.read_text(encoding="utf-8"))
+    assert on_disk["render_finish"] == "layer-lines"
+    assert on_disk["render_key_energy"] == pytest.approx(300)
+    assert on_disk["render_shadow"] is False
+    assert on_disk["render_exposure"] == pytest.approx(1.5)
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"finish": "matte"},
+    {"finish": "Layer-Lines"},  # case-sensitive wire value
+    {"layer_height_mm": 0.05},
+    {"layer_height_mm": 0.5},
+    {"layer_depth": -0.1},
+    {"layer_depth": 1.5},
+    {"key_energy": -1},
+    {"key_energy": 5000},
+    {"fill_energy": -1},
+    {"rim_energy": -1},
+    {"ambient": -0.1},
+    {"ambient": 3.0},
+    {"shadow_softness": 0},
+    {"shadow_softness": 20},
+    {"exposure": 0},
+    {"exposure": 5},
+])
+def test_save_render_settings_rejects_invalid_new_values(config_file, kwargs):
+    with pytest.raises(ValueError):
+        combine_data.save_render_settings(**kwargs)
+    # nothing was written
+    assert combine_data.get_render_settings()["finish"] == "smooth"
+
+
 @pytest.mark.parametrize("kwargs", [
     {"color": "red"},
     {"color": "#12345"},
@@ -102,6 +170,56 @@ def test_render_settings_route_get_defaults(client, config_file):
     assert payload["roughness"] == pytest.approx(0.3)
     assert payload["resolution"] == 1024
     assert payload["fov"] == pytest.approx(40)
+    # expanded surface: lighting, shadows, exposure, finish
+    assert payload["key_energy"] == pytest.approx(150)
+    assert payload["fill_energy"] == pytest.approx(60)
+    assert payload["rim_energy"] == pytest.approx(250)
+    assert payload["ambient"] == pytest.approx(0.35)
+    assert payload["shadow"] is True
+    assert payload["shadow_softness"] == pytest.approx(1.5)
+    assert payload["exposure"] == pytest.approx(1.0)
+    assert payload["finish"] == "smooth"
+    assert payload["layer_height_mm"] == pytest.approx(0.2)
+    assert payload["layer_depth"] == pytest.approx(0.4)
+
+
+def test_render_settings_route_post_roundtrips_new_fields(client, config_file):
+    res = client.post("/api/render-settings", json={
+        "key_energy": 300, "ambient": 0.8, "shadow": False,
+        "shadow_softness": 3.0, "exposure": 1.5,
+        "finish": "layer-lines", "layer_height_mm": 0.12, "layer_depth": 0.7,
+    })
+    assert res.status_code == 200
+    payload = res.get_json()
+    assert payload["key_energy"] == pytest.approx(300)
+    assert payload["ambient"] == pytest.approx(0.8)
+    assert payload["shadow"] is False
+    assert payload["shadow_softness"] == pytest.approx(3.0)
+    assert payload["exposure"] == pytest.approx(1.5)
+    assert payload["finish"] == "layer-lines"
+    assert payload["layer_height_mm"] == pytest.approx(0.12)
+    assert payload["layer_depth"] == pytest.approx(0.7)
+
+    # persists across reads (simulating a panel reopen / page reload)
+    reread = client.get("/api/render-settings").get_json()
+    assert reread["key_energy"] == pytest.approx(300)
+    assert reread["shadow"] is False
+    assert reread["finish"] == "layer-lines"
+
+
+def test_render_settings_route_post_rejects_invalid_new_fields(client, config_file):
+    res = client.post("/api/render-settings", json={"finish": "matte"})
+    assert res.status_code == 400
+    assert "finish" in res.get_json()["error"].lower()
+
+    res = client.post("/api/render-settings", json={"exposure": 10})
+    assert res.status_code == 400
+
+    res = client.post("/api/render-settings", json={"shadow": "yes"})
+    assert res.status_code == 400
+
+    # rejected writes did not stick
+    assert client.get("/api/render-settings").get_json()["finish"] == "smooth"
 
 
 def test_render_settings_route_post_persists(client, config_file):

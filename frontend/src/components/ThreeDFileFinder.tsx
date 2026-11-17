@@ -8,15 +8,32 @@ import { DOWNLOAD_MODE_FILES, DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE,
 import {
   modelExtensionOf,
   NATIVE_RENDER_EXTENSIONS,
+  RENDER_AMBIENT_MAX,
   RENDER_CANDIDATE_EXTENSIONS,
+  RENDER_ENERGY_MAX,
+  RENDER_EXPOSURE_MAX,
+  RENDER_EXPOSURE_MIN,
+  RENDER_FINISH_OPTIONS,
   RENDER_FOV_MAX,
   RENDER_FOV_MIN,
+<<<<<<< HEAD
+  RENDER_LAYER_HEIGHT_MM_MAX,
+  RENDER_LAYER_HEIGHT_MM_MIN,
+  RENDER_RESOLUTION_OPTIONS,
+=======
+>>>>>>> integration/render-profiles
   RENDER_SETTINGS_DEFAULTS,
   RENDER_SETTINGS_SAVE_DEBOUNCE_MS,
+  RENDER_SHADOW_SOFTNESS_MAX,
+  RENDER_SHADOW_SOFTNESS_MIN,
   RENDER_STATUS_POLL_DEADLINE_MS,
   RENDER_STATUS_POLL_INTERVAL_MS,
   RENDERABLE_FORMATS_HINT,
+<<<<<<< HEAD
+  type RenderFinish,
+=======
   type RenderProfileSettings,
+>>>>>>> integration/render-profiles
 } from "../constants/render";
 
 interface SearchResult {
@@ -62,6 +79,16 @@ interface RenderSettingsPatch {
   roughness?: number;
   resolution?: number;
   fov?: number;
+  finish?: RenderFinish;
+  layer_height_mm?: number;
+  layer_depth?: number;
+  key_energy?: number;
+  fill_energy?: number;
+  rim_energy?: number;
+  ambient?: number;
+  shadow?: boolean;
+  shadow_softness?: number;
+  exposure?: number;
 }
 
 // Unzip a blob into flat entries; non-zip blobs (e.g. MakerWorld .3mf) become a single entry
@@ -168,6 +195,16 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
   const [renderColor, setRenderColor] = useState(RENDER_SETTINGS_DEFAULTS.color);
   const [renderRoughness, setRenderRoughness] = useState(RENDER_SETTINGS_DEFAULTS.roughness);
   const [renderResolution, setRenderResolution] = useState(RENDER_SETTINGS_DEFAULTS.resolution);
+  const [renderFinish, setRenderFinish] = useState<RenderFinish>(RENDER_SETTINGS_DEFAULTS.finish);
+  const [renderLayerHeightMm, setRenderLayerHeightMm] = useState(RENDER_SETTINGS_DEFAULTS.layerHeightMm);
+  const [renderLayerDepth, setRenderLayerDepth] = useState(RENDER_SETTINGS_DEFAULTS.layerDepth);
+  const [renderKeyEnergy, setRenderKeyEnergy] = useState(RENDER_SETTINGS_DEFAULTS.keyEnergy);
+  const [renderFillEnergy, setRenderFillEnergy] = useState(RENDER_SETTINGS_DEFAULTS.fillEnergy);
+  const [renderRimEnergy, setRenderRimEnergy] = useState(RENDER_SETTINGS_DEFAULTS.rimEnergy);
+  const [renderAmbient, setRenderAmbient] = useState(RENDER_SETTINGS_DEFAULTS.ambient);
+  const [renderShadow, setRenderShadow] = useState(RENDER_SETTINGS_DEFAULTS.shadow);
+  const [renderShadowSoftness, setRenderShadowSoftness] = useState(RENDER_SETTINGS_DEFAULTS.shadowSoftness);
+  const [renderExposure, setRenderExposure] = useState(RENDER_SETTINGS_DEFAULTS.exposure);
   const renderSettingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Step 4 — view switching: the profile dropdown or the Profile Editor
@@ -187,6 +224,16 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
         if (typeof data.roughness === "number") setRenderRoughness(data.roughness);
         if (typeof data.resolution === "number") setRenderResolution(data.resolution);
         if (typeof data.fov === "number") setRenderFov(data.fov);
+        if (data.finish === "smooth" || data.finish === "layer-lines") setRenderFinish(data.finish);
+        if (typeof data.layer_height_mm === "number") setRenderLayerHeightMm(data.layer_height_mm);
+        if (typeof data.layer_depth === "number") setRenderLayerDepth(data.layer_depth);
+        if (typeof data.key_energy === "number") setRenderKeyEnergy(data.key_energy);
+        if (typeof data.fill_energy === "number") setRenderFillEnergy(data.fill_energy);
+        if (typeof data.rim_energy === "number") setRenderRimEnergy(data.rim_energy);
+        if (typeof data.ambient === "number") setRenderAmbient(data.ambient);
+        if (typeof data.shadow === "boolean") setRenderShadow(data.shadow);
+        if (typeof data.shadow_softness === "number") setRenderShadowSoftness(data.shadow_softness);
+        if (typeof data.exposure === "number") setRenderExposure(data.exposure);
       })
       .catch(() => { /* keep spec defaults */ });
     return () => { cancelled = true; };
@@ -452,6 +499,16 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
         form.append("camera_target", intent.target.join(","));
       }
       form.append("fov", String(renderFov));
+      form.append("finish", renderFinish);
+      form.append("layer_height_mm", String(renderLayerHeightMm));
+      form.append("layer_depth", String(renderLayerDepth));
+      form.append("key_energy", String(renderKeyEnergy));
+      form.append("fill_energy", String(renderFillEnergy));
+      form.append("rim_energy", String(renderRimEnergy));
+      form.append("ambient", String(renderAmbient));
+      form.append("shadow", String(renderShadow));
+      form.append("shadow_softness", String(renderShadowSoftness));
+      form.append("exposure", String(renderExposure));
       const res = await fetch("/api/render", { method: "POST", body: form });
       const data = await res.json() as { task_id?: string; error?: string };
       if (!res.ok || data.error || !data.task_id) throw new Error(data.error || "Failed to start the render");
@@ -732,8 +789,221 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
               }}
               addToast={addToast}
             />
+<<<<<<< HEAD
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-muted">Glossiness ({(1 - renderRoughness).toFixed(2)})</span>
+            {/* Slider shows glossiness; the persisted/wire value is Principled
+                roughness (glossiness = 1 − roughness), so dragging up = glossier */}
+            <input
+              type="range"
+              aria-label="Glossiness"
+              min={0}
+              max={1}
+              step={0.05}
+              value={1 - renderRoughness}
+              onChange={(e) => {
+                const roughness = 1 - Number(e.target.value);
+                setRenderRoughness(roughness);
+                persistRenderSettings({ roughness });
+              }}
+              className="w-40 accent-primary"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-muted">Resolution</span>
+            <select
+              aria-label="Resolution"
+              value={renderResolution}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                setRenderResolution(value);
+                persistRenderSettings({ resolution: value });
+              }}
+              className="rounded border border-border-default bg-surface-panel px-2 py-1 text-sm text-text-primary"
+            >
+              {RENDER_RESOLUTION_OPTIONS.map((size) => (
+                <option key={size} value={size}>{size} × {size}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-muted">Finish</span>
+            <select
+              aria-label="Surface finish"
+              value={renderFinish}
+              onChange={(e) => {
+                const value = e.target.value as RenderFinish;
+                setRenderFinish(value);
+                persistRenderSettings({ finish: value });
+              }}
+              className="rounded border border-border-default bg-surface-panel px-2 py-1 text-sm text-text-primary"
+            >
+              {RENDER_FINISH_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          {renderFinish === "layer-lines" && (
+            <>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-text-muted">Layer height ({renderLayerHeightMm.toFixed(2)}mm)</span>
+                <input
+                  type="range"
+                  aria-label="Layer height"
+                  min={RENDER_LAYER_HEIGHT_MM_MIN}
+                  max={RENDER_LAYER_HEIGHT_MM_MAX}
+                  step={0.01}
+                  value={renderLayerHeightMm}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    setRenderLayerHeightMm(value);
+                    persistRenderSettings({ layer_height_mm: value });
+                  }}
+                  className="w-32 accent-primary"
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-text-muted">Line depth ({renderLayerDepth.toFixed(2)})</span>
+                <input
+                  type="range"
+                  aria-label="Line depth"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={renderLayerDepth}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    setRenderLayerDepth(value);
+                    persistRenderSettings({ layer_depth: value });
+                  }}
+                  className="w-32 accent-primary"
+                />
+              </label>
+            </>
+          )}
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-muted">Key light ({renderKeyEnergy})</span>
+            <input
+              type="range"
+              aria-label="Key light intensity"
+              min={0}
+              max={RENDER_ENERGY_MAX}
+              step={10}
+              value={renderKeyEnergy}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                setRenderKeyEnergy(value);
+                persistRenderSettings({ key_energy: value });
+              }}
+              className="w-32 accent-primary"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-muted">Fill light ({renderFillEnergy})</span>
+            <input
+              type="range"
+              aria-label="Fill light intensity"
+              min={0}
+              max={RENDER_ENERGY_MAX}
+              step={10}
+              value={renderFillEnergy}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                setRenderFillEnergy(value);
+                persistRenderSettings({ fill_energy: value });
+              }}
+              className="w-32 accent-primary"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-muted">Rim light ({renderRimEnergy})</span>
+            <input
+              type="range"
+              aria-label="Rim light intensity"
+              min={0}
+              max={RENDER_ENERGY_MAX}
+              step={10}
+              value={renderRimEnergy}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                setRenderRimEnergy(value);
+                persistRenderSettings({ rim_energy: value });
+              }}
+              className="w-32 accent-primary"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-muted">Ambient ({renderAmbient.toFixed(2)})</span>
+            <input
+              type="range"
+              aria-label="Ambient strength"
+              min={0}
+              max={RENDER_AMBIENT_MAX}
+              step={0.05}
+              value={renderAmbient}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                setRenderAmbient(value);
+                persistRenderSettings({ ambient: value });
+              }}
+              className="w-32 accent-primary"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-muted">Exposure ({renderExposure.toFixed(2)})</span>
+            <input
+              type="range"
+              aria-label="Exposure"
+              min={RENDER_EXPOSURE_MIN}
+              max={RENDER_EXPOSURE_MAX}
+              step={0.05}
+              value={renderExposure}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                setRenderExposure(value);
+                persistRenderSettings({ exposure: value });
+              }}
+              className="w-32 accent-primary"
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-muted">Shadow</span>
+            <input
+              type="checkbox"
+              aria-label="Shadow"
+              checked={renderShadow}
+              onChange={(e) => {
+                setRenderShadow(e.target.checked);
+                persistRenderSettings({ shadow: e.target.checked });
+              }}
+              className="h-5 w-5 accent-primary"
+            />
+          </label>
+          {renderShadow && (
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-text-muted">Shadow softness ({renderShadowSoftness.toFixed(1)})</span>
+              <input
+                type="range"
+                aria-label="Shadow softness"
+                min={RENDER_SHADOW_SOFTNESS_MIN}
+                max={RENDER_SHADOW_SOFTNESS_MAX}
+                step={0.1}
+                value={renderShadowSoftness}
+                onChange={(e) => {
+                  const value = Number(e.target.value);
+                  setRenderShadowSoftness(value);
+                  persistRenderSettings({ shadow_softness: value });
+                }}
+                className="w-32 accent-primary"
+              />
+            </label>
+          )}
+        </div>
+=======
           </div>
         )}
+>>>>>>> integration/render-profiles
         <div className="flex items-center gap-3">
           <button
             type="button"
