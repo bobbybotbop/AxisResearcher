@@ -2,18 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
 import MessageBarInput from "./MessageBarInput";
 import RenderProfileDropdown from "./RenderProfileDropdown";
+import RenderProfileEditor from "./RenderProfileEditor";
 import StudioRenderPreview, { type StudioRenderPreviewHandle } from "./StudioRenderPreview";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { DOWNLOAD_MODE_FILES, DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, threeDSiteKeyFromLink, type DownloadMode, type ThreeDSiteStatus } from "../constants/files3d";
 import {
   modelExtensionOf,
   NATIVE_RENDER_EXTENSIONS,
-  RENDER_AMBIENT_MAX,
   RENDER_CANDIDATE_EXTENSIONS,
-  RENDER_ENERGY_MAX,
-  RENDER_EXPOSURE_MAX,
-  RENDER_EXPOSURE_MIN,
-  RENDER_FINISH_OPTIONS,
   RENDER_FOV_MAX,
   RENDER_FOV_MIN,
   RENDER_LAYER_HEIGHT_MM_MAX,
@@ -21,8 +17,6 @@ import {
   RENDER_RESOLUTION_OPTIONS,
   RENDER_SETTINGS_DEFAULTS,
   RENDER_SETTINGS_SAVE_DEBOUNCE_MS,
-  RENDER_SHADOW_SOFTNESS_MAX,
-  RENDER_SHADOW_SOFTNESS_MIN,
   RENDER_STATUS_POLL_DEADLINE_MS,
   RENDER_STATUS_POLL_INTERVAL_MS,
   RENDERABLE_FORMATS_HINT,
@@ -207,13 +201,14 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
   const [step4View, setStep4View] = useState<"dropdown" | "editor">("dropdown");
   const [editingProfile, setEditingProfile] = useState<string | null | "create">(null);
 
-  // Load persisted Render Settings once on mount; fall back to spec defaults on failure
-  useEffect(() => {
-    let cancelled = false;
+  // (Re)load the persisted flat Render Settings into local state; falls back to
+  // spec defaults on failure. Used on mount and after the Profile Editor saves
+  // "Current Settings" so Step 4 reflects the saved values.
+  const reloadRenderSettings = () => {
     fetch("/api/render-settings")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (cancelled || !data) return;
+        if (!data) return;
         if (typeof data.color === "string") setRenderColor(data.color);
         if (typeof data.roughness === "number") setRenderRoughness(data.roughness);
         if (typeof data.resolution === "number") setRenderResolution(data.resolution);
@@ -230,7 +225,12 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
         if (typeof data.exposure === "number") setRenderExposure(data.exposure);
       })
       .catch(() => { /* keep spec defaults */ });
-    return () => { cancelled = true; };
+  };
+
+  // Load persisted Render Settings once on mount; fall back to spec defaults on failure
+  useEffect(() => {
+    reloadRenderSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Persist changes debounced (slider/color input fire many events while dragging)
@@ -261,6 +261,16 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
     if (typeof settings.roughness === "number") setRenderRoughness(settings.roughness);
     if (typeof settings.resolution === "number") setRenderResolution(settings.resolution);
     if (typeof settings.fov === "number") setRenderFov(settings.fov);
+    if (settings.finish === "smooth" || settings.finish === "layer-lines") setRenderFinish(settings.finish);
+    if (typeof settings.layer_height_mm === "number") setRenderLayerHeightMm(settings.layer_height_mm);
+    if (typeof settings.layer_depth === "number") setRenderLayerDepth(settings.layer_depth);
+    if (typeof settings.key_energy === "number") setRenderKeyEnergy(settings.key_energy);
+    if (typeof settings.fill_energy === "number") setRenderFillEnergy(settings.fill_energy);
+    if (typeof settings.rim_energy === "number") setRenderRimEnergy(settings.rim_energy);
+    if (typeof settings.ambient === "number") setRenderAmbient(settings.ambient);
+    if (typeof settings.shadow === "boolean") setRenderShadow(settings.shadow);
+    if (typeof settings.shadow_softness === "number") setRenderShadowSoftness(settings.shadow_softness);
+    if (typeof settings.exposure === "number") setRenderExposure(settings.exposure);
   };
 
   const resetStep4 = () => {
@@ -754,23 +764,12 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
         <p className="text-sm font-semibold text-text-primary">Step 4 — Studio Render</p>
         {step4View === "editor" ? (
-          // Profile Editor placeholder — ticket 05 replaces this block with the
-          // real editor (3DBenchy viewer + settings panel + Save buttons)
-          <div className="flex flex-col gap-3 rounded-lg border border-border-default p-3">
-            <p className="text-sm text-text-primary">
-              {editingProfile === "create"
-                ? "Create new profile"
-                : editingProfile === null
-                  ? "Edit Current Settings"
-                  : `Edit profile: ${editingProfile}`}
-            </p>
-            <p className="text-xs text-text-muted">The Profile Editor arrives in the next ticket.</p>
-            <div>
-              <button type="button" className={btnPillSm} onClick={() => setStep4View("dropdown")}>
-                ← Back to profiles
-              </button>
-            </div>
-          </div>
+          <RenderProfileEditor
+            editingProfile={editingProfile}
+            onBack={() => setStep4View("dropdown")}
+            onSavedCurrentSettings={reloadRenderSettings}
+            addToast={addToast}
+          />
         ) : (
           /* Render Profile — selecting one copies its values into Current
              Settings (the flat settings); camera angle is captured from the preview below */

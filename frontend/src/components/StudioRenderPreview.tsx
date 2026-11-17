@@ -138,10 +138,13 @@ interface StudioRenderPreviewProps {
   file: File;
   fov: number;
   onReady?: () => void;
+  // Square viewer (Profile Editor): the canvas fills an aspect-square container
+  // instead of the fixed 320px height used in Step 4
+  square?: boolean;
 }
 
 const StudioRenderPreview = forwardRef<StudioRenderPreviewHandle, StudioRenderPreviewProps>(
-  ({ file, fov, onReady }, ref) => {
+  ({ file, fov, onReady, square = false }, ref) => {
     const controlsRef = useRef<OrbitControlsImpl | null>(null);
     const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -162,10 +165,10 @@ const StudioRenderPreview = forwardRef<StudioRenderPreviewHandle, StudioRenderPr
 
     return (
       <div className="flex flex-col gap-1">
-        <div className="overflow-hidden rounded-lg border border-border-default">
+        <div className={`overflow-hidden rounded-lg border border-border-default ${square ? "aspect-square w-full" : ""}`}>
           <Canvas
             camera={{ fov, ...PREVIEW_INITIAL_CAMERA }}
-            style={{ height: 320, background: "#ffffff" }}
+            style={square ? { width: "100%", height: "100%", background: "#ffffff" } : { height: 320, background: "#ffffff" }}
           >
             <ambientLight intensity={0.7} />
             <directionalLight position={[4, 6, 3]} intensity={1.2} />
