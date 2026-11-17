@@ -16,12 +16,9 @@ import {
   RENDER_FINISH_OPTIONS,
   RENDER_FOV_MAX,
   RENDER_FOV_MIN,
-<<<<<<< HEAD
   RENDER_LAYER_HEIGHT_MM_MAX,
   RENDER_LAYER_HEIGHT_MM_MIN,
   RENDER_RESOLUTION_OPTIONS,
-=======
->>>>>>> integration/render-profiles
   RENDER_SETTINGS_DEFAULTS,
   RENDER_SETTINGS_SAVE_DEBOUNCE_MS,
   RENDER_SHADOW_SOFTNESS_MAX,
@@ -29,11 +26,8 @@ import {
   RENDER_STATUS_POLL_DEADLINE_MS,
   RENDER_STATUS_POLL_INTERVAL_MS,
   RENDERABLE_FORMATS_HINT,
-<<<<<<< HEAD
   type RenderFinish,
-=======
   type RenderProfileSettings,
->>>>>>> integration/render-profiles
 } from "../constants/render";
 
 interface SearchResult {
@@ -789,221 +783,8 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
               }}
               addToast={addToast}
             />
-<<<<<<< HEAD
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">Glossiness ({(1 - renderRoughness).toFixed(2)})</span>
-            {/* Slider shows glossiness; the persisted/wire value is Principled
-                roughness (glossiness = 1 − roughness), so dragging up = glossier */}
-            <input
-              type="range"
-              aria-label="Glossiness"
-              min={0}
-              max={1}
-              step={0.05}
-              value={1 - renderRoughness}
-              onChange={(e) => {
-                const roughness = 1 - Number(e.target.value);
-                setRenderRoughness(roughness);
-                persistRenderSettings({ roughness });
-              }}
-              className="w-40 accent-primary"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">Resolution</span>
-            <select
-              aria-label="Resolution"
-              value={renderResolution}
-              onChange={(e) => {
-                const value = Number(e.target.value);
-                setRenderResolution(value);
-                persistRenderSettings({ resolution: value });
-              }}
-              className="rounded border border-border-default bg-surface-panel px-2 py-1 text-sm text-text-primary"
-            >
-              {RENDER_RESOLUTION_OPTIONS.map((size) => (
-                <option key={size} value={size}>{size} × {size}</option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">Finish</span>
-            <select
-              aria-label="Surface finish"
-              value={renderFinish}
-              onChange={(e) => {
-                const value = e.target.value as RenderFinish;
-                setRenderFinish(value);
-                persistRenderSettings({ finish: value });
-              }}
-              className="rounded border border-border-default bg-surface-panel px-2 py-1 text-sm text-text-primary"
-            >
-              {RENDER_FINISH_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-          </label>
-          {renderFinish === "layer-lines" && (
-            <>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-text-muted">Layer height ({renderLayerHeightMm.toFixed(2)}mm)</span>
-                <input
-                  type="range"
-                  aria-label="Layer height"
-                  min={RENDER_LAYER_HEIGHT_MM_MIN}
-                  max={RENDER_LAYER_HEIGHT_MM_MAX}
-                  step={0.01}
-                  value={renderLayerHeightMm}
-                  onChange={(e) => {
-                    const value = Number(e.target.value);
-                    setRenderLayerHeightMm(value);
-                    persistRenderSettings({ layer_height_mm: value });
-                  }}
-                  className="w-32 accent-primary"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs text-text-muted">Line depth ({renderLayerDepth.toFixed(2)})</span>
-                <input
-                  type="range"
-                  aria-label="Line depth"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={renderLayerDepth}
-                  onChange={(e) => {
-                    const value = Number(e.target.value);
-                    setRenderLayerDepth(value);
-                    persistRenderSettings({ layer_depth: value });
-                  }}
-                  className="w-32 accent-primary"
-                />
-              </label>
-            </>
-          )}
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">Key light ({renderKeyEnergy})</span>
-            <input
-              type="range"
-              aria-label="Key light intensity"
-              min={0}
-              max={RENDER_ENERGY_MAX}
-              step={10}
-              value={renderKeyEnergy}
-              onChange={(e) => {
-                const value = Number(e.target.value);
-                setRenderKeyEnergy(value);
-                persistRenderSettings({ key_energy: value });
-              }}
-              className="w-32 accent-primary"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">Fill light ({renderFillEnergy})</span>
-            <input
-              type="range"
-              aria-label="Fill light intensity"
-              min={0}
-              max={RENDER_ENERGY_MAX}
-              step={10}
-              value={renderFillEnergy}
-              onChange={(e) => {
-                const value = Number(e.target.value);
-                setRenderFillEnergy(value);
-                persistRenderSettings({ fill_energy: value });
-              }}
-              className="w-32 accent-primary"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">Rim light ({renderRimEnergy})</span>
-            <input
-              type="range"
-              aria-label="Rim light intensity"
-              min={0}
-              max={RENDER_ENERGY_MAX}
-              step={10}
-              value={renderRimEnergy}
-              onChange={(e) => {
-                const value = Number(e.target.value);
-                setRenderRimEnergy(value);
-                persistRenderSettings({ rim_energy: value });
-              }}
-              className="w-32 accent-primary"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">Ambient ({renderAmbient.toFixed(2)})</span>
-            <input
-              type="range"
-              aria-label="Ambient strength"
-              min={0}
-              max={RENDER_AMBIENT_MAX}
-              step={0.05}
-              value={renderAmbient}
-              onChange={(e) => {
-                const value = Number(e.target.value);
-                setRenderAmbient(value);
-                persistRenderSettings({ ambient: value });
-              }}
-              className="w-32 accent-primary"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">Exposure ({renderExposure.toFixed(2)})</span>
-            <input
-              type="range"
-              aria-label="Exposure"
-              min={RENDER_EXPOSURE_MIN}
-              max={RENDER_EXPOSURE_MAX}
-              step={0.05}
-              value={renderExposure}
-              onChange={(e) => {
-                const value = Number(e.target.value);
-                setRenderExposure(value);
-                persistRenderSettings({ exposure: value });
-              }}
-              className="w-32 accent-primary"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">Shadow</span>
-            <input
-              type="checkbox"
-              aria-label="Shadow"
-              checked={renderShadow}
-              onChange={(e) => {
-                setRenderShadow(e.target.checked);
-                persistRenderSettings({ shadow: e.target.checked });
-              }}
-              className="h-5 w-5 accent-primary"
-            />
-          </label>
-          {renderShadow && (
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-text-muted">Shadow softness ({renderShadowSoftness.toFixed(1)})</span>
-              <input
-                type="range"
-                aria-label="Shadow softness"
-                min={RENDER_SHADOW_SOFTNESS_MIN}
-                max={RENDER_SHADOW_SOFTNESS_MAX}
-                step={0.1}
-                value={renderShadowSoftness}
-                onChange={(e) => {
-                  const value = Number(e.target.value);
-                  setRenderShadowSoftness(value);
-                  persistRenderSettings({ shadow_softness: value });
-                }}
-                className="w-32 accent-primary"
-              />
-            </label>
-          )}
-        </div>
-=======
           </div>
         )}
->>>>>>> integration/render-profiles
         <div className="flex items-center gap-3">
           <button
             type="button"
