@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
 import MessageBarInput from "./MessageBarInput";
+import RenderProfileDropdown from "./RenderProfileDropdown";
 import StudioRenderPreview, { type StudioRenderPreviewHandle } from "./StudioRenderPreview";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { DOWNLOAD_MODE_FILES, DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, threeDSiteKeyFromLink, type DownloadMode, type ThreeDSiteStatus } from "../constants/files3d";
@@ -10,12 +11,12 @@ import {
   RENDER_CANDIDATE_EXTENSIONS,
   RENDER_FOV_MAX,
   RENDER_FOV_MIN,
-  RENDER_RESOLUTION_OPTIONS,
   RENDER_SETTINGS_DEFAULTS,
   RENDER_SETTINGS_SAVE_DEBOUNCE_MS,
   RENDER_STATUS_POLL_DEADLINE_MS,
   RENDER_STATUS_POLL_INTERVAL_MS,
   RENDERABLE_FORMATS_HINT,
+  type RenderProfileSettings,
 } from "../constants/render";
 
 interface SearchResult {
@@ -169,6 +170,12 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
   const [renderResolution, setRenderResolution] = useState(RENDER_SETTINGS_DEFAULTS.resolution);
   const renderSettingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Step 4 — view switching: the profile dropdown or the Profile Editor
+  // (placeholder until ticket 05). editingProfile carries which profile the
+  // editor opened for: a name, null for "Current Settings", or "create".
+  const [step4View, setStep4View] = useState<"dropdown" | "editor">("dropdown");
+  const [editingProfile, setEditingProfile] = useState<string | null | "create">(null);
+
   // Load persisted Render Settings once on mount; fall back to spec defaults on failure
   useEffect(() => {
     let cancelled = false;
@@ -195,6 +202,24 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
         body: JSON.stringify(patch),
       }).catch(() => { /* persistence is best-effort; the control still applies to renders */ });
     }, RENDER_SETTINGS_SAVE_DEBOUNCE_MS);
+  };
+
+  // Selecting a Render Profile copies its values into Current Settings: the
+  // whole settings object is POSTed verbatim to the flat settings (so fields
+  // added later need no UI changes), and known fields update local state so
+  // the preview/Render button reflect the selection immediately.
+  const handleProfileSelect = (name: string | null, settings: RenderProfileSettings | null) => {
+    if (name === null || !settings) return; // "Current Settings": flat settings are already the source of truth
+    if (renderSettingsSaveTimer.current) clearTimeout(renderSettingsSaveTimer.current);
+    fetch("/api/render-settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(settings),
+    }).catch(() => { /* the selection still applies locally for this session */ });
+    if (typeof settings.color === "string") setRenderColor(settings.color);
+    if (typeof settings.roughness === "number") setRenderRoughness(settings.roughness);
+    if (typeof settings.resolution === "number") setRenderResolution(settings.resolution);
+    if (typeof settings.fov === "number") setRenderFov(settings.fov);
   };
 
   const resetStep4 = () => {
@@ -677,58 +702,38 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       {/* Step 4 — Studio Render */}
       <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
         <p className="text-sm font-semibold text-text-primary">Step 4 — Studio Render</p>
-        {/* Render Settings — persisted; camera angle is captured from the preview below */}
-        <div className="flex flex-wrap items-end gap-x-6 gap-y-3 rounded-lg border border-border-default p-3">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">Color</span>
-            <input
-              type="color"
-              aria-label="Model color"
-              value={renderColor}
-              onChange={(e) => {
-                setRenderColor(e.target.value);
-                persistRenderSettings({ color: e.target.value });
+        {step4View === "editor" ? (
+          // Profile Editor placeholder — ticket 05 replaces this block with the
+          // real editor (3DBenchy viewer + settings panel + Save buttons)
+          <div className="flex flex-col gap-3 rounded-lg border border-border-default p-3">
+            <p className="text-sm text-text-primary">
+              {editingProfile === "create"
+                ? "Create new profile"
+                : editingProfile === null
+                  ? "Edit Current Settings"
+                  : `Edit profile: ${editingProfile}`}
+            </p>
+            <p className="text-xs text-text-muted">The Profile Editor arrives in the next ticket.</p>
+            <div>
+              <button type="button" className={btnPillSm} onClick={() => setStep4View("dropdown")}>
+                ← Back to profiles
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* Render Profile — selecting one copies its values into Current
+             Settings (the flat settings); camera angle is captured from the preview below */
+          <div className="flex items-center gap-3 rounded-lg border border-border-default p-3">
+            <RenderProfileDropdown
+              onSelect={handleProfileSelect}
+              onEdit={(mode, name) => {
+                setEditingProfile(mode === "create" ? "create" : name);
+                setStep4View("editor");
               }}
-              className="h-8 w-14 cursor-pointer rounded border border-border-default bg-surface-panel"
+              addToast={addToast}
             />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">Glossiness ({(1 - renderRoughness).toFixed(2)})</span>
-            {/* Slider shows glossiness; the persisted/wire value is Principled
-                roughness (glossiness = 1 − roughness), so dragging up = glossier */}
-            <input
-              type="range"
-              aria-label="Glossiness"
-              min={0}
-              max={1}
-              step={0.05}
-              value={1 - renderRoughness}
-              onChange={(e) => {
-                const roughness = 1 - Number(e.target.value);
-                setRenderRoughness(roughness);
-                persistRenderSettings({ roughness });
-              }}
-              className="w-40 accent-primary"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">Resolution</span>
-            <select
-              aria-label="Resolution"
-              value={renderResolution}
-              onChange={(e) => {
-                const value = Number(e.target.value);
-                setRenderResolution(value);
-                persistRenderSettings({ resolution: value });
-              }}
-              className="rounded border border-border-default bg-surface-panel px-2 py-1 text-sm text-text-primary"
-            >
-              {RENDER_RESOLUTION_OPTIONS.map((size) => (
-                <option key={size} value={size}>{size} × {size}</option>
-              ))}
-            </select>
-          </label>
-        </div>
+          </div>
+        )}
         <div className="flex items-center gap-3">
           <button
             type="button"
