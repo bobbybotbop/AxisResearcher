@@ -18,6 +18,10 @@ See `docs/agents/architecture.md`.
 
 See `docs/agents/constants.md`.
 
+## Progress feedback
+
+See `docs/agents/progress-feedback.md`.
+
 ## Agent skills
 
 ### Issue tracker
