@@ -21,9 +21,6 @@ export const RENDER_FOV_MAX = 80;
 
 // Slider/color inputs fire many events while dragging; persist debounced
 export const RENDER_SETTINGS_SAVE_DEBOUNCE_MS = 400;
-// Render Job polling: the backend hard-kills at 90s, so the UI gives up at 120s
-export const RENDER_STATUS_POLL_INTERVAL_MS = 1000;
-export const RENDER_STATUS_POLL_DEADLINE_MS = 120_000;
 
 // Preview framing matches blender_studio.py so the preview frames like the render
 export const PREVIEW_FRAME_MARGIN = 1.15;

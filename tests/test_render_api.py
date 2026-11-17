@@ -2,7 +2,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import io
-import time
+import json
 
 import pytest
 
@@ -22,18 +22,20 @@ def client():
 
 @pytest.fixture()
 def fake_render(tmp_path, monkeypatch):
-    """Patch out Blender: render_model writes a stub PNG instantly."""
+    """Patch out Blender: iter_render_progress yields checkpoints, writes a stub PNG."""
     monkeypatch.setattr(app_module, "GENERATED_IMAGES_DIR", str(tmp_path))
     calls = {}
 
-    def fake_render_model(input_path, output_path, **kwargs):
+    def fake_iter_render(input_path, output_path, **kwargs):
         calls["input"] = input_path
         calls["kwargs"] = kwargs
+        yield (0, 48, None)
+        yield (48, 48, 1.0)
         with open(output_path, "wb") as f:
             f.write(PNG_BYTES)
         return output_path
 
-    monkeypatch.setattr(app_module, "render_model", fake_render_model)
+    monkeypatch.setattr(app_module, "iter_render_progress", fake_iter_render)
     return calls
 
 
@@ -44,16 +46,21 @@ def _post_render(client, filename="model.stl", data=MINIMAL_STL, extra=None):
     return client.post("/api/render", data=form, content_type="multipart/form-data")
 
 
-def _wait_for_status(client, task_id, timeout=10):
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        res = client.get(f"/api/render-status/{task_id}")
-        assert res.status_code == 200
-        payload = res.get_json()
-        if payload["status"] in ("completed", "failed"):
-            return payload
-        time.sleep(0.05)
-    raise AssertionError(f"task {task_id} did not finish in {timeout}s")
+def _read_stream(res):
+    """Parse a streaming NDJSON response into a list of events."""
+    events = []
+    for line in res.response:
+        line = line.decode("utf-8") if isinstance(line, bytes) else line
+        if line.strip():
+            events.append(json.loads(line))
+    return events
+
+
+def _stream_result(client, **kwargs):
+    """POST /api/render and return the parsed NDJSON events."""
+    res = _post_render(client, **kwargs)
+    assert res.status_code == 200
+    return _read_stream(res)
 
 
 def test_render_requires_a_file(client):
@@ -75,53 +82,55 @@ def test_render_rejects_bad_resolution(client, fake_render):
     assert "resolution" in res.get_json()["error"].lower()
 
 
-def test_render_job_roundtrip(client, fake_render):
-    res = _post_render(client, extra={"color": "#1a1a1a", "roughness": "0.3", "resolution": "1024"})
-    assert res.status_code == 200
-    task_id = res.get_json()["task_id"]
-    assert task_id
+def test_render_streams_progress_then_result(client, fake_render):
+    events = _stream_result(client, extra={"color": "#1a1a1a", "roughness": "0.3", "resolution": "1024"})
 
-    payload = _wait_for_status(client, task_id)
-    assert payload["status"] == "completed"
-    assert payload["error"] is None
-    assert payload["image"].startswith("/api/render-image/generated_render_")
-    assert payload["image"].endswith(".png")
+    progress = [e for e in events if e["type"] == "progress"]
+    assert progress, "expected live progress events before the result"
+    assert any(e.get("current") == 48 and e.get("total") == 48 for e in progress)
+
+    result = [e for e in events if e["type"] == "result"]
+    assert len(result) == 1
+    data = result[0]["data"]
+    assert data["image"].startswith("/api/render-image/generated_render_")
+    assert data["image"].endswith(".png")
+    assert data["filename"].endswith(".png")
 
     # settings were forwarded to the renderer
     assert fake_render["kwargs"]["color"] == "#1a1a1a"
     assert fake_render["kwargs"]["roughness"] == pytest.approx(0.3)
     assert fake_render["kwargs"]["resolution"] == 1024
 
-    image_res = client.get(payload["image"])
+    image_res = client.get(data["image"])
     assert image_res.status_code == 200
     assert image_res.mimetype == "image/png"
     assert image_res.data == PNG_BYTES
 
 
-def test_render_status_unknown_task(client):
-    res = client.get("/api/render-status/no-such-task")
-    assert res.status_code == 404
+def test_render_result_event_carries_image_and_filename(client, fake_render):
+    events = _stream_result(client)
+    result = [e for e in events if e["type"] == "result"][0]["data"]
+    assert result["image"] == f"/api/render-image/{result['filename']}"
 
 
-def test_render_failure_surfaces_friendly_error(client, tmp_path, monkeypatch):
+def test_render_failure_surfaces_friendly_error_event(client, tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "GENERATED_IMAGES_DIR", str(tmp_path))
 
     def broken_render(input_path, output_path, **kwargs):
         from backend.render import BlenderNotFoundError
         raise BlenderNotFoundError("Blender was not found. Set the BLENDER_PATH environment variable.")
+        yield  # make it a generator so the endpoint's next() triggers the raise
 
-    monkeypatch.setattr(app_module, "render_model", broken_render)
-    res = _post_render(client)
-    assert res.status_code == 200
-    payload = _wait_for_status(client, res.get_json()["task_id"])
-    assert payload["status"] == "failed"
-    assert "Blender" in payload["error"]
+    monkeypatch.setattr(app_module, "iter_render_progress", broken_render)
+    events = _stream_result(client)
+    errors = [e for e in events if e["type"] == "error"]
+    assert len(errors) == 1
+    assert "Blender" in errors[0]["error"]
+    assert not [e for e in events if e["type"] == "result"]
 
 
 def test_render_without_camera_uses_default_angle(client, fake_render):
-    res = _post_render(client)
-    assert res.status_code == 200
-    _wait_for_status(client, res.get_json()["task_id"])
+    _stream_result(client)
     assert fake_render["kwargs"]["azimuth"] == pytest.approx(45.0)
     assert fake_render["kwargs"]["elevation"] == pytest.approx(28.0)
     assert fake_render["kwargs"]["fov"] == pytest.approx(40.0)
@@ -130,14 +139,12 @@ def test_render_without_camera_uses_default_angle(client, fake_render):
 def test_render_forwards_camera_intent_as_blender_angles(client, fake_render):
     # three.js (Y-up) camera 5 along +Z looking at the origin is azimuth -90
     # in Blender (Z-up) coordinates — see tests/test_camera_intent.py
-    res = _post_render(client, extra={
+    events = _stream_result(client, extra={
         "camera_position": "0,0,5",
         "camera_target": "0,0,0",
         "fov": "55",
     })
-    assert res.status_code == 200
-    payload = _wait_for_status(client, res.get_json()["task_id"])
-    assert payload["status"] == "completed"
+    assert [e for e in events if e["type"] == "result"]
     assert fake_render["kwargs"]["azimuth"] == pytest.approx(-90.0)
     assert fake_render["kwargs"]["elevation"] == pytest.approx(0.0, abs=1e-6)
     assert fake_render["kwargs"]["fov"] == pytest.approx(55.0)
@@ -209,19 +216,15 @@ def box_step_bytes(tmp_path_factory):
 
 
 def test_render_accepts_3mf_and_renders_the_converted_stl(client, fake_render, box_3mf_bytes):
-    res = _post_render(client, filename="model.3mf", data=box_3mf_bytes)
-    assert res.status_code == 200
-    payload = _wait_for_status(client, res.get_json()["task_id"])
-    assert payload["status"] == "completed"
+    events = _stream_result(client, filename="model.3mf", data=box_3mf_bytes)
+    assert [e for e in events if e["type"] == "result"]
     # Blender only ever sees the normalized Render Mesh
     assert str(fake_render["input"]).lower().endswith(".stl")
 
 
 def test_render_accepts_step_and_renders_the_converted_stl(client, fake_render, box_step_bytes):
-    res = _post_render(client, filename="model.step", data=box_step_bytes)
-    assert res.status_code == 200
-    payload = _wait_for_status(client, res.get_json()["task_id"])
-    assert payload["status"] == "completed"
+    events = _stream_result(client, filename="model.step", data=box_step_bytes)
+    assert [e for e in events if e["type"] == "result"]
     assert str(fake_render["input"]).lower().endswith(".stl")
 
 
@@ -248,14 +251,13 @@ def test_preview_then_render_converts_only_once(client, fake_render, tmp_path, m
 
     render_res = _post_render(client, filename="model.3mf", data=data)
     assert render_res.status_code == 200
-    payload = _wait_for_status(client, render_res.get_json()["task_id"])
-    assert payload["status"] == "completed"
+    events = _read_stream(render_res)
+    assert [e for e in events if e["type"] == "result"]
     assert len(calls) == 1
 
 
 def test_render_corrupt_3mf_fails_with_friendly_error(client, fake_render):
-    res = _post_render(client, filename="model.3mf", data=b"not a real archive")
-    assert res.status_code == 200
-    payload = _wait_for_status(client, res.get_json()["task_id"])
-    assert payload["status"] == "failed"
-    assert "Traceback" not in payload["error"]
+    events = _stream_result(client, filename="model.3mf", data=b"not a real archive")
+    errors = [e for e in events if e["type"] == "error"]
+    assert len(errors) == 1
+    assert "Traceback" not in errors[0]["error"]
