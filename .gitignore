@@ -8,13 +8,41 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
-/generated-images
 node_modules
 frontend/dist
-.cursor/debug.log
 frontend/dist/index.html
+.cursor/debug.log
 docs/superpowers/
-logs.ndjson
 *.venv
 backend/downloaders/cults3d_profile/
 backend/downloaders/makerworld_profile/
+
+# Generated images (all timestamps)
+/generated-images/
+generated-images/
+
+# Generated 3D files & downloads
+/downloaded_files/
+downloaded_files/
+*.3mf
+*.stl
+*.lock
+
+# Generated listings & collected data
+/Generated_Listings/
+Generated_Listings/
+/Collected-Data/
+Collected-Data/
+
+# Logs & timestamps
+logs.ndjson
+*.log
+*.ndjson
+backend_stderr.txt
+backend_stdout.txt
+/backend_stderr.txt
+/backend_stdout.txt
+
+# Scratch/working files
+/.scratch/
+.scratch/

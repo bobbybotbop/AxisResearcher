@@ -1,3 +1,0 @@
-Migrate hide not_found listings: hidden=0, skipped=118, errors=0
- * Serving Flask app 'app'
- * Debug mode: on

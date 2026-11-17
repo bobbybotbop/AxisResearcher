@@ -6,9 +6,11 @@ export const DEFAULT_OPERATION_COOLDOWN_HOURS = 24;
 export const MS_PER_HOUR = 60 * 60 * 1000;
 export const IMPORT_SYNC_COOLDOWN_MS = 24 * MS_PER_HOUR;
 
-// localStorage keys for the History-tab stock snapshot
-export const STOCK_REFRESHED_AT_STORAGE_KEY = "axisStockRefreshedAt";
-export const STOCK_QUANTITIES_STORAGE_KEY = "axisStockQuantities";
+// localStorage keys for the History-tab stock snapshot. Bumped to v2: the v1
+// cache could hold lifetime listed totals (stock + sold) instead of available
+// stock, and was keyed by the retired MANUAL_* SKU format.
+export const STOCK_REFRESHED_AT_STORAGE_KEY = "axisStockRefreshedAtV2";
+export const STOCK_QUANTITIES_STORAGE_KEY = "axisStockQuantitiesV2";
 
 // localStorage key for the startup eBay status sync (soft-deletes listings
 // ended outside the app). Runs at most once per operationCooldownHours.

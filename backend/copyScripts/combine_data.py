@@ -1274,7 +1274,9 @@ def save_manual_import_last_refreshed(dt_str):
 
 def write_manual_listing_json(item):
     """
-    Write (or update) Generated_Listings/MANUAL_<itemId>.json from a get_seller_list() item.
+    Write (or update) Generated_Listings/<sellerSku>.json from a get_seller_list() item.
+    The file's sku is the eBay seller SKU (unique per listing); MANUAL_<itemId>
+    is only a fallback when eBay reports no SKU.
     item keys: item_id, title, quantity, price, image_urls, condition, start_time,
                description, seller_sku, is_variation, category_id.
     Rewrites an existing file when any eBay-sourced field differs, so stale
@@ -1282,7 +1284,8 @@ def write_manual_listing_json(item):
     ebay_status, hidden, ...) are preserved across rewrites.
     Returns True if the file was written, False if unchanged and skipped.
     """
-    sku = f"{MANUAL_SKU_PREFIX}{item['item_id']}"
+    seller_sku = str(item.get("seller_sku") or "").strip()
+    sku = seller_sku or f"{MANUAL_SKU_PREFIX}{item['item_id']}"
     output_dir = _get_generated_listings_dir()
     os.makedirs(output_dir, exist_ok=True)
     path = os.path.join(output_dir, f"{sku}.json")

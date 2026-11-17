@@ -2392,7 +2392,7 @@ function App() {
     if (!Number.isFinite(qty) || qty < 0) return;
 
     const skus = allListings
-      .filter((l) => l.sku!.startsWith("MANUAL_") || isUploaded(l))
+      .filter((l) => l.isManualListing || isUploaded(l))
       .filter((l) => !l.isVariationListing)
       .filter((l) => {
         const current = listingQuantities[l.sku!];
@@ -2438,10 +2438,10 @@ function App() {
           const raw = l?.title || sku;
           const title = raw.length > 50 ? raw.slice(0, 50) + "\u2026" : raw;
           addToast("error", `Failed to restock "${title}"`);
-          const ebayId = l?.ebayListingId || sku;
-          const url = ebayId && !sku.startsWith("MANUAL_")
+          const ebayId = l?.ebayListingId || "";
+          const url = ebayId
             ? `https://www.ebay.com/itm/${ebayId}`
-            : `(MANUAL item ${ebayId})`;
+            : "(no eBay link)";
           const errors = failedErrors[sku]?.join("; ") || "(no error details)";
           console.warn(`SKU ${sku} | ${url} | ${errors}`);
         });
@@ -2679,7 +2679,26 @@ function App() {
       // ignore — cooldown persistence is best-effort
     }
     void (async () => {
-      const toast = startTaskToast("Syncing with eBay…");
+      const toast = startTaskToast("Refreshing eBay tokens…");
+      // The user token may be hard-expired at app start; refresh before
+      // syncing so GetSellerList doesn't fail on a stale token.
+      try {
+        const refreshRes = await fetch("/api/refresh-tokens", { method: "POST" });
+        const refreshData = await refreshRes.json().catch(() => ({}));
+        if (!refreshRes.ok || refreshData.error) {
+          toast.fail(refreshData.error || `Token refresh failed (HTTP ${refreshRes.status}) — startup sync skipped`);
+          return;
+        }
+        if (!refreshData.user_token_refreshed) {
+          const detail = refreshData.errors?.join("; ") || "user token was not refreshed";
+          toast.fail(`Token refresh failed — ${detail}`);
+          return;
+        }
+      } catch (err) {
+        toast.fail(`Token refresh failed — ${(err as Error).message || "request failed"}`);
+        return;
+      }
+      toast.update("Syncing with eBay…");
       const summary = await runEbayStartupSync();
       if (summary.aborted) {
         toast.fail(summary.reason || summary.error || "eBay is unreachable — startup sync skipped");

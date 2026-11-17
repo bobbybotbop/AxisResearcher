@@ -11,6 +11,8 @@ interface StartupToast {
 }
 
 export interface TaskToastHandle {
+  /** Update the pending toast's label (and optional message) in place. */
+  update: (label: string, message?: string) => void;
   /** Mark the task done; toast auto-dismisses after ~5s. */
   succeed: (message?: string) => void;
   /** Mark the task failed; toast persists until manually dismissed. */
@@ -60,6 +62,14 @@ export function startTaskToast(label: string): TaskToastHandle {
 
   let settled = false;
   return {
+    update(label, message) {
+      if (settled) return;
+      try {
+        updateToast(id, { label, message });
+      } catch (err) {
+        console.warn("[startup-toasts] failed to update toast:", err);
+      }
+    },
     succeed(message) {
       if (settled) return;
       settled = true;

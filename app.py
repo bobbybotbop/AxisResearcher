@@ -74,7 +74,7 @@ from backend.constants.models import DEFAULT_TEXT_MODEL, DEFAULT_IMAGE_MODEL, DE
 from backend.constants.listing import (
     ANGLE_VARIANTS, PROMPT_TYPES, TITLE_MIN_LEN, TITLE_MAX_LEN,
     TITLE_TARGET_LEN, TITLE_MAX_ATTEMPTS, SKIP_CATEGORIES,
-    CATEGORY_TO_IMAGE_TYPE, MANUAL_SKU_PREFIX, EBAY_STATUS_NOT_FOUND,
+    CATEGORY_TO_IMAGE_TYPE, EBAY_STATUS_NOT_FOUND,
 )
 from backend.constants.ebay import EBAY_MARKETPLACE_ID, EBAY_BROWSE_API_BASE, EBAY_INVENTORY_API_BASE
 from backend.constants.paths import GENERATED_LISTINGS_DIR
@@ -90,6 +90,30 @@ CORS(app, origins=["http://localhost:3000", "http://localhost:5173", "http://loc
 # Structure: {task_id: {"status": "running|completed|failed", "total": N, "completed": M, "results": [], "errors": []}}
 image_generation_tasks = {}
 image_generation_lock = threading.Lock()
+
+
+def _load_listing_file(sku):
+    """Read a Generated_Listings/<sku>.json file; None if missing/unreadable."""
+    fpath = resolve_listing_json_path(sku=sku)
+    try:
+        with open(fpath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _is_manual_sku(sku):
+    """True when the listing file marks this SKU as imported from eBay (not tool-created)."""
+    d = _load_listing_file(sku)
+    return bool(d and d.get('isManualListing'))
+
+
+def _manual_item_id(sku):
+    """eBay item ID for an imported (manual) listing, from its ebayListingId field."""
+    d = _load_listing_file(sku)
+    if d and d.get('isManualListing'):
+        return str(d.get('ebayListingId') or '').strip()
+    return ''
 
 
 def _verify_failed_skus(
@@ -115,8 +139,8 @@ def _verify_failed_skus(
             if active_listings:  # Guard: skip if no active listings (prevents false-positive mass deactivation)
                 active_item_ids = {str(item['item_id']) for item in active_listings}
                 for sku in failed_manual_skus:
-                    item_id = sku[len(MANUAL_SKU_PREFIX):]
-                    if item_id not in active_item_ids:
+                    item_id = _manual_item_id(sku)
+                    if item_id and item_id not in active_item_ids:
                         confirmed_not_found.add(sku)
         except Exception as e:
             print(f"[verify_failed_skus] GetSellerList failed, skipping MANUAL check: {e}")
@@ -1724,7 +1748,7 @@ def list_all_listings():
 @app.route('/api/import-listings', methods=['POST'])
 def api_import_listings():
     """
-    Sync active eBay listings created outside this tool into Generated_Listings/MANUAL_*.json.
+    Sync active eBay listings created outside this tool into Generated_Listings/<sellerSku>.json.
     Uses ModTimeFrom from listingPreferences.json for incremental fetches after the first run.
     """
     last_refreshed = get_manual_import_last_refreshed()
@@ -1736,38 +1760,35 @@ def api_import_listings():
         log_event("import", "error", error=str(e))
         return jsonify({'error': str(e)}), 500
 
-    # Build set of eBay item IDs already claimed by non-MANUAL listings
-    known_ids = set()
+    # Index local files by eBay item ID, split by listing kind
+    axis_item_ids = set()
+    manual_item_ids = set()
     for fpath in glob.glob(os.path.join(generated_listings_dir, '*.json')):
-        if os.path.basename(fpath).startswith(MANUAL_SKU_PREFIX):
-            continue
         try:
             with open(fpath, 'r', encoding='utf-8') as f:
                 d = json.load(f)
             eid = str(d.get('ebayListingId') or '').strip()
-            if eid:
-                known_ids.add(eid)
+            if not eid:
+                continue
+            if d.get('isManualListing'):
+                manual_item_ids.add(eid)
+            else:
+                axis_item_ids.add(eid)
         except Exception:
             continue
-
-    existing_manual_skus = {
-        os.path.basename(fp).replace('.json', '')
-        for fp in glob.glob(os.path.join(generated_listings_dir, f'{MANUAL_SKU_PREFIX}*.json'))
-    }
 
     imported = updated = skipped = 0
     imported_skus = []
     for item in items:
-        if item['item_id'] in known_ids:
+        if item['item_id'] in axis_item_ids:
             skipped += 1
             continue
-        sku = f'{MANUAL_SKU_PREFIX}{item["item_id"]}'
-        is_new = sku not in existing_manual_skus
+        is_new = item['item_id'] not in manual_item_ids
         written = write_manual_listing_json(item)
         if written:
             if is_new:
                 imported += 1
-                imported_skus.append(sku)
+                imported_skus.append(str(item.get('seller_sku') or '').strip() or item['item_id'])
             else:
                 updated += 1
         else:
@@ -2202,18 +2223,15 @@ def api_listings_quantities():
 
     result = {}
     for sku in skus:
-        if sku.startswith(MANUAL_SKU_PREFIX):
-            # MANUAL_ listings live outside the Sell Inventory API; fetch the
+        if _is_manual_sku(sku):
+            # Imported listings live outside the Sell Inventory API; fetch the
             # live available quantity from eBay via GetItem, falling back to
             # the local snapshot if eBay is unreachable.
-            item_id = sku[len(MANUAL_SKU_PREFIX):]
-            qty = get_item_available_quantity(item_id)
+            item_id = _manual_item_id(sku)
+            qty = get_item_available_quantity(item_id) if item_id else None
             if qty is None:
-                base_dir = os.path.dirname(os.path.abspath(__file__))
-                fpath = os.path.join(base_dir, GENERATED_LISTINGS_DIR, f'{sku}.json')
+                d = _load_listing_file(sku)
                 try:
-                    with open(fpath, 'r', encoding='utf-8') as f:
-                        d = json.load(f)
                     qty = int(d.get('offer', {}).get('quantity', 0))
                 except Exception:
                     qty = None
@@ -2447,24 +2465,33 @@ def api_restock_listings():
     if not skus:
         return jsonify({'updated': [], 'failed': [], 'quantity': quantity}), 200
 
-    # Split into MANUAL_ (Trading API) and automated (Sell Inventory API) groups
-    manual_skus = [s for s in skus if s.startswith(MANUAL_SKU_PREFIX)]
-    automated_skus = [s for s in skus if not s.startswith(MANUAL_SKU_PREFIX)]
+    # Split into manual/imported (Trading API) and automated (Sell Inventory API) groups
+    manual_sku_set = {s for s in skus if _is_manual_sku(s)}
+    manual_skus = [s for s in skus if s in manual_sku_set]
+    automated_skus = [s for s in skus if s not in manual_sku_set]
 
     updated = []
     failed = []
     failed_errors = {}  # sku -> list of eBay error message strings
 
-    # --- MANUAL_ SKUs: route through ReviseInventoryStatus (Trading API) ---
+    # --- Manual SKUs: route through ReviseInventoryStatus (Trading API) ---
     if manual_skus:
-        manual_api_items = [
-            {'item_id': sku[len(MANUAL_SKU_PREFIX):], 'quantity': quantity}
-            for sku in manual_skus
-        ]
+        sku_by_item_id = {}
+        manual_api_items = []
+        for sku in manual_skus:
+            item_id = _manual_item_id(sku)
+            if item_id:
+                sku_by_item_id[item_id] = sku
+                manual_api_items.append({'item_id': item_id, 'quantity': quantity})
+            else:
+                failed.append(sku)
+                failed_errors[sku] = ['No eBay item ID on file for this imported listing']
         try:
             manual_results = revise_inventory_status_batch(manual_api_items)
             for result_item in manual_results:
-                sku = f"{MANUAL_SKU_PREFIX}{result_item['item_id']}"
+                sku = sku_by_item_id.get(str(result_item['item_id']))
+                if not sku:
+                    continue
                 if result_item['ok']:
                     updated.append(sku)
                     update_local_listing_quantity(sku=sku, quantity=quantity)
@@ -2473,9 +2500,10 @@ def api_restock_listings():
                     if result_item.get('errors'):
                         failed_errors[sku] = result_item['errors']
         except Exception as e:
-            failed.extend(manual_skus)
-            for sku in manual_skus:
-                failed_errors[sku] = [str(e)]
+            for sku in sku_by_item_id.values():
+                if sku not in failed:
+                    failed.append(sku)
+                    failed_errors[sku] = [str(e)]
 
     # --- Automated SKUs: route through Sell Inventory API ---
     if automated_skus:
@@ -2556,14 +2584,14 @@ def api_restock_listings():
                         failed_errors[sku] = [str(e)]
 
             for sku in updated:
-                if not sku.startswith(MANUAL_SKU_PREFIX):
+                if sku not in manual_sku_set:
                     update_local_listing_quantity(sku=sku, quantity=quantity)
 
     # --- Verify failed SKUs against eBay to separate "not found" from real errors ---
     not_found_skus = []
     if failed:
-        failed_manual = [s for s in failed if s.startswith(MANUAL_SKU_PREFIX)]
-        failed_axis = [s for s in failed if not s.startswith(MANUAL_SKU_PREFIX)]
+        failed_manual = [s for s in failed if s in manual_sku_set]
+        failed_axis = [s for s in failed if s not in manual_sku_set]
         try:
             confirmed_not_found = _verify_failed_skus(failed_manual, failed_axis)
         except Exception as e:
@@ -2593,18 +2621,13 @@ def api_restock_listings():
             # Build parallel ebay_ids array (same length as skus)
             ebay_ids = []
             for restocked_sku in updated:
-                if restocked_sku.startswith(MANUAL_SKU_PREFIX):
-                    ebay_ids.append(restocked_sku[len(MANUAL_SKU_PREFIX):])
+                ebay_id = ""
+                d = _load_listing_file(restocked_sku)
+                if d:
+                    ebay_id = str(d.get('ebayListingId') or '')
                 else:
-                    ebay_id = ""
-                    fpath = resolve_listing_json_path(sku=restocked_sku)
-                    try:
-                        with open(fpath, 'r', encoding='utf-8') as f:
-                            d = json.load(f)
-                        ebay_id = d.get('ebayListingId', '') or ''
-                    except Exception as e:
-                        print(f"[restock] could not read ebayListingId for {restocked_sku}: {e}")
-                    ebay_ids.append(ebay_id)
+                    print(f"[restock] could not read ebayListingId for {restocked_sku}")
+                ebay_ids.append(ebay_id)
             restock_kwargs["ebay_ids"] = ebay_ids
         all_failed = failed + not_found_skus
         if all_failed:
@@ -2766,7 +2789,7 @@ def api_sync_active_listings():
 
         if matched_item is not None:
             # Listing is confirmed active on eBay
-            is_manual = sku.startswith(MANUAL_SKU_PREFIX)
+            is_manual = bool(local_data.get('isManualListing'))
             was_not_found = ebay_status == EBAY_STATUS_NOT_FOUND
 
             if is_manual:
@@ -2895,7 +2918,7 @@ def api_sync_startup_listings():
                 continue
 
             if matched_item is not None:
-                if sku.startswith(MANUAL_SKU_PREFIX):
+                if local_data.get('isManualListing'):
                     write_manual_listing_json(matched_item)
                     if was_not_found:
                         set_listing_ebay_status(sku, 'active')

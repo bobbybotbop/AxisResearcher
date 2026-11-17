@@ -72,18 +72,28 @@ def listings_dir(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _read(listings_dir):
-    with open(listings_dir / "MANUAL_197523731100.json", encoding="utf-8") as f:
+def _read(listings_dir, sku="1"):
+    with open(listings_dir / f"{sku}.json", encoding="utf-8") as f:
         return json.load(f)
 
 
 def test_writes_category_sku_quantity(listings_dir):
     assert combine_data.write_manual_listing_json(_item()) is True
     d = _read(listings_dir)
+    # The file is named by the eBay seller SKU, never MANUAL_<itemId>.
+    assert d["sku"] == "1"
+    assert not (listings_dir / "MANUAL_197523731100.json").exists()
     assert d["offer"]["categoryId"] == "181415"
     assert d["sellerSku"] == "1"
     assert d["offer"]["quantity"] == 15
     assert d["inventoryItem"]["availability"]["shipToLocationAvailability"]["quantity"] == 15
+
+
+def test_missing_seller_sku_falls_back_to_manual_prefix(listings_dir):
+    combine_data.write_manual_listing_json(_item(seller_sku=""))
+    d = _read(listings_dir, sku="MANUAL_197523731100")
+    assert d["sku"] == "MANUAL_197523731100"
+    assert d["sellerSku"] == ""
 
 
 def test_unchanged_item_is_skipped(listings_dir):
@@ -101,7 +111,7 @@ def test_stale_file_heals_and_preserves_local_fields(listings_dir):
     """A stale import (missing sellerSku/categoryId) must heal even when the
     quantity is unchanged, and local-only fields must survive the rewrite."""
     combine_data.write_manual_listing_json(_item())
-    path = listings_dir / "MANUAL_197523731100.json"
+    path = listings_dir / "1.json"
     d = _read(listings_dir)
     d["sellerSku"] = ""  # stale: missing seller SKU -> UI shows MANUAL_XXX
     d["offer"].pop("categoryId", None)  # stale: missing category
