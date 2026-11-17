@@ -79,9 +79,18 @@ from backend.constants.listing import (
 from backend.constants.ebay import EBAY_MARKETPLACE_ID, EBAY_BROWSE_API_BASE, EBAY_INVENTORY_API_BASE
 from backend.constants.paths import GENERATED_LISTINGS_DIR, GENERATED_IMAGES_DIR
 from backend.constants.render import (
-    DEFAULT_RENDER_AZIMUTH, DEFAULT_RENDER_COLOR, DEFAULT_RENDER_ELEVATION,
-    DEFAULT_RENDER_FOV, DEFAULT_RENDER_ROUGHNESS, DEFAULT_RENDER_RESOLUTION,
-    RENDER_FOV_RANGE, RENDER_OUTPUT_PREFIX, RENDER_RESOLUTIONS,
+    DEFAULT_RENDER_AMBIENT, DEFAULT_RENDER_AZIMUTH, DEFAULT_RENDER_COLOR,
+    DEFAULT_RENDER_ELEVATION, DEFAULT_RENDER_EXPOSURE, DEFAULT_RENDER_FILL_ENERGY,
+    DEFAULT_RENDER_FINISH, DEFAULT_RENDER_FOV, DEFAULT_RENDER_KEY_ENERGY,
+    DEFAULT_RENDER_LAYER_DEPTH, DEFAULT_RENDER_LAYER_HEIGHT_MM,
+    DEFAULT_RENDER_RESOLUTION, DEFAULT_RENDER_RIM_ENERGY, DEFAULT_RENDER_ROUGHNESS,
+    DEFAULT_RENDER_SHADOW, DEFAULT_RENDER_SHADOW_SOFTNESS,
+    RENDER_AMBIENT_MAX, RENDER_ENERGY_MAX, RENDER_EXPOSURE_MAX, RENDER_EXPOSURE_MIN,
+    RENDER_FINISHES, RENDER_FOV_RANGE,
+    RENDER_LAYER_DEPTH_MAX, RENDER_LAYER_DEPTH_MIN,
+    RENDER_LAYER_HEIGHT_MM_MAX, RENDER_LAYER_HEIGHT_MM_MIN,
+    RENDER_OUTPUT_PREFIX, RENDER_RESOLUTIONS,
+    RENDER_SHADOW_SOFTNESS_MAX, RENDER_SHADOW_SOFTNESS_MIN,
     SUPPORTED_RENDER_EXTENSIONS,
 )
 from backend.render import render_model, RenderError
@@ -3611,6 +3620,16 @@ def start_render():
         roughness:  optional 0..1 (default 0.3)
         resolution: optional square size, one of RENDER_RESOLUTIONS (default 1024)
         fov:        optional vertical field of view in degrees (default 40, range 20-80)
+        finish:     optional Surface Finish ("smooth" or "layer-lines")
+        layer_height_mm / layer_depth:
+                    optional Layer Lines sub-settings (real FDM layer height,
+                    bump strength)
+        key_energy / fill_energy / rim_energy:
+                    optional light intensities (defaults 150/60/250)
+        ambient:    optional world background strength (default 0.35)
+        shadow:     optional "true"/"false" — key light casts a shadow (default true)
+        shadow_softness: optional key light disk size (default 1.5)
+        exposure:   optional global multiplier on all energies + world (default 1.0)
         camera_position / camera_target:
                     optional "x,y,z" in three.js (Y-up) preview coordinates; both or
                     neither. Converted to Blender (Z-up) azimuth/elevation; distance
@@ -3655,6 +3674,49 @@ def start_render():
             return jsonify({"error": f"fov must be a number between {RENDER_FOV_RANGE[0]:.0f} and {RENDER_FOV_RANGE[1]:.0f}", "task_id": None}), 400
         if not RENDER_FOV_RANGE[0] <= fov <= RENDER_FOV_RANGE[1]:
             return jsonify({"error": f"fov must be between {RENDER_FOV_RANGE[0]:.0f} and {RENDER_FOV_RANGE[1]:.0f} degrees", "task_id": None}), 400
+
+        # Expanded Render Settings: lighting, shadows, exposure, Surface Finish
+        def parse_float(field, default, minimum, maximum):
+            raw = request.form.get(field)
+            if raw is None:
+                return default, None
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                return None, f"{field} must be a number between {minimum} and {maximum}"
+            if not minimum <= value <= maximum:
+                return None, f"{field} must be between {minimum} and {maximum}"
+            return value, None
+
+        expanded = {}
+        for field, default, minimum, maximum in (
+            ("key_energy", DEFAULT_RENDER_KEY_ENERGY, 0.0, RENDER_ENERGY_MAX),
+            ("fill_energy", DEFAULT_RENDER_FILL_ENERGY, 0.0, RENDER_ENERGY_MAX),
+            ("rim_energy", DEFAULT_RENDER_RIM_ENERGY, 0.0, RENDER_ENERGY_MAX),
+            ("ambient", DEFAULT_RENDER_AMBIENT, 0.0, RENDER_AMBIENT_MAX),
+            ("shadow_softness", DEFAULT_RENDER_SHADOW_SOFTNESS, RENDER_SHADOW_SOFTNESS_MIN, RENDER_SHADOW_SOFTNESS_MAX),
+            ("exposure", DEFAULT_RENDER_EXPOSURE, RENDER_EXPOSURE_MIN, RENDER_EXPOSURE_MAX),
+            ("layer_height_mm", DEFAULT_RENDER_LAYER_HEIGHT_MM, RENDER_LAYER_HEIGHT_MM_MIN, RENDER_LAYER_HEIGHT_MM_MAX),
+            ("layer_depth", DEFAULT_RENDER_LAYER_DEPTH, RENDER_LAYER_DEPTH_MIN, RENDER_LAYER_DEPTH_MAX),
+        ):
+            value, error = parse_float(field, default, minimum, maximum)
+            if error:
+                return jsonify({"error": error, "task_id": None}), 400
+            expanded[field] = value
+
+        finish = request.form.get("finish", DEFAULT_RENDER_FINISH)
+        if finish not in RENDER_FINISHES:
+            return jsonify({"error": f"finish must be one of {list(RENDER_FINISHES)}", "task_id": None}), 400
+
+        raw_shadow = request.form.get("shadow")
+        if raw_shadow is None:
+            shadow = DEFAULT_RENDER_SHADOW
+        elif raw_shadow.lower() in ("true", "1", "on", "yes"):
+            shadow = True
+        elif raw_shadow.lower() in ("false", "0", "off", "no"):
+            shadow = False
+        else:
+            return jsonify({"error": "shadow must be true or false", "task_id": None}), 400
 
         def parse_vec3(field):
             raw = request.form.get(field)
@@ -3706,6 +3768,16 @@ def start_render():
                     mesh_path, output_path,
                     color=color, roughness=roughness, resolution=resolution,
                     azimuth=azimuth, elevation=elevation, fov=fov,
+                    finish=finish,
+                    layer_height_mm=expanded["layer_height_mm"],
+                    layer_depth=expanded["layer_depth"],
+                    key_energy=expanded["key_energy"],
+                    fill_energy=expanded["fill_energy"],
+                    rim_energy=expanded["rim_energy"],
+                    ambient=expanded["ambient"],
+                    shadow=shadow,
+                    shadow_softness=expanded["shadow_softness"],
+                    exposure=expanded["exposure"],
                 )
                 with render_tasks_lock:
                     render_tasks[task_id].update(
@@ -3809,7 +3881,8 @@ def api_render_settings():
     """
     Read or update persisted Render Settings (Step 4 Studio Render).
 
-    GET:        returns {"color", "roughness", "resolution", "fov"}
+    GET:        returns the full Render Settings surface (material, lighting,
+                shadows, exposure, resolution, fov)
     POST:       JSON body with any subset of those keys; persists and returns
                 the saved state. Camera angle/target are ephemeral by design.
     """
@@ -3825,6 +3898,16 @@ def api_render_settings():
             roughness=body.get('roughness'),
             resolution=body.get('resolution'),
             fov=body.get('fov'),
+            finish=body.get('finish'),
+            layer_height_mm=body.get('layer_height_mm'),
+            layer_depth=body.get('layer_depth'),
+            key_energy=body.get('key_energy'),
+            fill_energy=body.get('fill_energy'),
+            rim_energy=body.get('rim_energy'),
+            ambient=body.get('ambient'),
+            shadow=body.get('shadow'),
+            shadow_softness=body.get('shadow_softness'),
+            exposure=body.get('exposure'),
         )
         return jsonify(settings), 200
     except (TypeError, ValueError) as e:

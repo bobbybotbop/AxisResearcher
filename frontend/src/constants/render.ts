@@ -13,8 +13,37 @@ export const modelExtensionOf = (name: string) => name.slice(name.lastIndexOf(".
 
 // Render Settings defaults (persisted via /api/render-settings; spec defaults as
 // fallback). The UI exposes "Glossiness"; the persisted/wire value is Principled
-// roughness (glossiness = 1 − roughness).
-export const RENDER_SETTINGS_DEFAULTS = { color: "#1a1a1a", roughness: 0.3, resolution: 1024, fov: 40 };
+// roughness (glossiness = 1 − roughness). Lighting/shadow/exposure defaults
+// reproduce the original hardcoded rig exactly.
+export const RENDER_SETTINGS_DEFAULTS = {
+  color: "#1a1a1a",
+  roughness: 0.3,
+  resolution: 1024,
+  fov: 40,
+  finish: "smooth" as RenderFinish,
+  layerHeightMm: 0.2,
+  layerDepth: 0.4,
+  keyEnergy: 150,
+  fillEnergy: 60,
+  rimEnergy: 250,
+  ambient: 0.35,
+  shadow: true,
+  shadowSoftness: 1.5,
+  exposure: 1.0,
+};
+export type RenderFinish = "smooth" | "layer-lines";
+export const RENDER_FINISH_OPTIONS: { value: RenderFinish; label: string }[] = [
+  { value: "smooth", label: "Smooth Plastic" },
+  { value: "layer-lines", label: "Layer Lines" },
+];
+export const RENDER_LAYER_HEIGHT_MM_MIN = 0.08;
+export const RENDER_LAYER_HEIGHT_MM_MAX = 0.4;
+export const RENDER_ENERGY_MAX = 2000;
+export const RENDER_AMBIENT_MAX = 2;
+export const RENDER_SHADOW_SOFTNESS_MIN = 0.1;
+export const RENDER_SHADOW_SOFTNESS_MAX = 10;
+export const RENDER_EXPOSURE_MIN = 0.1;
+export const RENDER_EXPOSURE_MAX = 4;
 export const RENDER_RESOLUTION_OPTIONS = [512, 1024, 2048];
 export const RENDER_FOV_MIN = 20;
 export const RENDER_FOV_MAX = 80;

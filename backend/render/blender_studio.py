@@ -46,6 +46,17 @@ def parse_args():
     parser.add_argument("--finish", choices=["smooth", "layer-lines"], default="smooth")
     parser.add_argument("--layer-height-mm", type=float, default=0.2)
     parser.add_argument("--layer-depth", type=float, default=0.4)
+    # Lighting rig energies (defaults reproduce the original hardcoded rig)
+    parser.add_argument("--key-energy", type=float, default=150.0)
+    parser.add_argument("--fill-energy", type=float, default=60.0)
+    parser.add_argument("--rim-energy", type=float, default=250.0)
+    # World (ambient) background strength
+    parser.add_argument("--ambient", type=float, default=0.35)
+    # Shadows: only the key casts one; softness is the key light's disk size
+    parser.add_argument("--shadow", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--shadow-softness", type=float, default=1.5)
+    # Exposure: global multiplier on all light energies + world strength
+    parser.add_argument("--exposure", type=float, default=1.0)
     return parser.parse_args(argv)
 
 
@@ -264,16 +275,20 @@ def main():
     target = (0.0, 0.0, center.z)
 
     # 3-point area-light rig (key / fill / rim); only the key casts a shadow so
-    # the floor gets one clean soft contact shadow. When the camera is below,
-    # mirror the rig to negative z so the underside is lit.
+    # the floor gets one clean soft contact shadow. Exposure scales every
+    # energy. When the camera is below, mirror the rig to negative z so the
+    # underside is lit.
+    key_energy = args.key_energy * args.exposure
+    fill_energy = args.fill_energy * args.exposure
+    rim_energy = args.rim_energy * args.exposure
     if args.elevation < 0:
-        add_area_light("Key", (4, -3, -6), energy=150, size=1.5)
-        add_area_light("Fill", (-4, -2, -3), energy=60, size=4.0, shadow=False)
-        add_area_light("Rim", (1, 5, -7), energy=250, size=3.0, shadow=False)
+        add_area_light("Key", (4, -3, -6), energy=key_energy, size=args.shadow_softness, shadow=args.shadow)
+        add_area_light("Fill", (-4, -2, -3), energy=fill_energy, size=4.0, shadow=False)
+        add_area_light("Rim", (1, 5, -7), energy=rim_energy, size=3.0, shadow=False)
     else:
-        add_area_light("Key", (4, -3, 6), energy=150, size=1.5)
-        add_area_light("Fill", (-4, -2, 3), energy=60, size=4.0, shadow=False)
-        add_area_light("Rim", (1, 5, 7), energy=250, size=3.0, shadow=False)
+        add_area_light("Key", (4, -3, 6), energy=key_energy, size=args.shadow_softness, shadow=args.shadow)
+        add_area_light("Fill", (-4, -2, 3), energy=fill_energy, size=4.0, shadow=False)
+        add_area_light("Rim", (1, 5, 7), energy=rim_energy, size=3.0, shadow=False)
 
     add_camera(target, radius, args.azimuth, args.elevation, args.fov)
 
@@ -281,7 +296,7 @@ def main():
     world = bpy.data.worlds.new("World")
     world.use_nodes = True
     world.node_tree.nodes["Background"].inputs[0].default_value = (1.0, 1.0, 1.0, 1.0)
-    world.node_tree.nodes["Background"].inputs[1].default_value = 0.35
+    world.node_tree.nodes["Background"].inputs[1].default_value = args.ambient * args.exposure
     scene.world = world
     scene.render.film_transparent = has_shadow_catcher
 

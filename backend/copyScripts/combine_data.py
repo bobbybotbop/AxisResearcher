@@ -12,13 +12,34 @@ from backend.constants.ebay import EBAY_INVENTORY_API_BASE
 from backend.constants.paths import CONFIG_FILE, GENERATED_LISTINGS_DIR
 from backend.constants.listing import SKU_PREFIX, MANUAL_SKU_PREFIX, DEFAULT_OPERATION_COOLDOWN_HOURS, EBAY_STATUS_NOT_FOUND
 from backend.constants.render import (
+    DEFAULT_RENDER_AMBIENT,
     DEFAULT_RENDER_COLOR,
+    DEFAULT_RENDER_EXPOSURE,
+    DEFAULT_RENDER_FILL_ENERGY,
+    DEFAULT_RENDER_FINISH,
     DEFAULT_RENDER_FOV,
+    DEFAULT_RENDER_KEY_ENERGY,
+    DEFAULT_RENDER_LAYER_DEPTH,
+    DEFAULT_RENDER_LAYER_HEIGHT_MM,
     DEFAULT_RENDER_RESOLUTION,
+    DEFAULT_RENDER_RIM_ENERGY,
     DEFAULT_RENDER_ROUGHNESS,
+    DEFAULT_RENDER_SHADOW,
+    DEFAULT_RENDER_SHADOW_SOFTNESS,
+    RENDER_AMBIENT_MAX,
+    RENDER_ENERGY_MAX,
+    RENDER_EXPOSURE_MAX,
+    RENDER_EXPOSURE_MIN,
+    RENDER_FINISHES,
     RENDER_FOV_MAX,
     RENDER_FOV_MIN,
+    RENDER_LAYER_DEPTH_MAX,
+    RENDER_LAYER_DEPTH_MIN,
+    RENDER_LAYER_HEIGHT_MM_MAX,
+    RENDER_LAYER_HEIGHT_MM_MIN,
     RENDER_RESOLUTIONS,
+    RENDER_SHADOW_SOFTNESS_MAX,
+    RENDER_SHADOW_SOFTNESS_MIN,
 )
 
 # Load environment variables
@@ -1274,8 +1295,11 @@ def get_render_settings():
     Read Studio Render (Step 4) settings from listingPreferences.json.
 
     Returns:
-        dict: {"color": str, "roughness": float, "resolution": int, "fov": float}
-              Camera angle/target are ephemeral and deliberately not included.
+        dict: the full Render Settings surface — material (color, roughness,
+              finish, layer_height_mm, layer_depth), lighting (key/fill/rim
+              energy, ambient), shadows (shadow, shadow_softness), exposure,
+              resolution, fov. Camera angle/target are ephemeral and
+              deliberately not included.
     """
     config = load_config()
     return {
@@ -1283,22 +1307,42 @@ def get_render_settings():
         "roughness": float(config.get("render_roughness", DEFAULT_RENDER_ROUGHNESS)),
         "resolution": int(config.get("render_resolution", DEFAULT_RENDER_RESOLUTION)),
         "fov": float(config.get("render_fov", DEFAULT_RENDER_FOV)),
+        "finish": str(config.get("render_finish", DEFAULT_RENDER_FINISH)),
+        "layer_height_mm": float(config.get("render_layer_height_mm", DEFAULT_RENDER_LAYER_HEIGHT_MM)),
+        "layer_depth": float(config.get("render_layer_depth", DEFAULT_RENDER_LAYER_DEPTH)),
+        "key_energy": float(config.get("render_key_energy", DEFAULT_RENDER_KEY_ENERGY)),
+        "fill_energy": float(config.get("render_fill_energy", DEFAULT_RENDER_FILL_ENERGY)),
+        "rim_energy": float(config.get("render_rim_energy", DEFAULT_RENDER_RIM_ENERGY)),
+        "ambient": float(config.get("render_ambient", DEFAULT_RENDER_AMBIENT)),
+        "shadow": bool(config.get("render_shadow", DEFAULT_RENDER_SHADOW)),
+        "shadow_softness": float(config.get("render_shadow_softness", DEFAULT_RENDER_SHADOW_SOFTNESS)),
+        "exposure": float(config.get("render_exposure", DEFAULT_RENDER_EXPOSURE)),
     }
 
 
-def save_render_settings(color=None, roughness=None, resolution=None, fov=None):
+def save_render_settings(color=None, roughness=None, resolution=None, fov=None,
+                         finish=None, layer_height_mm=None, layer_depth=None,
+                         key_energy=None, fill_energy=None, rim_energy=None,
+                         ambient=None, shadow=None, shadow_softness=None, exposure=None):
     """
     Persist Studio Render (Step 4) settings to listingPreferences.json.
 
-    Args:
-        color (str, optional): Hex color like "#1a1a1a". Unchanged if None.
-        roughness (float, optional): Principled roughness 0..1. Unchanged if None.
-        resolution (int, optional): Square size, one of RENDER_RESOLUTIONS. Unchanged if None.
-        fov (float, optional): Preview field of view in degrees. Unchanged if None.
+    Args (all optional; unchanged when None):
+        color (str): Hex color like "#1a1a1a".
+        roughness (float): Principled roughness 0..1.
+        resolution (int): Square size, one of RENDER_RESOLUTIONS.
+        fov (float): Preview field of view in degrees.
+        finish (str): Surface Finish, one of RENDER_FINISHES.
+        layer_height_mm (float): FDM layer height for Layer Lines.
+        layer_depth (float): Layer Lines bump strength.
+        key_energy / fill_energy / rim_energy (float): light intensities.
+        ambient (float): world background strength.
+        shadow (bool): whether the key light casts a shadow.
+        shadow_softness (float): key light disk size (shadow softness).
+        exposure (float): global multiplier on all energies + world strength.
 
     Returns:
-        dict: {"color": str, "roughness": float, "resolution": int, "fov": float}
-              reflecting the saved state.
+        dict: the full Render Settings reflecting the saved state.
 
     Raises:
         ValueError: If any provided value is invalid.
@@ -1333,6 +1377,69 @@ def save_render_settings(color=None, roughness=None, resolution=None, fov=None):
         if not RENDER_FOV_MIN <= fov <= RENDER_FOV_MAX:
             raise ValueError(f"fov must be between {RENDER_FOV_MIN} and {RENDER_FOV_MAX}")
         config["render_fov"] = fov
+    if finish is not None:
+        finish = str(finish)
+        if finish not in RENDER_FINISHES:
+            raise ValueError(f"finish must be one of {list(RENDER_FINISHES)}")
+        config["render_finish"] = finish
+    if layer_height_mm is not None:
+        try:
+            layer_height_mm = float(layer_height_mm)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"layer_height_mm must be a number between {RENDER_LAYER_HEIGHT_MM_MIN} and {RENDER_LAYER_HEIGHT_MM_MAX}")
+        if not RENDER_LAYER_HEIGHT_MM_MIN <= layer_height_mm <= RENDER_LAYER_HEIGHT_MM_MAX:
+            raise ValueError(
+                f"layer_height_mm must be between {RENDER_LAYER_HEIGHT_MM_MIN} and {RENDER_LAYER_HEIGHT_MM_MAX}")
+        config["render_layer_height_mm"] = layer_height_mm
+    if layer_depth is not None:
+        try:
+            layer_depth = float(layer_depth)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"layer_depth must be a number between {RENDER_LAYER_DEPTH_MIN} and {RENDER_LAYER_DEPTH_MAX}")
+        if not RENDER_LAYER_DEPTH_MIN <= layer_depth <= RENDER_LAYER_DEPTH_MAX:
+            raise ValueError(f"layer_depth must be between {RENDER_LAYER_DEPTH_MIN} and {RENDER_LAYER_DEPTH_MAX}")
+        config["render_layer_depth"] = layer_depth
+    for name, value in (("key_energy", key_energy), ("fill_energy", fill_energy), ("rim_energy", rim_energy)):
+        if value is not None:
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                raise ValueError(f"{name} must be a number between 0 and {RENDER_ENERGY_MAX}")
+            if not 0.0 <= value <= RENDER_ENERGY_MAX:
+                raise ValueError(f"{name} must be between 0 and {RENDER_ENERGY_MAX}")
+            config[f"render_{name}"] = value
+    if ambient is not None:
+        try:
+            ambient = float(ambient)
+        except (TypeError, ValueError):
+            raise ValueError(f"ambient must be a number between 0 and {RENDER_AMBIENT_MAX}")
+        if not 0.0 <= ambient <= RENDER_AMBIENT_MAX:
+            raise ValueError(f"ambient must be between 0 and {RENDER_AMBIENT_MAX}")
+        config["render_ambient"] = ambient
+    if shadow is not None:
+        if not isinstance(shadow, bool):
+            raise ValueError("shadow must be a boolean")
+        config["render_shadow"] = shadow
+    if shadow_softness is not None:
+        try:
+            shadow_softness = float(shadow_softness)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"shadow_softness must be a number between {RENDER_SHADOW_SOFTNESS_MIN} and {RENDER_SHADOW_SOFTNESS_MAX}")
+        if not RENDER_SHADOW_SOFTNESS_MIN <= shadow_softness <= RENDER_SHADOW_SOFTNESS_MAX:
+            raise ValueError(
+                f"shadow_softness must be between {RENDER_SHADOW_SOFTNESS_MIN} and {RENDER_SHADOW_SOFTNESS_MAX}")
+        config["render_shadow_softness"] = shadow_softness
+    if exposure is not None:
+        try:
+            exposure = float(exposure)
+        except (TypeError, ValueError):
+            raise ValueError(f"exposure must be a number between {RENDER_EXPOSURE_MIN} and {RENDER_EXPOSURE_MAX}")
+        if not RENDER_EXPOSURE_MIN <= exposure <= RENDER_EXPOSURE_MAX:
+            raise ValueError(f"exposure must be between {RENDER_EXPOSURE_MIN} and {RENDER_EXPOSURE_MAX}")
+        config["render_exposure"] = exposure
     save_config(config)
     return get_render_settings()
 
