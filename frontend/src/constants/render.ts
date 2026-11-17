@@ -50,6 +50,17 @@ export const RENDER_FOV_MAX = 80;
 
 // Slider/color inputs fire many events while dragging; persist debounced
 export const RENDER_SETTINGS_SAVE_DEBOUNCE_MS = 400;
+
+// Render Profiles (named snapshots of the full Render Settings). The settings
+// object is opaque here on purpose: the dropdown copies whatever the profile
+// contains verbatim into the flat settings, so new fields need no UI changes.
+export type RenderProfileSettings = Record<string, unknown>;
+export interface RenderProfilesResponse {
+  profiles: Record<string, RenderProfileSettings>;
+  active: string | null; // null = "Current Settings" (the flat settings), never a stored profile
+}
+// Label of the implicit default entry (active=null) in the profile dropdown
+export const CURRENT_SETTINGS_LABEL = "Current Settings";
 // Render Job polling: the backend hard-kills at 90s, so the UI gives up at 120s
 export const RENDER_STATUS_POLL_INTERVAL_MS = 1000;
 export const RENDER_STATUS_POLL_DEADLINE_MS = 120_000;

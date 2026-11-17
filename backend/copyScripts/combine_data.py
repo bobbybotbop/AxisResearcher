@@ -1444,6 +1444,161 @@ def save_render_settings(color=None, roughness=None, resolution=None, fov=None,
     return get_render_settings()
 
 
+def get_render_profiles():
+    """
+    Read saved Render Profiles from listingPreferences.json.
+
+    Returns:
+        dict: {profile_name: settings_dict}. "Current Settings" is not a
+              stored profile and never appears here.
+    """
+    config = load_config()
+    profiles = config.get("render_profiles", {})
+    return {str(name): dict(settings) for name, settings in profiles.items()}
+
+
+def save_render_profile(name, settings):
+    """
+    Persist a Render Profile (name + full settings snapshot) to
+    listingPreferences.json. Overwrites any existing profile with the same name.
+
+    Args:
+        name (str): Profile name. Must be non-empty and not "Current Settings".
+        settings (dict): Flat settings dict mirroring get_render_settings()
+                         keys (color, roughness, resolution, fov). Extra keys
+                         are preserved so future fields need no migration.
+
+    Returns:
+        dict: {"name": name, "settings": settings} as saved.
+
+    Raises:
+        ValueError: If the name is empty, reserved, or the settings are invalid.
+    """
+    name = _validate_render_profile_name(name)
+    settings = _validate_render_profile_settings(settings)
+    config = load_config()
+    profiles = config.get("render_profiles", {})
+    profiles[name] = settings
+    config["render_profiles"] = profiles
+    save_config(config)
+    return {"name": name, "settings": dict(settings)}
+
+
+def delete_render_profile(name):
+    """
+    Delete a Render Profile by name. If it was the active profile, the active
+    profile resets to None ("Current Settings").
+
+    Returns:
+        bool: True if a profile was deleted, False if no such profile exists.
+    """
+    config = load_config()
+    profiles = config.get("render_profiles", {})
+    if name not in profiles:
+        return False
+    del profiles[name]
+    config["render_profiles"] = profiles
+    if config.get("active_render_profile") == name:
+        config["active_render_profile"] = None
+    save_config(config)
+    return True
+
+
+def get_active_render_profile():
+    """
+    Returns the active Render Profile name, or None meaning "Current Settings"
+    (the implicit default: the flat render settings themselves).
+    """
+    config = load_config()
+    return config.get("active_render_profile")
+
+
+def set_active_render_profile(name):
+    """
+    Set the active Render Profile by name, or None for "Current Settings".
+
+    Raises:
+        ValueError: If name is not None and no such profile exists.
+    """
+    config = load_config()
+    if name is not None:
+        name = str(name).strip()
+        if name not in config.get("render_profiles", {}):
+            raise ValueError(f"No render profile named '{name}'")
+    config["active_render_profile"] = name
+    save_config(config)
+    return name
+
+
+def _validate_render_profile_name(name):
+    if name is None:
+        raise ValueError("Profile name is required")
+    name = str(name).strip()
+    if not name:
+        raise ValueError("Profile name must not be empty")
+    if name.lower() == "current settings":
+        raise ValueError("'Current Settings' is reserved and cannot be used as a profile name")
+    if name.lower() == "active":
+        raise ValueError("'active' is reserved and cannot be used as a profile name")
+    return name
+
+
+def _validate_render_profile_settings(settings):
+    if not isinstance(settings, dict):
+        raise ValueError("Profile settings must be an object")
+    # Validate the known fields with the same rules as save_render_settings,
+    # without writing anything: unknown/extra fields pass through untouched so
+    # ticket 02 can add settings without a schema migration.
+    validators = {
+        "color": _validate_render_color,
+        "roughness": _validate_render_roughness,
+        "resolution": _validate_render_resolution,
+        "fov": _validate_render_fov,
+    }
+    validated = dict(settings)
+    for key, validator in validators.items():
+        if key in validated:
+            validated[key] = validator(validated[key])
+    return validated
+
+
+def _validate_render_color(value):
+    value = str(value).strip().lower()
+    if not re.match(r"^#[0-9a-f]{6}$", value):
+        raise ValueError(f"color must be a hex value like #1a1a1a, got '{value}'")
+    return value
+
+
+def _validate_render_roughness(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("roughness must be a number between 0 and 1")
+    if not 0.0 <= value <= 1.0:
+        raise ValueError("roughness must be between 0 and 1")
+    return value
+
+
+def _validate_render_resolution(value):
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"resolution must be one of {list(RENDER_RESOLUTIONS)}")
+    if value not in RENDER_RESOLUTIONS:
+        raise ValueError(f"resolution must be one of {list(RENDER_RESOLUTIONS)}")
+    return value
+
+
+def _validate_render_fov(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"fov must be a number between {RENDER_FOV_MIN} and {RENDER_FOV_MAX}")
+    if not RENDER_FOV_MIN <= value <= RENDER_FOV_MAX:
+        raise ValueError(f"fov must be between {RENDER_FOV_MIN} and {RENDER_FOV_MAX}")
+    return value
+
+
 def get_manual_import_last_refreshed():
     """Returns the last manual import timestamp as ISO string, or None if never run."""
     config = load_config()
