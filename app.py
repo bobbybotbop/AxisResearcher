@@ -84,7 +84,7 @@ from backend.constants.render import (
     RENDER_FOV_RANGE, RENDER_OUTPUT_PREFIX, RENDER_RESOLUTIONS,
     SUPPORTED_RENDER_EXTENSIONS,
 )
-from backend.render import render_model, RenderError
+from backend.render import render_model, iter_render_progress, RenderError
 from backend.render.normalize import normalize_to_render_mesh
 from backend.render.camera import compute_blender_camera
 import re
@@ -100,11 +100,6 @@ CORS(app, origins=["http://localhost:3000", "http://localhost:5173", "http://loc
 # Structure: {task_id: {"status": "running|completed|failed", "total": N, "completed": M, "results": [], "errors": []}}
 image_generation_tasks = {}
 image_generation_lock = threading.Lock()
-
-# In-memory storage for Render Job (Step 4 Studio Render) progress
-# Structure: {task_id: {"status": "running|completed|failed", "image": url|None, "filename": str|None, "error": str|None}}
-render_tasks = {}
-render_tasks_lock = threading.Lock()
 
 
 def _verify_failed_skus(
@@ -3375,7 +3370,7 @@ def serve_bg_removed_image(filename):
 @app.route('/api/render', methods=['POST'])
 def start_render():
     """
-    Start a Render Job (Step 4 Studio Render) for an uploaded 3D model.
+    Stream a Render Job (Step 4 Studio Render) for an uploaded 3D model as NDJSON.
 
     Accepts multipart/form-data:
         file:       model file (.stl/.obj/.ply used as-is; .step/.stp/.3mf are
@@ -3389,122 +3384,124 @@ def start_render():
                     neither. Converted to Blender (Z-up) azimuth/elevation; distance
                     is auto-computed to frame the whole model (Camera Intent).
 
-    Returns:
-        JSON {task_id} for polling /api/render-status/<task_id>, or a friendly error
+    Streams NDJSON events:
+        { "type": "progress", "step": "render", "status": "sample N/M",
+          "current": N, "total": M, "remaining_seconds": float|null }
+        { "type": "result", "data": { "image": url, "filename": str } }
+        { "type": "error", "error": friendly message }
     """
+    print("[API] /api/render endpoint called")
+    file = request.files.get('file')
+    if not file or not file.filename:
+        return jsonify({"error": "A model file is required"}), 400
+
+    extension = os.path.splitext(file.filename)[1].lower()
+    if extension not in SUPPORTED_RENDER_EXTENSIONS:
+        return jsonify({
+            "error": f"'{extension or file.filename}' files are not supported for rendering. "
+                     f"Supported formats: {', '.join(SUPPORTED_RENDER_EXTENSIONS)}",
+        }), 400
+
+    color = request.form.get("color", DEFAULT_RENDER_COLOR)
     try:
-        print("[API] /api/render endpoint called")
-        file = request.files.get('file')
-        if not file or not file.filename:
-            return jsonify({"error": "A model file is required", "task_id": None}), 400
+        roughness = float(request.form.get("roughness", DEFAULT_RENDER_ROUGHNESS))
+    except (TypeError, ValueError):
+        return jsonify({"error": "roughness must be a number between 0 and 1"}), 400
+    if not 0.0 <= roughness <= 1.0:
+        return jsonify({"error": "roughness must be between 0 and 1"}), 400
+    try:
+        resolution = int(request.form.get("resolution", DEFAULT_RENDER_RESOLUTION))
+    except (TypeError, ValueError):
+        return jsonify({"error": f"resolution must be one of {list(RENDER_RESOLUTIONS)}"}), 400
+    if resolution not in RENDER_RESOLUTIONS:
+        return jsonify({"error": f"resolution must be one of {list(RENDER_RESOLUTIONS)}"}), 400
 
-        extension = os.path.splitext(file.filename)[1].lower()
-        if extension not in SUPPORTED_RENDER_EXTENSIONS:
-            return jsonify({
-                "error": f"'{extension or file.filename}' files are not supported for rendering. "
-                         f"Supported formats: {', '.join(SUPPORTED_RENDER_EXTENSIONS)}",
-                "task_id": None,
-            }), 400
+    # Camera Intent: preview camera (three.js coords) -> Blender azimuth/elevation
+    try:
+        fov = float(request.form.get("fov", DEFAULT_RENDER_FOV))
+    except (TypeError, ValueError):
+        return jsonify({"error": f"fov must be a number between {RENDER_FOV_RANGE[0]:.0f} and {RENDER_FOV_RANGE[1]:.0f}"}), 400
+    if not RENDER_FOV_RANGE[0] <= fov <= RENDER_FOV_RANGE[1]:
+        return jsonify({"error": f"fov must be between {RENDER_FOV_RANGE[0]:.0f} and {RENDER_FOV_RANGE[1]:.0f} degrees"}), 400
 
-        # Optional Render Settings — the controls UI lands in ticket 05; defaults per spec
-        color = request.form.get("color", DEFAULT_RENDER_COLOR)
+    def parse_vec3(field):
+        raw = request.form.get(field)
+        if raw is None:
+            return None
+        parts = raw.split(",")
+        if len(parts) != 3:
+            raise ValueError
+        return tuple(float(p) for p in parts)
+
+    try:
+        camera_position = parse_vec3("camera_position")
+        camera_target = parse_vec3("camera_target")
+    except (TypeError, ValueError):
+        return jsonify({"error": "camera_position and camera_target must be \"x,y,z\" numbers"}), 400
+    if (camera_position is None) != (camera_target is None):
+        return jsonify({"error": "camera_position and camera_target must be sent together"}), 400
+    if camera_position is not None:
         try:
-            roughness = float(request.form.get("roughness", DEFAULT_RENDER_ROUGHNESS))
-        except (TypeError, ValueError):
-            return jsonify({"error": "roughness must be a number between 0 and 1", "task_id": None}), 400
-        if not 0.0 <= roughness <= 1.0:
-            return jsonify({"error": "roughness must be between 0 and 1", "task_id": None}), 400
+            azimuth, elevation = compute_blender_camera(camera_position, camera_target)
+        except ValueError:
+            return jsonify({"error": "camera position and target must differ"}), 400
+    else:
+        azimuth, elevation = DEFAULT_RENDER_AZIMUTH, DEFAULT_RENDER_ELEVATION
+
+    os.makedirs(GENERATED_IMAGES_DIR, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{RENDER_OUTPUT_PREFIX}{timestamp}.png"
+    suffix = 1
+    while os.path.exists(os.path.join(GENERATED_IMAGES_DIR, filename)):
+        filename = f"{RENDER_OUTPUT_PREFIX}{timestamp}_{suffix}.png"
+        suffix += 1
+    output_path = os.path.join(GENERATED_IMAGES_DIR, filename)
+
+    fd, input_path = tempfile.mkstemp(prefix="render_upload_", suffix=extension)
+    os.close(fd)
+    file.save(input_path)
+
+    def generate():
         try:
-            resolution = int(request.form.get("resolution", DEFAULT_RENDER_RESOLUTION))
-        except (TypeError, ValueError):
-            return jsonify({"error": f"resolution must be one of {list(RENDER_RESOLUTIONS)}", "task_id": None}), 400
-        if resolution not in RENDER_RESOLUTIONS:
-            return jsonify({"error": f"resolution must be one of {list(RENDER_RESOLUTIONS)}", "task_id": None}), 400
+            yield progress_event("render", "Preparing the model...")
+            # Normalize to the Render Mesh first (native formats pass through).
+            # The converted STL is cache-owned — only the uploaded temp is removed below.
+            mesh_path = normalize_to_render_mesh(input_path)
 
-        # Camera Intent: preview camera (three.js coords) -> Blender azimuth/elevation
-        try:
-            fov = float(request.form.get("fov", DEFAULT_RENDER_FOV))
-        except (TypeError, ValueError):
-            return jsonify({"error": f"fov must be a number between {RENDER_FOV_RANGE[0]:.0f} and {RENDER_FOV_RANGE[1]:.0f}", "task_id": None}), 400
-        if not RENDER_FOV_RANGE[0] <= fov <= RENDER_FOV_RANGE[1]:
-            return jsonify({"error": f"fov must be between {RENDER_FOV_RANGE[0]:.0f} and {RENDER_FOV_RANGE[1]:.0f} degrees", "task_id": None}), 400
-
-        def parse_vec3(field):
-            raw = request.form.get(field)
-            if raw is None:
-                return None
-            parts = raw.split(",")
-            if len(parts) != 3:
-                raise ValueError
-            return tuple(float(p) for p in parts)
-
-        try:
-            camera_position = parse_vec3("camera_position")
-            camera_target = parse_vec3("camera_target")
-        except (TypeError, ValueError):
-            return jsonify({"error": "camera_position and camera_target must be \"x,y,z\" numbers", "task_id": None}), 400
-        if (camera_position is None) != (camera_target is None):
-            return jsonify({"error": "camera_position and camera_target must be sent together", "task_id": None}), 400
-        if camera_position is not None:
-            try:
-                azimuth, elevation = compute_blender_camera(camera_position, camera_target)
-            except ValueError:
-                return jsonify({"error": "camera position and target must differ", "task_id": None}), 400
-        else:
-            azimuth, elevation = DEFAULT_RENDER_AZIMUTH, DEFAULT_RENDER_ELEVATION
-
-        os.makedirs(GENERATED_IMAGES_DIR, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{RENDER_OUTPUT_PREFIX}{timestamp}.png"
-        suffix = 1
-        while os.path.exists(os.path.join(GENERATED_IMAGES_DIR, filename)):
-            filename = f"{RENDER_OUTPUT_PREFIX}{timestamp}_{suffix}.png"
-            suffix += 1
-        output_path = os.path.join(GENERATED_IMAGES_DIR, filename)
-
-        fd, input_path = tempfile.mkstemp(prefix="render_upload_", suffix=extension)
-        os.close(fd)
-        file.save(input_path)
-
-        task_id = str(uuid.uuid4())
-        with render_tasks_lock:
-            render_tasks[task_id] = {"status": "running", "image": None, "filename": None, "error": None}
-
-        def run_render():
-            try:
-                # Normalize to the Render Mesh first (native formats pass through).
-                # The converted STL is cache-owned — only the uploaded temp is removed below.
-                mesh_path = normalize_to_render_mesh(input_path)
-                render_model(
-                    mesh_path, output_path,
-                    color=color, roughness=roughness, resolution=resolution,
-                    azimuth=azimuth, elevation=elevation, fov=fov,
-                )
-                with render_tasks_lock:
-                    render_tasks[task_id].update(
-                        status="completed",
-                        filename=filename,
-                        image=f"/api/render-image/{filename}",
-                    )
-            except RenderError as e:
-                print(f"[API] /api/render task {task_id} failed: {e}")
-                with render_tasks_lock:
-                    render_tasks[task_id].update(status="failed", error=str(e))
-            except Exception as e:
-                print(f"[API] /api/render task {task_id} unexpected error: {e}")
-                with render_tasks_lock:
-                    render_tasks[task_id].update(status="failed", error=f"Unexpected render error: {e}")
-            finally:
+            # Drive Blender and stream each Cycles checkpoint as it arrives.
+            progress = iter_render_progress(
+                mesh_path, output_path,
+                color=color, roughness=roughness, resolution=resolution,
+                azimuth=azimuth, elevation=elevation, fov=fov,
+            )
+            while True:
                 try:
-                    os.remove(input_path)
-                except OSError:
-                    pass
+                    current, total, remaining_seconds = next(progress)
+                except StopIteration:
+                    break
+                yield json.dumps({
+                    "type": "progress", "step": "render",
+                    "status": f"sample {current}/{total}",
+                    "current": current, "total": total,
+                    "remaining_seconds": remaining_seconds,
+                }) + "\n"
+            yield result_event({
+                "image": f"/api/render-image/{filename}",
+                "filename": filename,
+            })
+        except RenderError as e:
+            print(f"[API] /api/render failed: {e}")
+            yield error_event(str(e))
+        except Exception as e:
+            print(f"[API] /api/render unexpected error: {e}")
+            yield error_event(f"Unexpected render error: {e}")
+        finally:
+            try:
+                os.remove(input_path)
+            except OSError:
+                pass
 
-        threading.Thread(target=run_render, daemon=True).start()
-        return jsonify({"task_id": task_id}), 200
-
-    except Exception as e:
-        return jsonify({"error": f"An error occurred while starting the render: {str(e)}", "task_id": None}), 500
+    return streaming_response(generate())
 
 
 @app.route('/api/render-preview', methods=['POST'])
@@ -3541,28 +3538,6 @@ def render_preview():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": f"An error occurred while preparing the preview: {str(e)}"}), 500
-
-
-@app.route('/api/render-status/<task_id>', methods=['GET'])
-def get_render_status(task_id):
-    """
-    Get status of a Render Job.
-
-    Returns:
-        JSON with status, and the image URL when completed or a friendly error when failed
-    """
-    try:
-        with render_tasks_lock:
-            if task_id not in render_tasks:
-                return jsonify({"error": f"Task {task_id} not found", "status": None}), 404
-            task = render_tasks[task_id]
-            response_data = {"status": task["status"], "error": task["error"]}
-            if task["status"] == "completed":
-                response_data["image"] = task["image"]
-                response_data["filename"] = task["filename"]
-            return jsonify(response_data), 200
-    except Exception as e:
-        return jsonify({"error": f"An error occurred while checking status: {str(e)}", "status": None}), 500
 
 
 @app.route('/api/render-image/<filename>', methods=['GET'])

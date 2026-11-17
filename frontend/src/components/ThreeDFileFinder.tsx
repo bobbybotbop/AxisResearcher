@@ -3,6 +3,7 @@ import JSZip from "jszip";
 import MessageBarInput from "./MessageBarInput";
 import StudioRenderPreview, { type StudioRenderPreviewHandle } from "./StudioRenderPreview";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
+import { fetchWithProgress } from "../utils/fetchWithProgress";
 import { DOWNLOAD_MODE_FILES, DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, threeDSiteKeyFromLink, type DownloadMode, type ThreeDSiteStatus } from "../constants/files3d";
 import {
   modelExtensionOf,
@@ -13,8 +14,6 @@ import {
   RENDER_RESOLUTION_OPTIONS,
   RENDER_SETTINGS_DEFAULTS,
   RENDER_SETTINGS_SAVE_DEBOUNCE_MS,
-  RENDER_STATUS_POLL_DEADLINE_MS,
-  RENDER_STATUS_POLL_INTERVAL_MS,
   RENDERABLE_FORMATS_HINT,
 } from "../constants/render";
 
@@ -162,6 +161,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
   const [step4Loading, setStep4Loading] = useState(false);
   const [step4Image, setStep4Image] = useState<{ url: string; filename: string } | null>(null);
   const [step4Error, setStep4Error] = useState<string | null>(null);
+  const [renderProgress, setRenderProgress] = useState<{ current: number; total: number; remainingSeconds: number | null } | null>(null);
 
   // Step 4 — Render Settings (persisted in listingPreferences.json via /api/render-settings)
   const [renderColor, setRenderColor] = useState(RENDER_SETTINGS_DEFAULTS.color);
@@ -414,6 +414,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
     setStep4Loading(true);
     setStep4Error(null);
     setStep4Image(null);
+    setRenderProgress(null);
     try {
       const form = new FormData();
       form.append("file", renderFile);
@@ -427,27 +428,26 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
         form.append("camera_target", intent.target.join(","));
       }
       form.append("fov", String(renderFov));
-      const res = await fetch("/api/render", { method: "POST", body: form });
-      const data = await res.json() as { task_id?: string; error?: string };
-      if (!res.ok || data.error || !data.task_id) throw new Error(data.error || "Failed to start the render");
-
-      const deadline = Date.now() + RENDER_STATUS_POLL_DEADLINE_MS;
-      for (;;) {
-        await new Promise((r) => setTimeout(r, RENDER_STATUS_POLL_INTERVAL_MS));
-        const statusRes = await fetch(`/api/render-status/${data.task_id}`);
-        const status = await statusRes.json() as { status?: string; image?: string; filename?: string; error?: string };
-        if (!statusRes.ok) throw new Error(status.error || "Lost track of the render job");
-        if (status.status === "completed" && status.image && status.filename) {
-          setStep4Image({ url: status.image, filename: status.filename });
-          break;
-        }
-        if (status.status === "failed") throw new Error(status.error || "Render failed");
-        if (Date.now() > deadline) throw new Error("Render is taking too long — check that Blender is installed and the backend is running");
-      }
+      const data = await fetchWithProgress(
+        "/api/render",
+        { method: "POST", body: form },
+        (event) => {
+          if (typeof event.current === "number" && typeof event.total === "number") {
+            setRenderProgress({
+              current: event.current,
+              total: event.total,
+              remainingSeconds: typeof event.remaining_seconds === "number" ? event.remaining_seconds : null,
+            });
+          }
+        },
+      ) as { image?: string; filename?: string };
+      if (!data.image || !data.filename) throw new Error("Render finished without an image");
+      setStep4Image({ url: data.image, filename: data.filename });
     } catch (err) {
       setStep4Error((err as Error).message || "Render failed");
     } finally {
       setStep4Loading(false);
+      setRenderProgress(null);
     }
   };
 
@@ -814,7 +814,23 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
           </>
         )}
         {step4Loading && (
-          <p className="text-xs text-text-muted">Rendering in Blender — this usually takes 10–30 seconds...</p>
+          <div className="flex flex-col gap-1.5" role="status" aria-live="polite">
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-hover">
+              <div
+                className="h-full rounded-full bg-primary transition-all duration-300"
+                style={{
+                  width: renderProgress && renderProgress.total > 0
+                    ? `${Math.min(100, Math.round((renderProgress.current / renderProgress.total) * 100))}%`
+                    : "5%",
+                }}
+              />
+            </div>
+            <p className="text-xs text-text-muted">
+              {renderProgress
+                ? `Rendering — sample ${renderProgress.current}/${renderProgress.total}${renderProgress.remainingSeconds != null ? `, ~${Math.ceil(renderProgress.remainingSeconds)}s remaining` : ""}`
+                : "Rendering in Blender — this usually takes 10–30 seconds..."}
+            </p>
+          </div>
         )}
         {step4Image && (
           <div className="flex flex-col items-start gap-2">
