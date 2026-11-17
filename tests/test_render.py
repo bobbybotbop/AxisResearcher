@@ -78,6 +78,61 @@ def test_hung_blender_is_killed_with_friendly_timeout(tmp_path, monkeypatch):
         render_model(mesh, tmp_path / "out.png")
 
 
+def test_silent_hang_is_killed_within_timeout(tmp_path, monkeypatch):
+    """A Blender that prints nothing and never exits is killed within ~timeout.
+
+    The read must not block on stdout: with a silent hang there is no line to
+    wake the loop, so the deadline has to be enforced while waiting for output.
+    """
+    import subprocess
+    import threading
+
+    blender = _blender_path_or_skip()
+
+    class SilentHangProcess:
+        """stdout never yields a line and never EOFs; the process never exits."""
+
+        stderr = ""
+
+        def __init__(self):
+            self.killed = threading.Event()
+            self.returncode = None
+
+        def _read(self):
+            # Block until killed: a silent Blender hang produces no output.
+            while not self.killed.is_set():
+                self.killed.wait(0.05)
+            raise StopIteration
+
+        @property
+        def stdout(self):
+            return iter(self._read, None)
+
+        def wait(self, timeout=None):
+            if self.killed.is_set():
+                self.returncode = -9
+                return self.returncode
+            raise subprocess.TimeoutExpired(cmd="blender", timeout=timeout)
+
+        def kill(self):
+            self.killed.set()
+
+    process = SilentHangProcess()
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: process)
+
+    mesh = tmp_path / "model.stl"
+    mesh.write_text("solid x\nendsolid x\n")
+
+    import time
+    start = time.monotonic()
+    with pytest.raises(RenderError, match="too long"):
+        render_model(mesh, tmp_path / "out.png", blender_path=blender, timeout=1)
+    elapsed = time.monotonic() - start
+
+    assert process.killed.is_set(), "silent hang must be killed, not waited on forever"
+    assert elapsed < 10, f"kill took {elapsed:.1f}s for a 1s timeout — the read blocked on stdout"
+
+
 class _FakeProcess:
     """Minimal Popen stand-in: canned stdout lines, exit code 0."""
 
