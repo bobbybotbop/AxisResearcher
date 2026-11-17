@@ -24,17 +24,21 @@ FRAME_MARGIN = 1.15  # breathing room around the model in frame
 
 
 def parse_args():
+    # All values are required: backend.render._prepare_render always passes them
+    # explicitly from backend.constants.render, which is the single source of
+    # truth. This script runs in Blender's own interpreter and cannot import
+    # backend.constants, so it must not carry its own copies of the defaults.
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
-    parser.add_argument("--color", type=float, nargs=3, default=[0.102, 0.102, 0.102])
-    parser.add_argument("--roughness", type=float, default=0.3)
-    parser.add_argument("--resolution", type=int, default=1024)
+    parser.add_argument("--color", type=float, nargs=3, required=True)
+    parser.add_argument("--roughness", type=float, required=True)
+    parser.add_argument("--resolution", type=int, required=True)
     # Camera Intent (ticket 03): viewing direction + FOV
-    parser.add_argument("--azimuth", type=float, default=45.0)
-    parser.add_argument("--elevation", type=float, default=28.0)
-    parser.add_argument("--fov", type=float, default=40.0)
+    parser.add_argument("--azimuth", type=float, required=True)
+    parser.add_argument("--elevation", type=float, required=True)
+    parser.add_argument("--fov", type=float, required=True)
     return parser.parse_args(argv)
 
 

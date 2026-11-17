@@ -16,9 +16,11 @@ from backend.constants.render import (
     DEFAULT_RENDER_FOV,
     DEFAULT_RENDER_RESOLUTION,
     DEFAULT_RENDER_ROUGHNESS,
-    RENDER_FOV_MAX,
-    RENDER_FOV_MIN,
-    RENDER_RESOLUTIONS,
+)
+from backend.render.validate import (
+    validate_fov,
+    validate_resolution,
+    validate_roughness,
 )
 
 # Load environment variables
@@ -1263,29 +1265,11 @@ def save_render_settings(color=None, roughness=None, resolution=None, fov=None):
             raise ValueError(f"color must be a hex value like #1a1a1a, got '{color}'")
         config["render_color"] = color
     if roughness is not None:
-        try:
-            roughness = float(roughness)
-        except (TypeError, ValueError):
-            raise ValueError("roughness must be a number between 0 and 1")
-        if not 0.0 <= roughness <= 1.0:
-            raise ValueError("roughness must be between 0 and 1")
-        config["render_roughness"] = roughness
+        config["render_roughness"] = validate_roughness(roughness)
     if resolution is not None:
-        try:
-            resolution = int(resolution)
-        except (TypeError, ValueError):
-            raise ValueError(f"resolution must be one of {list(RENDER_RESOLUTIONS)}")
-        if resolution not in RENDER_RESOLUTIONS:
-            raise ValueError(f"resolution must be one of {list(RENDER_RESOLUTIONS)}")
-        config["render_resolution"] = resolution
+        config["render_resolution"] = validate_resolution(resolution)
     if fov is not None:
-        try:
-            fov = float(fov)
-        except (TypeError, ValueError):
-            raise ValueError(f"fov must be a number between {RENDER_FOV_MIN} and {RENDER_FOV_MAX}")
-        if not RENDER_FOV_MIN <= fov <= RENDER_FOV_MAX:
-            raise ValueError(f"fov must be between {RENDER_FOV_MIN} and {RENDER_FOV_MAX}")
-        config["render_fov"] = fov
+        config["render_fov"] = validate_fov(fov)
     save_config(config)
     return get_render_settings()
 

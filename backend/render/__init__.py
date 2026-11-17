@@ -4,8 +4,10 @@ Public seam: render_model(). See .scratch/studio-render/spec.md.
 """
 
 import os
+import queue
 import re
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -144,18 +146,35 @@ def iter_render_progress(
     stdout_lines = []
     timed_out = False
     deadline = time.monotonic() + timeout
-    try:
-        # Drive the subprocess: read stdout as lines arrive so progress events
-        # stream while Blender renders (not capture_output, which waits for exit).
+
+    # Read stdout on a helper thread that pushes lines onto a queue, so the
+    # deadline below is enforced with queue.get(timeout=...) instead of only
+    # when a line arrives: a Blender that hangs while printing nothing would
+    # otherwise block the read forever and the hard kill would never fire.
+    lines: queue.Queue = queue.Queue()
+
+    def _pump_stdout():
         for line in process.stdout:
+            lines.put(line)
+        lines.put(None)  # EOF sentinel
+
+    reader = threading.Thread(target=_pump_stdout, daemon=True)
+    reader.start()
+
+    try:
+        while True:
+            try:
+                line = lines.get(timeout=max(deadline - time.monotonic(), 0))
+            except queue.Empty:
+                raise subprocess.TimeoutExpired(cmd=command, timeout=timeout)
+            if line is None:  # Blender closed stdout: it is exiting
+                break
             stdout_lines.append(line)
             sample = _SAMPLE_RE.search(line)
             if sample:
                 remaining_match = _REMAINING_RE.search(line)
                 remaining = _parse_remaining_seconds(remaining_match) if remaining_match else None
                 yield (int(sample.group(1)), int(sample.group(2)), remaining)
-            if time.monotonic() > deadline:
-                raise subprocess.TimeoutExpired(cmd=command, timeout=timeout)
         process.wait(timeout=max(deadline - time.monotonic(), 0))
     except subprocess.TimeoutExpired:
         timed_out = True

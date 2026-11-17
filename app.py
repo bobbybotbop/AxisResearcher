@@ -81,12 +81,12 @@ from backend.constants.paths import GENERATED_LISTINGS_DIR, GENERATED_IMAGES_DIR
 from backend.constants.render import (
     DEFAULT_RENDER_AZIMUTH, DEFAULT_RENDER_COLOR, DEFAULT_RENDER_ELEVATION,
     DEFAULT_RENDER_FOV, DEFAULT_RENDER_ROUGHNESS, DEFAULT_RENDER_RESOLUTION,
-    RENDER_FOV_RANGE, RENDER_OUTPUT_PREFIX, RENDER_RESOLUTIONS,
-    SUPPORTED_RENDER_EXTENSIONS,
+    RENDER_OUTPUT_PREFIX, SUPPORTED_RENDER_EXTENSIONS,
 )
 from backend.render import render_model, iter_render_progress, RenderError
 from backend.render.normalize import normalize_to_render_mesh
 from backend.render.camera import compute_blender_camera
+from backend.render.validate import validate_fov, validate_resolution, validate_roughness
 import re
 import tempfile
 import requests
@@ -3404,25 +3404,19 @@ def start_render():
 
     color = request.form.get("color", DEFAULT_RENDER_COLOR)
     try:
-        roughness = float(request.form.get("roughness", DEFAULT_RENDER_ROUGHNESS))
-    except (TypeError, ValueError):
-        return jsonify({"error": "roughness must be a number between 0 and 1"}), 400
-    if not 0.0 <= roughness <= 1.0:
-        return jsonify({"error": "roughness must be between 0 and 1"}), 400
+        roughness = validate_roughness(request.form.get("roughness", DEFAULT_RENDER_ROUGHNESS))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     try:
-        resolution = int(request.form.get("resolution", DEFAULT_RENDER_RESOLUTION))
-    except (TypeError, ValueError):
-        return jsonify({"error": f"resolution must be one of {list(RENDER_RESOLUTIONS)}"}), 400
-    if resolution not in RENDER_RESOLUTIONS:
-        return jsonify({"error": f"resolution must be one of {list(RENDER_RESOLUTIONS)}"}), 400
+        resolution = validate_resolution(request.form.get("resolution", DEFAULT_RENDER_RESOLUTION))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     # Camera Intent: preview camera (three.js coords) -> Blender azimuth/elevation
     try:
-        fov = float(request.form.get("fov", DEFAULT_RENDER_FOV))
-    except (TypeError, ValueError):
-        return jsonify({"error": f"fov must be a number between {RENDER_FOV_RANGE[0]:.0f} and {RENDER_FOV_RANGE[1]:.0f}"}), 400
-    if not RENDER_FOV_RANGE[0] <= fov <= RENDER_FOV_RANGE[1]:
-        return jsonify({"error": f"fov must be between {RENDER_FOV_RANGE[0]:.0f} and {RENDER_FOV_RANGE[1]:.0f} degrees"}), 400
+        fov = validate_fov(request.form.get("fov", DEFAULT_RENDER_FOV))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
 
     def parse_vec3(field):
         raw = request.form.get(field)
