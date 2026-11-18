@@ -93,6 +93,15 @@ export const CURRENT_SETTINGS_LABEL = "Current Settings";
 export const RENDER_STATUS_POLL_INTERVAL_MS = 1000;
 export const RENDER_STATUS_POLL_DEADLINE_MS = 120_000;
 
+// Rig camera azimuth/elevation → three.js (Y-up) unit direction, mirroring
+// blender_studio.py's add_camera: blender (x,y,z) maps to three (x,z,-y), so
+// (cos(el)cos(az), cos(el)sin(az), sin(el)) becomes (cos(el)cos(az), sin(el), -cos(el)sin(az)).
+export const rigCameraDirection = (azimuth: number, elevation: number): [number, number, number] => {
+  const az = (azimuth * Math.PI) / 180;
+  const el = (elevation * Math.PI) / 180;
+  return [Math.cos(el) * Math.cos(az), Math.sin(el), -Math.cos(el) * Math.sin(az)];
+};
+
 // Preview framing matches blender_studio.py so the preview frames like the render
 export const PREVIEW_FRAME_MARGIN = 1.15;
 // Blender's default studio angle (azimuth 45, elevation 28) in three.js (Y-up)
