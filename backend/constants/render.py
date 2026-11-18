@@ -55,6 +55,28 @@ DEFAULT_RENDER_LAYER_DEPTH = 0.4  # bump strength
 RENDER_LAYER_DEPTH_MIN = 0.0
 RENDER_LAYER_DEPTH_MAX = 1.0
 
+# Shot Mode (GLOSSARY): single camera per render, or a multi Camera Rig of N
+# cameras producing N images as sequential Render Jobs (Cycles CPU saturates
+# the machine — never parallel). Roll is fixed at 0; distance/look-at automatic.
+RENDER_SHOT_MODES: tuple[str, ...] = ("single", "multi")
+DEFAULT_RENDER_SHOT_MODE = "single"
+
+# Camera Rig preset library (GLOSSARY): one-click named angles. Each camera is
+# azimuth (orbit around the model, degrees) + elevation (height, -90..+90);
+# negative elevation renders from below the model (blender_studio.py handles it).
+RENDER_ANGLE_PRESETS: dict[str, dict[str, float]] = {
+    "front": {"azimuth": 0.0, "elevation": 0.0},
+    "top": {"azimuth": 0.0, "elevation": 89.0},
+    "left": {"azimuth": -90.0, "elevation": 0.0},
+    "right": {"azimuth": 90.0, "elevation": 0.0},
+    "bottom": {"azimuth": 0.0, "elevation": -89.0},
+    "back": {"azimuth": 180.0, "elevation": 0.0},
+    "front-right": {"azimuth": 45.0, "elevation": 0.0},
+    "back-left": {"azimuth": 225.0, "elevation": 0.0},
+    "front-top-left": {"azimuth": -45.0, "elevation": 45.0},
+    "back-bottom-right": {"azimuth": 135.0, "elevation": -45.0},
+}
+
 # Soft target ~30s; hard kill is hang protection only (ADR 0001)
 RENDER_TIMEOUT_SECONDS = 90
 

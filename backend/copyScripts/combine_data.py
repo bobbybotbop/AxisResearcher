@@ -40,6 +40,8 @@ from backend.constants.render import (
     RENDER_RESOLUTIONS,
     RENDER_SHADOW_SOFTNESS_MAX,
     RENDER_SHADOW_SOFTNESS_MIN,
+    DEFAULT_RENDER_SHOT_MODE,
+    RENDER_SHOT_MODES,
 )
 
 # Load environment variables
@@ -1298,8 +1300,9 @@ def get_render_settings():
         dict: the full Render Settings surface — material (color, roughness,
               finish, layer_height_mm, layer_depth), lighting (key/fill/rim
               energy, ambient), shadows (shadow, shadow_softness), exposure,
-              resolution, fov. Camera angle/target are ephemeral and
-              deliberately not included.
+              resolution, fov, shot_mode, and rig (the Camera Rig: an ordered
+              list of {"azimuth", "elevation"} cameras). Camera angle/target
+              are ephemeral and deliberately not included.
     """
     config = load_config()
     return {
@@ -1317,13 +1320,40 @@ def get_render_settings():
         "shadow": bool(config.get("render_shadow", DEFAULT_RENDER_SHADOW)),
         "shadow_softness": float(config.get("render_shadow_softness", DEFAULT_RENDER_SHADOW_SOFTNESS)),
         "exposure": float(config.get("render_exposure", DEFAULT_RENDER_EXPOSURE)),
+        "shot_mode": str(config.get("render_shot_mode", DEFAULT_RENDER_SHOT_MODE)),
+        "rig": [dict(camera) for camera in config.get("render_rig", [])],
     }
+
+
+def _validate_rig(rig):
+    """Normalize a Camera Rig to a list of {"azimuth": float, "elevation": float}.
+
+    Raises ValueError on any malformed camera (roll is fixed at 0 by design).
+    """
+    if not isinstance(rig, (list, tuple)):
+        raise ValueError("rig must be a list of cameras like [{\"azimuth\": 0, \"elevation\": 0}]")
+    cameras = []
+    for camera in rig:
+        if not isinstance(camera, dict) or set(camera) != {"azimuth", "elevation"}:
+            raise ValueError("each rig camera must have exactly azimuth and elevation")
+        try:
+            azimuth = float(camera["azimuth"])
+            elevation = float(camera["elevation"])
+        except (TypeError, ValueError):
+            raise ValueError("rig azimuth and elevation must be numbers")
+        if not -360.0 <= azimuth <= 360.0:
+            raise ValueError("rig azimuth must be between -360 and 360 degrees")
+        if not -90.0 <= elevation <= 90.0:
+            raise ValueError("rig elevation must be between -90 and 90 degrees")
+        cameras.append({"azimuth": azimuth, "elevation": elevation})
+    return cameras
 
 
 def save_render_settings(color=None, roughness=None, resolution=None, fov=None,
                          finish=None, layer_height_mm=None, layer_depth=None,
                          key_energy=None, fill_energy=None, rim_energy=None,
-                         ambient=None, shadow=None, shadow_softness=None, exposure=None):
+                         ambient=None, shadow=None, shadow_softness=None, exposure=None,
+                         shot_mode=None, rig=None):
     """
     Persist Studio Render (Step 4) settings to listingPreferences.json.
 
@@ -1340,6 +1370,9 @@ def save_render_settings(color=None, roughness=None, resolution=None, fov=None,
         shadow (bool): whether the key light casts a shadow.
         shadow_softness (float): key light disk size (shadow softness).
         exposure (float): global multiplier on all energies + world strength.
+        shot_mode (str): Shot Mode, one of RENDER_SHOT_MODES.
+        rig (list): Camera Rig — ordered cameras, each {"azimuth", "elevation"}
+                    in degrees (roll fixed 0).
 
     Returns:
         dict: the full Render Settings reflecting the saved state.
@@ -1440,6 +1473,13 @@ def save_render_settings(color=None, roughness=None, resolution=None, fov=None,
         if not RENDER_EXPOSURE_MIN <= exposure <= RENDER_EXPOSURE_MAX:
             raise ValueError(f"exposure must be between {RENDER_EXPOSURE_MIN} and {RENDER_EXPOSURE_MAX}")
         config["render_exposure"] = exposure
+    if shot_mode is not None:
+        shot_mode = str(shot_mode)
+        if shot_mode not in RENDER_SHOT_MODES:
+            raise ValueError(f"shot_mode must be one of {list(RENDER_SHOT_MODES)}")
+        config["render_shot_mode"] = shot_mode
+    if rig is not None:
+        config["render_rig"] = _validate_rig(rig)
     save_config(config)
     return get_render_settings()
 

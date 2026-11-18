@@ -51,6 +51,34 @@ export const RENDER_FOV_MAX = 80;
 // Slider/color inputs fire many events while dragging; persist debounced
 export const RENDER_SETTINGS_SAVE_DEBOUNCE_MS = 400;
 
+// Shot Mode + Camera Rig, mirrors backend/constants/render.py. Multi runs the
+// rig as N sequential Render Jobs (Cycles CPU saturates the machine).
+export type RenderShotMode = "single" | "multi";
+export const RENDER_SHOT_MODE_OPTIONS: { value: RenderShotMode; label: string }[] = [
+  { value: "single", label: "Single" },
+  { value: "multi", label: "Multi" },
+];
+export const DEFAULT_RENDER_SHOT_MODE: RenderShotMode = "single";
+// One rig camera: azimuth (orbit, degrees) + elevation (height, -90..+90);
+// roll fixed 0, distance/look-at automatic
+export interface RenderRigCamera {
+  azimuth: number;
+  elevation: number;
+}
+// Named one-click rig angles, mirrors backend RENDER_ANGLE_PRESETS
+export const RENDER_ANGLE_PRESETS: Record<string, RenderRigCamera> = {
+  front: { azimuth: 0, elevation: 0 },
+  top: { azimuth: 0, elevation: 89 },
+  left: { azimuth: -90, elevation: 0 },
+  right: { azimuth: 90, elevation: 0 },
+  bottom: { azimuth: 0, elevation: -89 },
+  back: { azimuth: 180, elevation: 0 },
+  "front-right": { azimuth: 45, elevation: 0 },
+  "back-left": { azimuth: 225, elevation: 0 },
+  "front-top-left": { azimuth: -45, elevation: 45 },
+  "back-bottom-right": { azimuth: 135, elevation: -45 },
+};
+
 // Render Profiles (named snapshots of the full Render Settings). The settings
 // object is opaque here on purpose: the dropdown copies whatever the profile
 // contains verbatim into the flat settings, so new fields need no UI changes.
