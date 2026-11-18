@@ -25,7 +25,7 @@ The material texture of a Studio Render: Smooth Plastic (plain Principled BSDF) 
 Single (one camera angle per render, captured ephemerally from the Step 4 preview — today's behavior) or Multi (a Camera Rig of N cameras producing N images per Render click, run as sequential Render Jobs and shown as an image grid). Shot Mode and the rig are saved in the Render Profile.
 
 ## Camera Rig
-The ordered set of cameras in Multi Shot Mode. Each camera is defined by azimuth (orbit around the model, 0–360°) and elevation (height, −90° to +90°); roll is fixed at 0 (horizon always level) and distance/look-at stay automatic. A preset library of named angles (front, top, left, right, bottom, back, front-right, back-left, front-top-left, back-bottom-right) provides one-click starting points.
+The ordered set of cameras in Multi Shot Mode. Each camera is defined by azimuth (orbit around the model, −360° to +360°; negative values orbit counterclockwise) and elevation (height, −90° to +90°); roll is fixed at 0 (horizon always level) and distance/look-at stay automatic. A preset library of named angles (front, top, left, right, bottom, back, front-right, back-left, front-top-left, back-bottom-right) provides one-click starting points.
 
 ## Rig Overview
 In the Profile Editor's Multi Shot Mode, the main square three.js view showing the benchy with every rig camera's frustum and sight line wireframed. Below it, a strip of small per-camera POV thumbnails (framing-only lightweight previews) — clicking one selects that camera for editing and highlights its frustum.
