@@ -54,7 +54,7 @@ from backend.copyScripts.create_image import (
     _openrouter_response_dict_to_image_bytes_and_mime,
     upload_image_bytes_to_ebay,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, migrate_hide_not_found_listings, get_render_settings, save_render_settings, get_render_profiles, save_render_profile, delete_render_profile, get_active_render_profile, set_active_render_profile, _validate_rig
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, migrate_hide_not_found_listings, get_render_settings, save_render_settings, get_render_profiles, save_render_profile, delete_render_profile, get_active_render_profile, set_active_render_profile, validate_rig
 from backend.helper_functions import remove_html_tags
 import os
 import json
@@ -3753,7 +3753,7 @@ def start_render():
         raw_rig = request.form.get("rig")
         if raw_rig is not None:
             try:
-                rig = _validate_rig(json.loads(raw_rig))
+                rig = validate_rig(json.loads(raw_rig))
             except (ValueError, TypeError):
                 return jsonify({"error": "rig must be a JSON list of cameras like [{\"azimuth\": 0, \"elevation\": 0}]", "task_id": None}), 400
         cameras = rig if (shot_mode == "multi" and rig) else [{"azimuth": azimuth, "elevation": elevation}]

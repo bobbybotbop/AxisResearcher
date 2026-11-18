@@ -21,6 +21,7 @@ import {
   RENDER_STATUS_POLL_DEADLINE_MS,
   RENDER_STATUS_POLL_INTERVAL_MS,
   RENDERABLE_FORMATS_HINT,
+  renderSettingsFromUnknown,
   type RenderFinish,
   type RenderProfileSettings,
   type RenderRigCamera,
@@ -218,26 +219,23 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!data) return;
-        if (typeof data.color === "string") setRenderColor(data.color);
-        if (typeof data.roughness === "number") setRenderRoughness(data.roughness);
-        if (typeof data.resolution === "number") setRenderResolution(data.resolution);
-        if (typeof data.fov === "number") setRenderFov(data.fov);
-        if (data.finish === "smooth" || data.finish === "layer-lines") setRenderFinish(data.finish);
-        if (typeof data.layer_height_mm === "number") setRenderLayerHeightMm(data.layer_height_mm);
-        if (typeof data.layer_depth === "number") setRenderLayerDepth(data.layer_depth);
-        if (typeof data.key_energy === "number") setRenderKeyEnergy(data.key_energy);
-        if (typeof data.fill_energy === "number") setRenderFillEnergy(data.fill_energy);
-        if (typeof data.rim_energy === "number") setRenderRimEnergy(data.rim_energy);
-        if (typeof data.ambient === "number") setRenderAmbient(data.ambient);
-        if (typeof data.shadow === "boolean") setRenderShadow(data.shadow);
-        if (typeof data.shadow_softness === "number") setRenderShadowSoftness(data.shadow_softness);
-        if (typeof data.exposure === "number") setRenderExposure(data.exposure);
-        if (data.shot_mode === "single" || data.shot_mode === "multi") setRenderShotMode(data.shot_mode);
-        if (Array.isArray(data.rig)) setRenderRig(data.rig.filter((c: unknown): c is RenderRigCamera => {
-          if (typeof c !== "object" || c === null) return false;
-          const { azimuth, elevation } = c as Record<string, unknown>;
-          return typeof azimuth === "number" && typeof elevation === "number";
-        }));
+        const parsed = renderSettingsFromUnknown(data);
+        setRenderColor(parsed.color);
+        setRenderRoughness(parsed.roughness);
+        setRenderResolution(parsed.resolution);
+        setRenderFov(parsed.fov);
+        setRenderFinish(parsed.finish);
+        setRenderLayerHeightMm(parsed.layer_height_mm);
+        setRenderLayerDepth(parsed.layer_depth);
+        setRenderKeyEnergy(parsed.key_energy);
+        setRenderFillEnergy(parsed.fill_energy);
+        setRenderRimEnergy(parsed.rim_energy);
+        setRenderAmbient(parsed.ambient);
+        setRenderShadow(parsed.shadow);
+        setRenderShadowSoftness(parsed.shadow_softness);
+        setRenderExposure(parsed.exposure);
+        setRenderShotMode(parsed.shot_mode);
+        setRenderRig(parsed.rig);
       })
       .catch(() => { /* keep spec defaults */ });
   };
@@ -272,26 +270,23 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(settings),
     }).catch(() => { /* the selection still applies locally for this session */ });
-    if (typeof settings.color === "string") setRenderColor(settings.color);
-    if (typeof settings.roughness === "number") setRenderRoughness(settings.roughness);
-    if (typeof settings.resolution === "number") setRenderResolution(settings.resolution);
-    if (typeof settings.fov === "number") setRenderFov(settings.fov);
-    if (settings.finish === "smooth" || settings.finish === "layer-lines") setRenderFinish(settings.finish);
-    if (typeof settings.layer_height_mm === "number") setRenderLayerHeightMm(settings.layer_height_mm);
-    if (typeof settings.layer_depth === "number") setRenderLayerDepth(settings.layer_depth);
-    if (typeof settings.key_energy === "number") setRenderKeyEnergy(settings.key_energy);
-    if (typeof settings.fill_energy === "number") setRenderFillEnergy(settings.fill_energy);
-    if (typeof settings.rim_energy === "number") setRenderRimEnergy(settings.rim_energy);
-    if (typeof settings.ambient === "number") setRenderAmbient(settings.ambient);
-    if (typeof settings.shadow === "boolean") setRenderShadow(settings.shadow);
-    if (typeof settings.shadow_softness === "number") setRenderShadowSoftness(settings.shadow_softness);
-    if (typeof settings.exposure === "number") setRenderExposure(settings.exposure);
-    if (settings.shot_mode === "single" || settings.shot_mode === "multi") setRenderShotMode(settings.shot_mode);
-    if (Array.isArray(settings.rig)) setRenderRig(settings.rig.filter((c: unknown): c is RenderRigCamera => {
-      if (typeof c !== "object" || c === null) return false;
-      const { azimuth, elevation } = c as Record<string, unknown>;
-      return typeof azimuth === "number" && typeof elevation === "number";
-    }));
+    const parsed = renderSettingsFromUnknown(settings);
+    setRenderColor(parsed.color);
+    setRenderRoughness(parsed.roughness);
+    setRenderResolution(parsed.resolution);
+    setRenderFov(parsed.fov);
+    setRenderFinish(parsed.finish);
+    setRenderLayerHeightMm(parsed.layer_height_mm);
+    setRenderLayerDepth(parsed.layer_depth);
+    setRenderKeyEnergy(parsed.key_energy);
+    setRenderFillEnergy(parsed.fill_energy);
+    setRenderRimEnergy(parsed.rim_energy);
+    setRenderAmbient(parsed.ambient);
+    setRenderShadow(parsed.shadow);
+    setRenderShadowSoftness(parsed.shadow_softness);
+    setRenderExposure(parsed.exposure);
+    setRenderShotMode(parsed.shot_mode);
+    setRenderRig(parsed.rig);
   };
 
   const resetStep4 = () => {

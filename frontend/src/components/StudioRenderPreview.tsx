@@ -11,6 +11,9 @@ import {
   PREVIEW_FRAME_MARGIN,
   PREVIEW_INITIAL_CAMERA,
   PREVIEW_MATERIAL_DEFAULTS,
+  RIG_FRUSTUM_COLOR,
+  RIG_FRUSTUM_SELECTED_COLOR,
+  RIG_SIGHT_LINE_COLOR,
   rigCameraDirection,
   type RenderRigCamera,
 } from "../constants/render";
@@ -205,7 +208,7 @@ function RigOverviewHelpers({
       const selected = index === selectedCamera;
       const helper = new THREE.CameraHelper(frustumCamera);
       const material = helper.material as THREE.LineBasicMaterial;
-      material.color = new THREE.Color(selected ? "#3b82f6" : "#94a3b8");
+      material.color = new THREE.Color(selected ? RIG_FRUSTUM_SELECTED_COLOR : RIG_FRUSTUM_COLOR);
       material.depthTest = false;
       helper.renderOrder = 999;
       group.add(helper);
@@ -213,7 +216,7 @@ function RigOverviewHelpers({
       const lineGeometry = new THREE.BufferGeometry().setFromPoints([position, center]);
       const line = new THREE.Line(
         lineGeometry,
-        new THREE.LineBasicMaterial({ color: selected ? "#3b82f6" : "#cbd5e1", depthTest: false }),
+        new THREE.LineBasicMaterial({ color: selected ? RIG_FRUSTUM_SELECTED_COLOR : RIG_SIGHT_LINE_COLOR, depthTest: false }),
       );
       line.renderOrder = 999;
       group.add(line);

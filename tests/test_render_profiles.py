@@ -90,6 +90,58 @@ def test_save_render_profile_rejects_invalid_settings(config_file, settings):
     assert combine_data.get_render_profiles() == {}
 
 
+# The full Render Settings surface is validated with the same per-field rules
+# as save_render_settings: a profile must never snapshot values the flat
+# settings would reject.
+@pytest.mark.parametrize("settings", [
+    {"finish": "matte"},
+    {"layer_height_mm": 0.5},
+    {"layer_height_mm": 0.01},
+    {"layer_depth": 1.5},
+    {"layer_depth": -0.1},
+    {"key_energy": 2001},
+    {"fill_energy": -1},
+    {"rim_energy": "lots"},
+    {"ambient": 2.1},
+    {"shadow": "yes"},
+    {"shadow_softness": 0.05},
+    {"shadow_softness": 11},
+    {"exposure": 0.05},
+    {"exposure": 5},
+    {"shot_mode": "burst"},
+    {"rig": "not-a-list"},
+    {"rig": [{"azimuth": 0}]},
+    {"rig": [{"azimuth": 0, "elevation": 0, "roll": 5}]},
+    {"rig": [{"azimuth": 400, "elevation": 0}]},
+    {"rig": [{"azimuth": 0, "elevation": 91}]},
+    {"rig": [{"azimuth": "north", "elevation": 0}]},
+])
+def test_save_render_profile_rejects_invalid_full_surface(config_file, settings):
+    with pytest.raises(ValueError):
+        combine_data.save_render_profile("P", settings)
+    assert combine_data.get_render_profiles() == {}
+
+
+def test_save_render_profile_accepts_full_surface(config_file):
+    settings = {
+        "color": "#3366cc", "roughness": 0.5, "resolution": 2048, "fov": 55,
+        "finish": "layer-lines", "layer_height_mm": 0.3, "layer_depth": 0.7,
+        "key_energy": 200, "fill_energy": 80, "rim_energy": 300, "ambient": 0.5,
+        "shadow": False, "shadow_softness": 2.5, "exposure": 1.2,
+        "shot_mode": "multi",
+        "rig": [{"azimuth": -45, "elevation": 30}, {"azimuth": 180, "elevation": -89}],
+    }
+    saved = combine_data.save_render_profile("Full", settings)
+    assert saved == {"name": "Full", "settings": settings}
+    assert combine_data.get_render_profiles()["Full"] == settings
+
+
+def test_save_render_profile_normalizes_rig_numbers(config_file):
+    # validate_rig coerces numeric strings, same as the flat settings path
+    combine_data.save_render_profile("Rig", {"rig": [{"azimuth": "45", "elevation": "10"}]})
+    assert combine_data.get_render_profiles()["Rig"] == {"rig": [{"azimuth": 45.0, "elevation": 10.0}]}
+
+
 def test_delete_render_profile(config_file):
     combine_data.save_render_profile("A", {"color": "#111111"})
     combine_data.save_render_profile("B", {"color": "#222222"})

@@ -61,6 +61,13 @@ RENDER_LAYER_DEPTH_MAX = 1.0
 RENDER_SHOT_MODES: tuple[str, ...] = ("single", "multi")
 DEFAULT_RENDER_SHOT_MODE = "single"
 
+# Camera Rig limits (GLOSSARY): azimuth orbits −360..+360° (negative orbits
+# counterclockwise); elevation −90..+90° (negative renders from below).
+RENDER_AZIMUTH_MIN = -360.0
+RENDER_AZIMUTH_MAX = 360.0
+RENDER_ELEVATION_MIN = -90.0
+RENDER_ELEVATION_MAX = 90.0
+
 # Camera Rig preset library (GLOSSARY): one-click named angles. Each camera is
 # azimuth (orbit around the model, degrees) + elevation (height, -90..+90);
 # negative elevation renders from below the model (blender_studio.py handles it).

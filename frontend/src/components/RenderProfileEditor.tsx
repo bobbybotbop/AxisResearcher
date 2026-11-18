@@ -2,9 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import StudioRenderPreview, { type StudioRenderPreviewHandle } from "./StudioRenderPreview";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import {
-  DEFAULT_RENDER_SHOT_MODE,
   RENDER_AMBIENT_MAX,
   RENDER_ANGLE_PRESETS,
+  RENDER_AZIMUTH_MAX,
+  RENDER_AZIMUTH_MIN,
+  RENDER_ELEVATION_MAX,
+  RENDER_ELEVATION_MIN,
   RENDER_ENERGY_MAX,
   RENDER_EXPOSURE_MAX,
   RENDER_EXPOSURE_MIN,
@@ -14,16 +17,17 @@ import {
   RENDER_LAYER_HEIGHT_MM_MAX,
   RENDER_LAYER_HEIGHT_MM_MIN,
   RENDER_RESOLUTION_OPTIONS,
-  RENDER_SETTINGS_DEFAULTS,
   RENDER_SHADOW_SOFTNESS_MAX,
   RENDER_SHADOW_SOFTNESS_MIN,
   RENDER_SHOT_MODE_OPTIONS,
   RENDER_STATUS_POLL_DEADLINE_MS,
   RENDER_STATUS_POLL_INTERVAL_MS,
+  renderSettingsFromUnknown,
   type RenderFinish,
   type RenderProfileSettings,
   type RenderProfilesResponse,
   type RenderRigCamera,
+  type RenderSettingsWire,
   type RenderShotMode,
 } from "../constants/render";
 
@@ -53,56 +57,9 @@ interface RenderProfileEditorProps {
 
 const BENCHY_URL = "/render/3DBenchy.stl";
 
-// Wire format (snake_case) shared by the flat settings, the profiles API, and
-// the /api/render form fields
-interface EditorSettingsWire {
-  color: string;
-  roughness: number;
-  resolution: number;
-  fov: number;
-  finish: RenderFinish;
-  layer_height_mm: number;
-  layer_depth: number;
-  key_energy: number;
-  fill_energy: number;
-  rim_energy: number;
-  ambient: number;
-  shadow: boolean;
-  shadow_softness: number;
-  exposure: number;
-  shot_mode: RenderShotMode;
-  rig: RenderRigCamera[];
-}
-
-const rigCameraFromUnknown = (camera: unknown): RenderRigCamera | null => {
-  if (typeof camera !== "object" || camera === null) return null;
-  const { azimuth, elevation } = camera as Record<string, unknown>;
-  if (typeof azimuth !== "number" || typeof elevation !== "number") return null;
-  return { azimuth, elevation };
-};
-
-const wireFromUnknown = (data: RenderProfileSettings): EditorSettingsWire => ({
-  color: typeof data.color === "string" ? data.color : RENDER_SETTINGS_DEFAULTS.color,
-  roughness: typeof data.roughness === "number" ? data.roughness : RENDER_SETTINGS_DEFAULTS.roughness,
-  resolution: typeof data.resolution === "number" ? data.resolution : RENDER_SETTINGS_DEFAULTS.resolution,
-  fov: typeof data.fov === "number" ? data.fov : RENDER_SETTINGS_DEFAULTS.fov,
-  finish: data.finish === "layer-lines" || data.finish === "smooth" ? data.finish : RENDER_SETTINGS_DEFAULTS.finish,
-  layer_height_mm: typeof data.layer_height_mm === "number" ? data.layer_height_mm : RENDER_SETTINGS_DEFAULTS.layerHeightMm,
-  layer_depth: typeof data.layer_depth === "number" ? data.layer_depth : RENDER_SETTINGS_DEFAULTS.layerDepth,
-  key_energy: typeof data.key_energy === "number" ? data.key_energy : RENDER_SETTINGS_DEFAULTS.keyEnergy,
-  fill_energy: typeof data.fill_energy === "number" ? data.fill_energy : RENDER_SETTINGS_DEFAULTS.fillEnergy,
-  rim_energy: typeof data.rim_energy === "number" ? data.rim_energy : RENDER_SETTINGS_DEFAULTS.rimEnergy,
-  ambient: typeof data.ambient === "number" ? data.ambient : RENDER_SETTINGS_DEFAULTS.ambient,
-  shadow: typeof data.shadow === "boolean" ? data.shadow : RENDER_SETTINGS_DEFAULTS.shadow,
-  shadow_softness: typeof data.shadow_softness === "number" ? data.shadow_softness : RENDER_SETTINGS_DEFAULTS.shadowSoftness,
-  exposure: typeof data.exposure === "number" ? data.exposure : RENDER_SETTINGS_DEFAULTS.exposure,
-  shot_mode: data.shot_mode === "multi" || data.shot_mode === "single" ? data.shot_mode : DEFAULT_RENDER_SHOT_MODE,
-  rig: Array.isArray(data.rig) ? data.rig.map(rigCameraFromUnknown).filter((c): c is RenderRigCamera => c !== null) : [],
-});
-
 function RenderProfileEditor({ editingProfile, onBack, onSavedCurrentSettings, addToast }: RenderProfileEditorProps) {
   // Local copy of the settings being edited — nothing persists until Save
-  const [settings, setSettings] = useState<EditorSettingsWire>(() => wireFromUnknown({}));
+  const [settings, setSettings] = useState<RenderSettingsWire>(() => renderSettingsFromUnknown({}));
   const [settingsLoaded, setSettingsLoaded] = useState(false);
 
   const [benchyFile, setBenchyFile] = useState<File | null>(null);
@@ -121,7 +78,7 @@ function RenderProfileEditor({ editingProfile, onBack, onSavedCurrentSettings, a
   // highlight / the camera the editor's Render button renders)
   const [selectedCamera, setSelectedCamera] = useState(0);
 
-  const patch = (p: Partial<EditorSettingsWire>) => setSettings((s) => ({ ...s, ...p }));
+  const patch = (p: Partial<RenderSettingsWire>) => setSettings((s) => ({ ...s, ...p }));
 
   // Camera Rig editing (Multi Shot Mode): one-click preset adds, per-camera
   // azimuth/elevation numeric edits, remove. The rig is part of the profile's
@@ -149,7 +106,7 @@ function RenderProfileEditor({ editingProfile, onBack, onSavedCurrentSettings, a
     let cancelled = false;
     const apply = (data: RenderProfileSettings) => {
       if (cancelled) return;
-      setSettings(wireFromUnknown(data));
+      setSettings(renderSettingsFromUnknown(data));
       setSettingsLoaded(true);
     };
     if (editingProfile === "create" || editingProfile === null) {
@@ -644,8 +601,8 @@ function RenderProfileEditor({ editingProfile, onBack, onSavedCurrentSettings, a
                         <input
                           type="number"
                           aria-label={`Camera ${index + 1} azimuth`}
-                          min={-360}
-                          max={360}
+                          min={RENDER_AZIMUTH_MIN}
+                          max={RENDER_AZIMUTH_MAX}
                           step={1}
                           value={camera.azimuth}
                           onChange={(e) => updateRigCamera(index, { azimuth: Number(e.target.value) })}
@@ -657,8 +614,8 @@ function RenderProfileEditor({ editingProfile, onBack, onSavedCurrentSettings, a
                         <input
                           type="number"
                           aria-label={`Camera ${index + 1} elevation`}
-                          min={-90}
-                          max={90}
+                          min={RENDER_ELEVATION_MIN}
+                          max={RENDER_ELEVATION_MAX}
                           step={1}
                           value={camera.elevation}
                           onChange={(e) => updateRigCamera(index, { elevation: Number(e.target.value) })}
