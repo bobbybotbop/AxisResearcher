@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import StudioRenderPreview, { type StudioRenderPreviewHandle } from "./StudioRenderPreview";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import {
+  DEFAULT_RENDER_SHOT_MODE,
   RENDER_AMBIENT_MAX,
+  RENDER_ANGLE_PRESETS,
   RENDER_ENERGY_MAX,
   RENDER_EXPOSURE_MAX,
   RENDER_EXPOSURE_MIN,
@@ -15,11 +17,14 @@ import {
   RENDER_SETTINGS_DEFAULTS,
   RENDER_SHADOW_SOFTNESS_MAX,
   RENDER_SHADOW_SOFTNESS_MIN,
+  RENDER_SHOT_MODE_OPTIONS,
   RENDER_STATUS_POLL_DEADLINE_MS,
   RENDER_STATUS_POLL_INTERVAL_MS,
   type RenderFinish,
   type RenderProfileSettings,
   type RenderProfilesResponse,
+  type RenderRigCamera,
+  type RenderShotMode,
 } from "../constants/render";
 
 // The Profile Editor (GLOSSARY.md): Step 4's in-place editor for Render
@@ -65,7 +70,16 @@ interface EditorSettingsWire {
   shadow: boolean;
   shadow_softness: number;
   exposure: number;
+  shot_mode: RenderShotMode;
+  rig: RenderRigCamera[];
 }
+
+const rigCameraFromUnknown = (camera: unknown): RenderRigCamera | null => {
+  if (typeof camera !== "object" || camera === null) return null;
+  const { azimuth, elevation } = camera as Record<string, unknown>;
+  if (typeof azimuth !== "number" || typeof elevation !== "number") return null;
+  return { azimuth, elevation };
+};
 
 const wireFromUnknown = (data: RenderProfileSettings): EditorSettingsWire => ({
   color: typeof data.color === "string" ? data.color : RENDER_SETTINGS_DEFAULTS.color,
@@ -82,6 +96,8 @@ const wireFromUnknown = (data: RenderProfileSettings): EditorSettingsWire => ({
   shadow: typeof data.shadow === "boolean" ? data.shadow : RENDER_SETTINGS_DEFAULTS.shadow,
   shadow_softness: typeof data.shadow_softness === "number" ? data.shadow_softness : RENDER_SETTINGS_DEFAULTS.shadowSoftness,
   exposure: typeof data.exposure === "number" ? data.exposure : RENDER_SETTINGS_DEFAULTS.exposure,
+  shot_mode: data.shot_mode === "multi" || data.shot_mode === "single" ? data.shot_mode : DEFAULT_RENDER_SHOT_MODE,
+  rig: Array.isArray(data.rig) ? data.rig.map(rigCameraFromUnknown).filter((c): c is RenderRigCamera => c !== null) : [],
 });
 
 function RenderProfileEditor({ editingProfile, onBack, onSavedCurrentSettings, addToast }: RenderProfileEditorProps) {
@@ -101,7 +117,31 @@ function RenderProfileEditor({ editingProfile, onBack, onSavedCurrentSettings, a
   const [nameModalOpen, setNameModalOpen] = useState(false);
   const [newProfileName, setNewProfileName] = useState("");
 
+  // Multi Shot Mode: which rig camera is selected (POV strip click / frustum
+  // highlight / the camera the editor's Render button renders)
+  const [selectedCamera, setSelectedCamera] = useState(0);
+
   const patch = (p: Partial<EditorSettingsWire>) => setSettings((s) => ({ ...s, ...p }));
+
+  // Camera Rig editing (Multi Shot Mode): one-click preset adds, per-camera
+  // azimuth/elevation numeric edits, remove. The rig is part of the profile's
+  // settings — it round-trips through Save like every other field.
+  const addRigCamera = (camera: RenderRigCamera) => {
+    patch({ rig: [...settings.rig, { ...camera }] });
+    setSelectedCamera(settings.rig.length);
+  };
+  const updateRigCamera = (index: number, p: Partial<RenderRigCamera>) => {
+    patch({ rig: settings.rig.map((c, i) => (i === index ? { ...c, ...p } : c)) });
+  };
+  const removeRigCamera = (index: number) => {
+    patch({ rig: settings.rig.filter((_, i) => i !== index) });
+    setSelectedCamera((sel) => {
+      if (settings.rig.length <= 1) return 0;
+      if (index < sel) return sel - 1;
+      if (index === sel) return Math.min(sel, settings.rig.length - 2);
+      return sel;
+    });
+  };
 
   // Load initial values: "create"/null from the flat settings, a named profile
   // from the profiles API
@@ -174,6 +214,16 @@ function RenderProfileEditor({ editingProfile, onBack, onSavedCurrentSettings, a
       form.append("shadow", String(settings.shadow));
       form.append("shadow_softness", String(settings.shadow_softness));
       form.append("exposure", String(settings.exposure));
+      // Shot Mode: Multi renders the SELECTED rig camera only (one job — the
+      // full rig runs from the main Step 4 panel). The backend auto-frames
+      // distance/look-at, so the rig camera goes as azimuth/elevation.
+      if (settings.shot_mode === "multi") {
+        const camera = settings.rig[Math.min(selectedCamera, settings.rig.length - 1)];
+        if (camera) {
+          form.append("shot_mode", "multi");
+          form.append("rig", JSON.stringify([camera]));
+        }
+      }
       const res = await fetch("/api/render", { method: "POST", body: form });
       const data = await res.json() as { task_id?: string; error?: string };
       if (!res.ok || data.error || !data.task_id) throw new Error(data.error || "Failed to start the render");
@@ -284,13 +334,44 @@ function RenderProfileEditor({ editingProfile, onBack, onSavedCurrentSettings, a
         </button>
       </div>
       <div className="flex flex-col gap-4 md:flex-row">
-        {/* Square benchy viewer + render result */}
+        {/* Square benchy viewer + render result. Multi Shot Mode turns it into
+            the Rig Overview (wireframe frustums + sight lines) with a POV strip. */}
         <div className="flex w-full flex-col gap-2 md:w-1/2">
           {benchyFile ? (
-            <StudioRenderPreview ref={previewRef} file={benchyFile} fov={settings.fov} square />
+            <StudioRenderPreview
+              ref={previewRef}
+              file={benchyFile}
+              fov={settings.fov}
+              square
+              rig={settings.shot_mode === "multi" ? settings.rig : undefined}
+              selectedCamera={selectedCamera}
+            />
           ) : (
             <div className="flex aspect-square w-full items-center justify-center rounded-lg border border-border-default bg-surface-panel">
               <p className="text-xs text-text-muted">{benchyError ?? "Loading 3DBenchy..."}</p>
+            </div>
+          )}
+          {/* POV strip: one small square thumbnail per rig camera, each a
+              lightweight render from that camera's POV. Click selects the
+              camera (highlights its frustum in the overview). */}
+          {settings.shot_mode === "multi" && benchyFile && settings.rig.length > 0 && (
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {settings.rig.map((camera, index) => (
+                <button
+                  key={index}
+                  type="button"
+                  aria-label={`Select camera ${index + 1} (azimuth ${camera.azimuth}°, elevation ${camera.elevation}°)`}
+                  aria-pressed={selectedCamera === index}
+                  onClick={() => setSelectedCamera(index)}
+                  className={`w-20 shrink-0 overflow-hidden rounded-lg border-2 transition-colors ${
+                    selectedCamera === index
+                      ? "border-primary ring-2 ring-primary/30"
+                      : "border-border-default hover:border-primary/50"
+                  }`}
+                >
+                  <StudioRenderPreview file={benchyFile} fov={settings.fov} square fixedCamera={camera} hideHint />
+                </button>
+              ))}
             </div>
           )}
           <div className="flex items-center gap-3">
@@ -506,6 +587,98 @@ function RenderProfileEditor({ editingProfile, onBack, onSavedCurrentSettings, a
               className={sliderClass}
             />
           </label>
+          {/* Shot Mode (GLOSSARY): Single captures the angle from the preview;
+              Multi reveals the Camera Rig — the Rig Overview above plus the
+              preset library and per-camera editing below. */}
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-muted">Shot Mode</span>
+            <select
+              aria-label="Shot Mode"
+              value={settings.shot_mode}
+              onChange={(e) => patch({ shot_mode: e.target.value as RenderShotMode })}
+              className={selectClass}
+            >
+              {RENDER_SHOT_MODE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
+          {settings.shot_mode === "multi" && (
+            <div className="flex flex-col gap-2 rounded-lg border border-border-default p-2">
+              <p className="text-xs font-semibold text-text-primary">Camera Rig ({settings.rig.length} camera{settings.rig.length !== 1 ? "s" : ""})</p>
+              {/* Preset library: one-click adds */}
+              <div className="flex flex-wrap gap-1">
+                {Object.entries(RENDER_ANGLE_PRESETS).map(([name, camera]) => (
+                  <button
+                    key={name}
+                    type="button"
+                    className={btnPillSm}
+                    onClick={() => addRigCamera(camera)}
+                  >
+                    + {name}
+                  </button>
+                ))}
+              </div>
+              {/* Per-camera azimuth/elevation editing + remove */}
+              {settings.rig.length === 0 ? (
+                <p className="text-xs text-text-muted">Add cameras from the presets above — Render in Multi renders the selected camera.</p>
+              ) : (
+                <ol className="flex flex-col gap-2">
+                  {settings.rig.map((camera, index) => (
+                    <li
+                      key={index}
+                      className={`flex items-center gap-2 rounded-md border p-2 ${
+                        selectedCamera === index ? "border-primary bg-primary/5" : "border-border-default"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        aria-label={`Select camera ${index + 1}`}
+                        onClick={() => setSelectedCamera(index)}
+                        className="w-5 shrink-0 text-right text-sm font-bold text-text-muted hover:text-text-primary"
+                      >
+                        {index + 1}.
+                      </button>
+                      <label className="flex items-center gap-1 text-xs text-text-muted">
+                        Az
+                        <input
+                          type="number"
+                          aria-label={`Camera ${index + 1} azimuth`}
+                          min={-360}
+                          max={360}
+                          step={1}
+                          value={camera.azimuth}
+                          onChange={(e) => updateRigCamera(index, { azimuth: Number(e.target.value) })}
+                          className="w-16 rounded border border-border-default bg-surface-panel px-1 py-0.5 text-xs text-text-primary"
+                        />
+                      </label>
+                      <label className="flex items-center gap-1 text-xs text-text-muted">
+                        El
+                        <input
+                          type="number"
+                          aria-label={`Camera ${index + 1} elevation`}
+                          min={-90}
+                          max={90}
+                          step={1}
+                          value={camera.elevation}
+                          onChange={(e) => updateRigCamera(index, { elevation: Number(e.target.value) })}
+                          className="w-16 rounded border border-border-default bg-surface-panel px-1 py-0.5 text-xs text-text-primary"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        aria-label={`Remove camera ${index + 1}`}
+                        onClick={() => removeRigCamera(index)}
+                        className="ml-auto text-xs text-text-muted hover:text-red-400"
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          )}
           <div className="mt-1 flex items-center gap-3 border-t border-border-default pt-3">
             <button type="button" className={btnPill} onClick={handleSave} disabled={saving}>
               {saving ? "Saving..." : editingProfile === "create" ? "Save as new profile" : "Save"}

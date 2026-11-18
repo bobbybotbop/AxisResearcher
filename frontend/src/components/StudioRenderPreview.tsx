@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
@@ -11,6 +11,8 @@ import {
   PREVIEW_FRAME_MARGIN,
   PREVIEW_INITIAL_CAMERA,
   PREVIEW_MATERIAL_DEFAULTS,
+  rigCameraDirection,
+  type RenderRigCamera,
 } from "../constants/render";
 
 // Camera Intent (GLOSSARY.md): the preview camera state captured on Render —
@@ -63,17 +65,36 @@ const disposeObject = (obj: THREE.Object3D) => {
 
 type OrbitControlsImpl = React.ComponentRef<typeof OrbitControls>;
 
+// Where the camera ends up for a given rig angle: auto-framed like the render
+// (bounding sphere + FOV + margin), direction from the backend's az/el math.
+const rigCameraPosition = (
+  camera: RenderRigCamera,
+  center: THREE.Vector3,
+  radius: number,
+  fov: number,
+): THREE.Vector3 => {
+  const distance = (radius / Math.tan(THREE.MathUtils.degToRad(fov) / 2)) * PREVIEW_FRAME_MARGIN;
+  const direction = new THREE.Vector3(...rigCameraDirection(camera.azimuth, camera.elevation));
+  return center.clone().addScaledVector(direction, distance);
+};
+
 interface PreviewSceneProps {
   file: File;
   fov: number;
   controlsRef: React.RefObject<OrbitControlsImpl | null>;
   onReady: () => void;
   onError: (message: string) => void;
+  // Rig Overview: wireframe frustums + sight lines for every rig camera
+  rig?: RenderRigCamera[];
+  selectedCamera?: number;
+  // POV thumbnail mode: lock the camera at this rig angle (no orbit controls)
+  fixedCamera?: RenderRigCamera;
 }
 
-function PreviewScene({ file, fov, controlsRef, onReady, onError }: PreviewSceneProps) {
+function PreviewScene({ file, fov, controlsRef, onReady, onError, rig, selectedCamera, fixedCamera }: PreviewSceneProps) {
   const camera = useThree((s) => s.camera);
   const [model, setModel] = useState<THREE.Object3D | null>(null);
+  const [frame, setFrame] = useState<{ center: THREE.Vector3; radius: number } | null>(null);
   const prevFovRef = useRef(fov);
 
   useEffect(() => {
@@ -90,9 +111,13 @@ function PreviewScene({ file, fov, controlsRef, onReady, onError }: PreviewScene
         // Frame the whole model from the default studio angle, mirroring the
         // render's auto-framing (bounding sphere + FOV + margin)
         const sphere = new THREE.Box3().setFromObject(obj).getBoundingSphere(new THREE.Sphere());
+        setFrame({ center: sphere.center.clone(), radius: sphere.radius });
         const distance = (sphere.radius / Math.tan(THREE.MathUtils.degToRad(fov) / 2)) * PREVIEW_FRAME_MARGIN;
         if (camera instanceof THREE.PerspectiveCamera) {
-          camera.position.copy(sphere.center).addScaledVector(defaultViewDirection, distance);
+          const startDirection = fixedCamera
+            ? new THREE.Vector3(...rigCameraDirection(fixedCamera.azimuth, fixedCamera.elevation))
+            : defaultViewDirection;
+          camera.position.copy(sphere.center).addScaledVector(startDirection, distance);
           camera.near = Math.max(distance / 100, 0.0001);
           camera.far = distance * 100;
           camera.fov = fov;
@@ -107,6 +132,7 @@ function PreviewScene({ file, fov, controlsRef, onReady, onError }: PreviewScene
     return () => {
       cancelled = true;
       setModel(null);
+      setFrame(null);
       if (loaded) disposeObject(loaded);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -130,8 +156,82 @@ function PreviewScene({ file, fov, controlsRef, onReady, onError }: PreviewScene
     camera.updateProjectionMatrix();
   }, [fov, camera, controlsRef]);
 
+  // POV thumbnail mode: re-frame whenever the fixed rig camera changes
+  useEffect(() => {
+    if (!fixedCamera || !frame || !(camera instanceof THREE.PerspectiveCamera)) return;
+    camera.position.copy(rigCameraPosition(fixedCamera, frame.center, frame.radius, fov));
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+    camera.lookAt(frame.center);
+  }, [fixedCamera, frame, fov, camera]);
+
   if (!model) return null;
-  return <primitive object={model} />;
+  return (
+    <>
+      <primitive object={model} />
+      {rig && frame && (
+        <RigOverviewHelpers rig={rig} center={frame.center} radius={frame.radius} fov={fov} selectedCamera={selectedCamera} />
+      )}
+    </>
+  );
+}
+
+// Rig Overview helpers: one wireframe frustum + a sight line per rig camera.
+// The frustum is a THREE.CameraHelper on a throwaway PerspectiveCamera placed
+// at the auto-framed rig position; the sight line runs from the camera to the
+// model center. The selected camera is highlighted in the primary color.
+function RigOverviewHelpers({
+  rig,
+  center,
+  radius,
+  fov,
+  selectedCamera,
+}: {
+  rig: RenderRigCamera[];
+  center: THREE.Vector3;
+  radius: number;
+  fov: number;
+  selectedCamera?: number;
+}) {
+  const helpers = useMemo(() => {
+    const group = new THREE.Group();
+    rig.forEach((rigCamera, index) => {
+      const position = rigCameraPosition(rigCamera, center, radius, fov);
+      const frustumCamera = new THREE.PerspectiveCamera(fov, 1, radius * 0.05, radius * 1.2);
+      frustumCamera.position.copy(position);
+      frustumCamera.lookAt(center);
+      frustumCamera.updateProjectionMatrix();
+      frustumCamera.updateMatrixWorld(true);
+      const selected = index === selectedCamera;
+      const helper = new THREE.CameraHelper(frustumCamera);
+      const material = helper.material as THREE.LineBasicMaterial;
+      material.color = new THREE.Color(selected ? "#3b82f6" : "#94a3b8");
+      material.depthTest = false;
+      helper.renderOrder = 999;
+      group.add(helper);
+
+      const lineGeometry = new THREE.BufferGeometry().setFromPoints([position, center]);
+      const line = new THREE.Line(
+        lineGeometry,
+        new THREE.LineBasicMaterial({ color: selected ? "#3b82f6" : "#cbd5e1", depthTest: false }),
+      );
+      line.renderOrder = 999;
+      group.add(line);
+    });
+    return group;
+  }, [rig, center, radius, fov, selectedCamera]);
+
+  useEffect(() => () => {
+    helpers.traverse((child) => {
+      if (child instanceof THREE.CameraHelper) child.dispose();
+      if (child instanceof THREE.Line) {
+        child.geometry.dispose();
+        (child.material as THREE.Material).dispose();
+      }
+    });
+  }, [helpers]);
+
+  return <primitive object={helpers} />;
 }
 
 interface StudioRenderPreviewProps {
@@ -141,10 +241,17 @@ interface StudioRenderPreviewProps {
   // Square viewer (Profile Editor): the canvas fills an aspect-square container
   // instead of the fixed 320px height used in Step 4
   square?: boolean;
+  // Rig Overview (Multi Shot Mode): wireframe frustums + sight lines
+  rig?: RenderRigCamera[];
+  selectedCamera?: number;
+  // POV thumbnail mode: fixed camera at this rig angle, no orbit controls
+  fixedCamera?: RenderRigCamera;
+  // Hide the hint line under the canvas (POV thumbnails are self-explanatory)
+  hideHint?: boolean;
 }
 
 const StudioRenderPreview = forwardRef<StudioRenderPreviewHandle, StudioRenderPreviewProps>(
-  ({ file, fov, onReady, square = false }, ref) => {
+  ({ file, fov, onReady, square = false, rig, selectedCamera, fixedCamera, hideHint = false }, ref) => {
     const controlsRef = useRef<OrbitControlsImpl | null>(null);
     const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -173,13 +280,22 @@ const StudioRenderPreview = forwardRef<StudioRenderPreviewHandle, StudioRenderPr
             <ambientLight intensity={0.7} />
             <directionalLight position={[4, 6, 3]} intensity={1.2} />
             <directionalLight position={[-4, 2, -3]} intensity={0.4} />
-            <PreviewScene file={file} fov={fov} controlsRef={controlsRef} onReady={() => onReady?.()} onError={setLoadError} />
-            <OrbitControls ref={controlsRef} makeDefault />
+            <PreviewScene
+              file={file}
+              fov={fov}
+              controlsRef={controlsRef}
+              onReady={() => onReady?.()}
+              onError={setLoadError}
+              rig={rig}
+              selectedCamera={selectedCamera}
+              fixedCamera={fixedCamera}
+            />
+            {!fixedCamera && <OrbitControls ref={controlsRef} makeDefault />}
           </Canvas>
         </div>
         {loadError ? (
           <p className="text-xs text-red-400">{loadError}</p>
-        ) : (
+        ) : hideHint ? null : (
           <p className="text-xs text-text-muted">Drag to orbit to choose the render angle · field of view is adjusted below</p>
         )}
       </div>

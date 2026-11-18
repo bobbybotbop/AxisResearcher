@@ -7,6 +7,7 @@ import StudioRenderPreview, { type StudioRenderPreviewHandle } from "./StudioRen
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { DOWNLOAD_MODE_FILES, DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, threeDSiteKeyFromLink, type DownloadMode, type ThreeDSiteStatus } from "../constants/files3d";
 import {
+  DEFAULT_RENDER_SHOT_MODE,
   modelExtensionOf,
   NATIVE_RENDER_EXTENSIONS,
   RENDER_CANDIDATE_EXTENSIONS,
@@ -22,6 +23,8 @@ import {
   RENDERABLE_FORMATS_HINT,
   type RenderFinish,
   type RenderProfileSettings,
+  type RenderRigCamera,
+  type RenderShotMode,
 } from "../constants/render";
 
 interface SearchResult {
@@ -193,6 +196,12 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
   const [renderShadow, setRenderShadow] = useState(RENDER_SETTINGS_DEFAULTS.shadow);
   const [renderShadowSoftness, setRenderShadowSoftness] = useState(RENDER_SETTINGS_DEFAULTS.shadowSoftness);
   const [renderExposure, setRenderExposure] = useState(RENDER_SETTINGS_DEFAULTS.exposure);
+  // Shot Mode + Camera Rig (Multi: N cameras → N images per Render click)
+  const [renderShotMode, setRenderShotMode] = useState<RenderShotMode>(DEFAULT_RENDER_SHOT_MODE);
+  const [renderRig, setRenderRig] = useState<RenderRigCamera[]>([]);
+  // Multi-shot render progress + results (N images)
+  const [step4Progress, setStep4Progress] = useState<{ completed: number; total: number } | null>(null);
+  const [step4Images, setStep4Images] = useState<{ url: string; filename: string }[]>([]);
   const renderSettingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Step 4 — view switching: the profile dropdown or the Profile Editor
@@ -223,6 +232,12 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
         if (typeof data.shadow === "boolean") setRenderShadow(data.shadow);
         if (typeof data.shadow_softness === "number") setRenderShadowSoftness(data.shadow_softness);
         if (typeof data.exposure === "number") setRenderExposure(data.exposure);
+        if (data.shot_mode === "single" || data.shot_mode === "multi") setRenderShotMode(data.shot_mode);
+        if (Array.isArray(data.rig)) setRenderRig(data.rig.filter((c: unknown): c is RenderRigCamera => {
+          if (typeof c !== "object" || c === null) return false;
+          const { azimuth, elevation } = c as Record<string, unknown>;
+          return typeof azimuth === "number" && typeof elevation === "number";
+        }));
       })
       .catch(() => { /* keep spec defaults */ });
   };
@@ -271,6 +286,12 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
     if (typeof settings.shadow === "boolean") setRenderShadow(settings.shadow);
     if (typeof settings.shadow_softness === "number") setRenderShadowSoftness(settings.shadow_softness);
     if (typeof settings.exposure === "number") setRenderExposure(settings.exposure);
+    if (settings.shot_mode === "single" || settings.shot_mode === "multi") setRenderShotMode(settings.shot_mode);
+    if (Array.isArray(settings.rig)) setRenderRig(settings.rig.filter((c: unknown): c is RenderRigCamera => {
+      if (typeof c !== "object" || c === null) return false;
+      const { azimuth, elevation } = c as Record<string, unknown>;
+      return typeof azimuth === "number" && typeof elevation === "number";
+    }));
   };
 
   const resetStep4 = () => {
@@ -490,13 +511,19 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
     setStep4Loading(true);
     setStep4Error(null);
     setStep4Image(null);
+    setStep4Images([]);
+    setStep4Progress(null);
+    // Multi Shot Mode with a rig renders N cameras as one job (sequential
+    // backend Render Jobs); an empty rig falls back to the single preview angle.
+    const multi = renderShotMode === "multi" && renderRig.length > 0;
     try {
       const form = new FormData();
       form.append("file", renderFile);
       form.append("color", renderColor);
       form.append("roughness", String(renderRoughness));
       form.append("resolution", String(renderResolution));
-      // Camera Intent: the angle the user framed in the preview
+      // Camera Intent: the angle the user framed in the preview (single mode;
+      // in multi the rig's azimuth/elevation cameras take over)
       const intent = previewRef.current?.getCameraIntent();
       if (intent) {
         form.append("camera_position", intent.position.join(","));
@@ -513,6 +540,10 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       form.append("shadow", String(renderShadow));
       form.append("shadow_softness", String(renderShadowSoftness));
       form.append("exposure", String(renderExposure));
+      if (multi) {
+        form.append("shot_mode", "multi");
+        form.append("rig", JSON.stringify(renderRig));
+      }
       const res = await fetch("/api/render", { method: "POST", body: form });
       const data = await res.json() as { task_id?: string; error?: string };
       if (!res.ok || data.error || !data.task_id) throw new Error(data.error || "Failed to start the render");
@@ -521,10 +552,29 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       for (;;) {
         await new Promise((r) => setTimeout(r, RENDER_STATUS_POLL_INTERVAL_MS));
         const statusRes = await fetch(`/api/render-status/${data.task_id}`);
-        const status = await statusRes.json() as { status?: string; image?: string; filename?: string; error?: string };
+        const status = await statusRes.json() as {
+          status?: string;
+          image?: string;
+          filename?: string;
+          images?: string[];
+          shots_completed?: number;
+          shots_total?: number;
+          error?: string;
+        };
         if (!statusRes.ok) throw new Error(status.error || "Lost track of the render job");
-        if (status.status === "completed" && status.image && status.filename) {
-          setStep4Image({ url: status.image, filename: status.filename });
+        // Multi-shot progress: "Rendering shot 2 of 5" + the images done so far
+        if (multi && typeof status.shots_completed === "number" && typeof status.shots_total === "number") {
+          setStep4Progress({ completed: status.shots_completed, total: status.shots_total });
+          if (Array.isArray(status.images)) {
+            setStep4Images(status.images.map((url) => ({ url, filename: url.split("/").pop() ?? "render.png" })));
+          }
+        }
+        if (status.status === "completed") {
+          if (multi && Array.isArray(status.images) && status.images.length > 0) {
+            setStep4Images(status.images.map((url) => ({ url, filename: url.split("/").pop() ?? "render.png" })));
+          } else if (status.image && status.filename) {
+            setStep4Image({ url: status.image, filename: status.filename });
+          }
           break;
         }
         if (status.status === "failed") throw new Error(status.error || "Render failed");
@@ -534,6 +584,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       setStep4Error((err as Error).message || "Render failed");
     } finally {
       setStep4Loading(false);
+      setStep4Progress(null);
     }
   };
 
@@ -807,6 +858,14 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
                 : "Download a model in Step 3, or test with your own file"}
           </p>
         </div>
+        {/* Multi-shot summary: the active profile's Camera Rig (angle list) */}
+        {renderShotMode === "multi" && renderRig.length > 0 && (
+          <p className="text-xs text-text-muted">
+            <span className="font-semibold text-text-primary">Multi-shot: {renderRig.length} camera{renderRig.length !== 1 ? "s" : ""}</span>
+            {" — "}
+            {renderRig.map((c, i) => `#${i + 1} az ${c.azimuth}° el ${c.elevation}°`).join(", ")}
+          </p>
+        )}
         <label className="flex items-center gap-2 text-xs text-text-muted">
           Test your own file:
           <input
@@ -869,7 +928,11 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
           </>
         )}
         {step4Loading && (
-          <p className="text-xs text-text-muted">Rendering in Blender — this usually takes 10–30 seconds...</p>
+          <p className="text-xs text-text-muted">
+            {step4Progress
+              ? `Rendering shot ${Math.min(step4Progress.completed + 1, step4Progress.total)} of ${step4Progress.total} in Blender...`
+              : "Rendering in Blender — this usually takes 10–30 seconds..."}
+          </p>
         )}
         {step4Image && (
           <div className="flex flex-col items-start gap-2">
@@ -881,6 +944,23 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
             <a href={step4Image.url} download={step4Image.filename} className={btnPillSm}>
               Download {step4Image.filename}
             </a>
+          </div>
+        )}
+        {/* Multi-shot result: N-image grid with per-image download */}
+        {step4Images.length > 0 && (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {step4Images.map((image, index) => (
+              <div key={image.url} className="flex flex-col items-start gap-1">
+                <img
+                  src={image.url}
+                  alt={`Studio render shot ${index + 1}`}
+                  className="w-full rounded-lg border border-border-default"
+                />
+                <a href={image.url} download={image.filename} className={btnPillSm}>
+                  Download shot {index + 1}
+                </a>
+              </div>
+            ))}
           </div>
         )}
         {step4Error && (
