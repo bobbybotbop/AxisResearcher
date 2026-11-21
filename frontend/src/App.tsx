@@ -20,7 +20,8 @@ import UploadListingsToolbar from "./components/UploadListingsToolbar";
 import ApiKeyManagementSection from "./components/ApiKeyManagementSection";
 import TestAiModelSection from "./components/TestAiModelSection";
 import LogsTab from "./components/LogsTab";
-import ThreeDFileFinder from "./components/ThreeDFileFinder";
+import ImageSearchSteps from "./components/ImageSearchSteps";
+import SharedDownloadRender from "./components/SharedDownloadRender";
 import TitleSearchPipeline from "./components/TitleSearchPipeline";
 import NumberInput from "./components/NumberInput";
 import { MOCK_DATA, MOCK_GENERATED_TITLE, MOCK_GENERATED_DESCRIPTION } from "./mockData";
@@ -320,9 +321,11 @@ function App() {
     return THREE_D_SITES.map(({ site }) => site);
   });
   const [threeDSiteTesting, setThreeDSiteTesting] = useState(false);
-  // Link forwarded from the Title Search pipeline to the shared download step.
-  // Consumed by the Steps 3-4 restructure in ticket 08; surfaced via toast for now.
+  // Link forwarded from either pipeline (Image Search or Title Search) to the
+  // shared Steps 3-4 download step. Consumed by SharedDownloadRender via the
+  // externalUrl prop; cleared after consumption.
   const [sharedDownloadLink, setSharedDownloadLink] = useState("");
+  const [imageSearchOpen, setImageSearchOpen] = useState(false);
   const threeDSiteAutoTestRan = useRef(false);
   // Shared cooldown (hours) for automatic background operations: History-tab
   // stock refresh and the 3D site auto-test. Fetched from the backend on
@@ -4434,6 +4437,33 @@ function App() {
                   </div>
                 )}
                 <hr className="border-border-default" />
+
+                {/* Image Search pipeline — expandable, collapsed by default */}
+                <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
+                  <button
+                    type="button"
+                    aria-expanded={imageSearchOpen}
+                    onClick={() => setImageSearchOpen(!imageSearchOpen)}
+                    className="flex items-center gap-2 text-left"
+                  >
+                    <span className={`inline-block transition-transform ${imageSearchOpen ? "rotate-90" : ""}`}>▸</span>
+                    <span className="text-lg font-semibold text-text-primary">Image Search</span>
+                  </button>
+                  {imageSearchOpen && (
+                    <ImageSearchSteps
+                      addToast={addToast as (type: string, message: string) => void}
+                      siteStatus={threeDSiteStatus}
+                      enabledSites={THREE_D_SITES.map(({ site }) => site).filter(site => threeDSitesEnabled[site] ?? true)}
+                      sitePriority={threeDSitePriority}
+                      onUseLink={(link) => {
+                        setSharedDownloadLink(link);
+                        addToast("success", `Link ready for the download step: ${link}`);
+                      }}
+                    />
+                  )}
+                </div>
+
+                {/* Title Search pipeline — expandable, open by default */}
                 <TitleSearchPipeline
                   addToast={addToast as (type: string, message: string) => void}
                   siteStatus={threeDSiteStatus}
@@ -4445,12 +4475,13 @@ function App() {
                     addToast("success", `Link ready for the download step: ${link}`);
                   }}
                 />
-                <ThreeDFileFinder
+
+                {/* Shared Steps 3-4 — always visible below both pipelines */}
+                <SharedDownloadRender
                   addToast={addToast as (type: string, message: string) => void}
                   fileDownloadDelay={threeDDownloadDelay}
-                  siteStatus={threeDSiteStatus}
-                  enabledSites={THREE_D_SITES.map(({ site }) => site).filter(site => threeDSitesEnabled[site] ?? true)}
-                  sitePriority={threeDSitePriority}
+                  externalUrl={sharedDownloadLink}
+                  onExternalUrlConsumed={() => setSharedDownloadLink("")}
                 />
               </div>
             </div>
