@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+import backend.db as db
 import backend.copyScripts.combine_data as combine_data
 from backend.constants.render import (
     DEFAULT_RENDER_SHOT_MODE,
@@ -12,22 +13,8 @@ from backend.constants.render import (
     RENDER_SHOT_MODES,
 )
 
-# Minimal config satisfying load_config()'s required keys
-BASE_CONFIG = {
-    "counter": 1,
-    "merchant_location_key": "TestLocation",
-    "default_quantity": 1,
-    "default_dimensions": {"length": "1", "width": "1", "height": "1", "unit": "INCH"},
-    "default_weight": {"value": "1", "unit": "POUND"},
-}
-
-
-@pytest.fixture()
-def config_file(tmp_path, monkeypatch):
-    path = tmp_path / "listingPreferences.json"
-    path.write_text(json.dumps(BASE_CONFIG), encoding="utf-8")
-    monkeypatch.setattr(combine_data, "CONFIG_FILE", str(path))
-    return path
+# The shared `config_file` fixture (tests/conftest.py) seeds a tmp axis.db with
+# the minimal valid config and points the storage layer at it.
 
 
 def test_shot_modes_are_single_and_multi_with_single_default():
@@ -81,9 +68,8 @@ def test_save_render_settings_roundtrips_shot_mode_and_rig(config_file):
     reread = combine_data.get_render_settings()
     assert reread == saved
 
-    on_disk = json.loads(config_file.read_text(encoding="utf-8"))
-    assert on_disk["render_shot_mode"] == "multi"
-    assert on_disk["render_rig"] == rig
+    assert db.get_preference("render_shot_mode") == "multi"
+    assert db.get_preference("render_rig") == rig
 
 
 def test_save_render_settings_shot_mode_partial_update_keeps_rig(config_file):

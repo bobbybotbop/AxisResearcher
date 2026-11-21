@@ -2,8 +2,8 @@
 Fixture-based tests for POST /api/listings/sync-startup (app.py).
 
 get_seller_list is monkeypatched — no network or eBay credentials are needed.
-GENERATED_LISTINGS_DIR is pointed at a tmp dir so the real Generated_Listings/
-tree is never touched.
+The listings store is pointed at a tmp axis.db so the real database is never
+touched.
 """
 import json
 import os
@@ -13,6 +13,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import backend.db as db
 import app as app_module
 
 
@@ -49,11 +50,12 @@ def _axis_listing(ebay_listing_id="", ebay_status="active", hidden=False, sku="A
 
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
-    # Point the endpoint's listing scan at an isolated tmp dir.
-    monkeypatch.setattr(app_module, "GENERATED_LISTINGS_DIR", str(tmp_path))
+    # Point the endpoint's listing scan at an isolated tmp axis.db.
+    monkeypatch.setattr(db, "DB_FILE", str(tmp_path / "axis.db"))
+    db.init_db()
     monkeypatch.setattr(app_module, "log_event", lambda *a, **k: None)
-    # Manual-listing helpers would write to the real Generated_Listings dir;
-    # stub them out (the un-hide path under test writes via fpath directly).
+    # Manual-listing helpers would write to the real listings store; stub them
+    # out (the un-hide path under test writes via the DB directly).
     monkeypatch.setattr(app_module, "write_manual_listing_json", lambda item: False)
     monkeypatch.setattr(app_module, "set_listing_ebay_status", lambda sku, status: True)
     app_module.app.config["TESTING"] = True
@@ -63,13 +65,11 @@ def client(tmp_path, monkeypatch):
 
 
 def _write_listing(tmp_path, sku, data):
-    with open(tmp_path / f"{sku}.json", "w", encoding="utf-8") as f:
-        json.dump(data, f)
+    db.save_listing(data)
 
 
 def _read_listing(tmp_path, sku):
-    with open(tmp_path / f"{sku}.json", "r", encoding="utf-8") as f:
-        return json.load(f)
+    return db.load_listing(sku)
 
 
 def test_soft_deletes_axis_and_manual_not_in_seller_list(client, monkeypatch):

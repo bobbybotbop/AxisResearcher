@@ -1,29 +1,14 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import json
-
 import pytest
 
+import backend.db as db
 import backend.copyScripts.combine_data as combine_data
 from app import app
 
-# Minimal config satisfying load_config()'s required keys
-BASE_CONFIG = {
-    "counter": 1,
-    "merchant_location_key": "TestLocation",
-    "default_quantity": 1,
-    "default_dimensions": {"length": "1", "width": "1", "height": "1", "unit": "INCH"},
-    "default_weight": {"value": "1", "unit": "POUND"},
-}
-
-
-@pytest.fixture()
-def config_file(tmp_path, monkeypatch):
-    path = tmp_path / "listingPreferences.json"
-    path.write_text(json.dumps(BASE_CONFIG), encoding="utf-8")
-    monkeypatch.setattr(combine_data, "CONFIG_FILE", str(path))
-    return path
+# The shared `config_file` fixture (tests/conftest.py) seeds a tmp axis.db with
+# the minimal valid config and points the storage layer at it.
 
 
 @pytest.fixture()
@@ -50,8 +35,7 @@ def test_save_render_profile_roundtrip(config_file):
     profiles = combine_data.get_render_profiles()
     assert profiles == {"My Profile": settings}
 
-    on_disk = json.loads(config_file.read_text(encoding="utf-8"))
-    assert on_disk["render_profiles"] == {"My Profile": settings}
+    assert db.get_preference("render_profiles") == {"My Profile": settings}
 
 
 def test_save_render_profile_overwrites_same_name(config_file):
@@ -154,8 +138,7 @@ def test_active_render_profile_roundtrip(config_file):
     combine_data.save_render_profile("Studio", {"color": "#111111"})
     assert combine_data.set_active_render_profile("Studio") == "Studio"
     assert combine_data.get_active_render_profile() == "Studio"
-    on_disk = json.loads(config_file.read_text(encoding="utf-8"))
-    assert on_disk["active_render_profile"] == "Studio"
+    assert db.get_preference("active_render_profile") == "Studio"
 
 
 def test_set_active_render_profile_rejects_unknown(config_file):
@@ -176,8 +159,7 @@ def test_deleting_active_profile_resets_to_current_settings(config_file):
     combine_data.set_active_render_profile("Studio")
     combine_data.delete_render_profile("Studio")
     assert combine_data.get_active_render_profile() is None
-    on_disk = json.loads(config_file.read_text(encoding="utf-8"))
-    assert on_disk["active_render_profile"] is None
+    assert db.get_preference("active_render_profile") is None
 
 
 # --- HTTP seam: /api/render-profiles ---

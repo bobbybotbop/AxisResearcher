@@ -55,11 +55,10 @@ from backend.copyScripts.create_image import (
     _openrouter_response_dict_to_image_bytes_and_mime,
     upload_image_bytes_to_ebay,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, migrate_hide_not_found_listings, get_render_settings, save_render_settings, get_render_profiles, save_render_profile, delete_render_profile, get_active_render_profile, set_active_render_profile, validate_rig
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, migrate_hide_not_found_listings, get_render_settings, save_render_settings, get_render_profiles, save_render_profile, delete_render_profile, get_active_render_profile, set_active_render_profile, validate_rig
 from backend.helper_functions import remove_html_tags
 import os
 import json
-import glob
 import time
 from datetime import datetime, timezone
 import uuid
@@ -71,6 +70,7 @@ from backend.copyScripts.imageEditing import remove_background, compile_images, 
 from backend.copyScripts.upload_to_ebay import upload_complete_listing
 from backend.promoted_listings import promote_listing, PromotionError
 from backend.logger import log_event
+from backend import db as _db
 from backend.constants.models import DEFAULT_TEXT_MODEL, DEFAULT_IMAGE_MODEL, DEFAULT_CLASSIFIER_MODEL
 from backend.constants.listing import (
     ANGLE_VARIANTS, PROMPT_TYPES, TITLE_MIN_LEN, TITLE_MAX_LEN,
@@ -78,7 +78,7 @@ from backend.constants.listing import (
     CATEGORY_TO_IMAGE_TYPE, EBAY_STATUS_NOT_FOUND,
 )
 from backend.constants.ebay import EBAY_MARKETPLACE_ID, EBAY_BROWSE_API_BASE, EBAY_INVENTORY_API_BASE
-from backend.constants.paths import GENERATED_LISTINGS_DIR, GENERATED_IMAGES_DIR
+from backend.constants.paths import GENERATED_IMAGES_DIR
 from backend.constants.render import (
     DEFAULT_RENDER_AMBIENT, DEFAULT_RENDER_AZIMUTH, DEFAULT_RENDER_COLOR,
     DEFAULT_RENDER_ELEVATION, DEFAULT_RENDER_EXPOSURE, DEFAULT_RENDER_FILL_ENERGY,
@@ -115,11 +115,10 @@ image_generation_lock = threading.Lock()
 
 
 def _load_listing_file(sku):
-    """Read a Generated_Listings/<sku>.json file; None if missing/unreadable."""
-    fpath = resolve_listing_json_path(sku=sku)
+    """Read a listing row from axis.db; None if missing/unreadable."""
+    _db.ensure_db()
     try:
-        with open(fpath, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        return _db.load_listing(sku)
     except Exception:
         return None
 
@@ -193,15 +192,8 @@ def _verify_failed_skus(
 def list_prompts(prompt_type):
     if prompt_type not in PROMPT_TYPES:
         return jsonify({"error": f"Invalid prompt type: {prompt_type}"}), 400
-    folder = os.path.join("prompts", prompt_type)
-    try:
-        files = sorted(
-            f for f in os.listdir(folder)
-            if os.path.isfile(os.path.join(folder, f)) and f.endswith(".txt")
-        )
-        return jsonify({"prompts": files}), 200
-    except FileNotFoundError:
-        return jsonify({"prompts": []}), 200
+    _db.ensure_db()
+    return jsonify({"prompts": _db.list_prompts(prompt_type)}), 200
 
 
 @app.route('/api/prompts/<prompt_type>', methods=['POST'])
@@ -221,13 +213,11 @@ def create_prompt(prompt_type):
         name = name + ".txt"
     if any(c in name for c in ("/", "\\", "..")):
         return jsonify({"error": "Invalid filename"}), 400
-    folder = os.path.join("prompts", prompt_type)
-    os.makedirs(folder, exist_ok=True)
-    file_path = os.path.join(folder, name)
-    if os.path.exists(file_path):
+    _db.ensure_db()
+    prompt_name = f"{prompt_type}/{name}"
+    if _db.prompt_exists(prompt_name):
         return jsonify({"error": f"Prompt '{name}' already exists"}), 400
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(content)
+    _db.save_prompt(prompt_name, content)
     return jsonify({"name": name}), 201
 
 
@@ -1091,8 +1081,11 @@ def _sanitize_title(text):
 
 
 def _load_prompt(filename):
-    with open(f"prompts/{filename}", "r", encoding="utf-8") as f:
-        return f.read()
+    _db.ensure_db()
+    content = _db.get_prompt(filename)
+    if content is None:
+        raise FileNotFoundError(f"prompt not found: {filename}")
+    return content
 
 
 def _nudge_title_length(current_title, text_model):
@@ -1598,9 +1591,8 @@ def regenerate_metadata():
         listing_data["inventoryItem"] = inventory
         listing_data["offer"] = offer
 
-        filepath = resolve_listing_json_path(sku=sku)
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(listing_data, f, indent=2, ensure_ascii=False)
+        _db.ensure_db()
+        _db.save_listing(listing_data)
 
         print(f"[API] Regenerated metadata for {sku}")
         return jsonify({"metadata": updated_metadata, "listing_data": listing_data}), 200
@@ -1673,80 +1665,65 @@ def update_description():
 @app.route('/api/listings', methods=['GET'])
 def list_all_listings():
     """
-    Get all generated listings from the Generated_Listings folder.
+    Get all generated listings from the listings table in axis.db.
     
     Returns:
         JSON response with list of all listings (summary data), or error message
     """
     try:
         print("[API] /api/listings endpoint called")
-        # Use absolute path to ensure we're looking in the right directory
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
-        
-        if not os.path.exists(output_dir):
-            print(f"[API] Generated_Listings directory does not exist at: {output_dir}")
-            return jsonify({
-                "listings": [],
-                "error": None
-            }), 200
-        
+        _db.ensure_db()
+
         listings = []
-        
-        # Get all JSON files in the directory
-        for filename in os.listdir(output_dir):
-            if filename.endswith('.json'):
-                filepath = os.path.join(output_dir, filename)
-                try:
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        listing_data = json.load(f)
 
-                    # Soft-deleted listings never appear in the API response
-                    if listing_data.get('hidden'):
-                        continue
-
-                    # Extract summary information
-                    sku = listing_data.get('sku', filename.replace('.json', ''))
-                    title = listing_data.get('inventoryItem', {}).get('product', {}).get('title', 'No title')
-                    description = listing_data.get('inventoryItem', {}).get('product', {}).get('description', '')
-                    price = listing_data.get('offer', {}).get('pricingSummary', {}).get('price', {}).get('value', 'N/A')
-                    currency = listing_data.get('offer', {}).get('pricingSummary', {}).get('price', {}).get('currency', 'USD')
-                    category_id = listing_data.get('offer', {}).get('categoryId', 'N/A')
-                    created_date = listing_data.get('createdDateTime', '')
-                    image_urls = listing_data.get('inventoryItem', {}).get('product', {}).get('imageUrls', [])
-                    image_count = len(image_urls)
-                    quantity = listing_data.get('offer', {}).get('quantity', 0)
-                    
-                    listings.append({
-                        'sku': sku,
-                        'title': title,
-                        'description': description,
-                        'price': price,
-                        'currency': currency,
-                        'categoryId': category_id,
-                        'createdDateTime': created_date,
-                        'imageCount': image_count,
-                        'imageUrls': image_urls,
-                        'quantity': quantity,
-                        'filename': filename,
-                        'fileSku': filename.replace('.json', ''),  # SKU derived from filename
-                        'ebayListingId': str(listing_data.get('ebayListingId') or '').strip(),
-                        'models': listing_data.get('models') or None,
-                        'isManualListing': bool(listing_data.get('isManualListing', False)),
-                        'sellerSku': str(listing_data.get('sellerSku') or '').strip() or None,
-                        'isVariationListing': bool(listing_data.get('isVariationListing', False)),
-                        'ebay_status': listing_data.get('ebay_status', 'active'),
-                    })
-                except Exception as e:
-                    print(f"[API] Error reading {filename}: {e}")
-                    import traceback
-                    traceback.print_exc()
+        for listing_data in _db.list_listings():
+            try:
+                # Soft-deleted listings never appear in the API response
+                if listing_data.get('hidden'):
                     continue
-        
+
+                # Extract summary information
+                sku = listing_data.get('sku', '')
+                title = listing_data.get('inventoryItem', {}).get('product', {}).get('title', 'No title')
+                description = listing_data.get('inventoryItem', {}).get('product', {}).get('description', '')
+                price = listing_data.get('offer', {}).get('pricingSummary', {}).get('price', {}).get('value', 'N/A')
+                currency = listing_data.get('offer', {}).get('pricingSummary', {}).get('price', {}).get('currency', 'USD')
+                category_id = listing_data.get('offer', {}).get('categoryId', 'N/A')
+                created_date = listing_data.get('createdDateTime', '')
+                image_urls = listing_data.get('inventoryItem', {}).get('product', {}).get('imageUrls', [])
+                image_count = len(image_urls)
+                quantity = listing_data.get('offer', {}).get('quantity', 0)
+
+                listings.append({
+                    'sku': sku,
+                    'title': title,
+                    'description': description,
+                    'price': price,
+                    'currency': currency,
+                    'categoryId': category_id,
+                    'createdDateTime': created_date,
+                    'imageCount': image_count,
+                    'imageUrls': image_urls,
+                    'quantity': quantity,
+                    'filename': f"{sku}.json",
+                    'fileSku': sku,
+                    'ebayListingId': str(listing_data.get('ebayListingId') or '').strip(),
+                    'models': listing_data.get('models') or None,
+                    'isManualListing': bool(listing_data.get('isManualListing', False)),
+                    'sellerSku': str(listing_data.get('sellerSku') or '').strip() or None,
+                    'isVariationListing': bool(listing_data.get('isVariationListing', False)),
+                    'ebay_status': listing_data.get('ebay_status', 'active'),
+                })
+            except Exception as e:
+                print(f"[API] Error reading listing {listing_data.get('sku')}: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+
         # Sort by created date (newest first)
         listings.sort(key=lambda x: x.get('createdDateTime', ''), reverse=True)
-        
-        print(f"[API] Found {len(listings)} listing(s) in {output_dir}")
+
+        print(f"[API] Found {len(listings)} listing(s)")
         
         return jsonify({
             "listings": listings,
@@ -1770,25 +1747,22 @@ def list_all_listings():
 @app.route('/api/import-listings', methods=['POST'])
 def api_import_listings():
     """
-    Sync active eBay listings created outside this tool into Generated_Listings/<sellerSku>.json.
-    Uses ModTimeFrom from listingPreferences.json for incremental fetches after the first run.
+    Sync active eBay listings created outside this tool into the listings table of axis.db.
+    Uses ModTimeFrom from the preferences table for incremental fetches after the first run.
     """
     last_refreshed = get_manual_import_last_refreshed()
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    generated_listings_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
     try:
         items = get_seller_list(mod_time_from=last_refreshed)
     except Exception as e:
         log_event("import", "error", error=str(e))
         return jsonify({'error': str(e)}), 500
 
-    # Index local files by eBay item ID, split by listing kind
+    # Index local listings by eBay item ID, split by listing kind
+    _db.ensure_db()
     axis_item_ids = set()
     manual_item_ids = set()
-    for fpath in glob.glob(os.path.join(generated_listings_dir, '*.json')):
+    for d in _db.list_listings():
         try:
-            with open(fpath, 'r', encoding='utf-8') as f:
-                d = json.load(f)
             eid = str(d.get('ebayListingId') or '').strip()
             if not eid:
                 continue
@@ -2430,7 +2404,7 @@ def api_save_promoted_listing_settings():
 @app.route('/api/listings/bulk-delete', methods=['POST'])
 def api_bulk_delete_listings():
     """
-    Delete one or more local listing JSON files from Generated_Listings/.
+    Delete one or more local listing rows from the listings table in axis.db.
 
     Request body: { "skus": ["axis_84", "axis_85"] }
     Response: { "deleted": [...], "not_found": [...] }
@@ -2440,9 +2414,7 @@ def api_bulk_delete_listings():
     if not isinstance(skus, list):
         return jsonify({'error': 'skus must be a list'}), 400
 
-    # Derive the safe root once via the shared helper so path resolution stays
-    # consistent if the directory ever moves.
-    safe_root = os.path.realpath(os.path.dirname(resolve_listing_json_path(sku='__probe__')))
+    _db.ensure_db()
 
     deleted = []
     not_found = []
@@ -2451,14 +2423,8 @@ def api_bulk_delete_listings():
         if not isinstance(sku, str) or not sku:
             not_found.append(sku)
             continue
-        filepath = resolve_listing_json_path(sku=sku)
-        resolved = os.path.realpath(filepath)
-        if not resolved.startswith(safe_root + os.sep):
-            not_found.append(sku)
-            continue
         try:
-            if os.path.isfile(resolved):
-                os.remove(resolved)
+            if _db.delete_listing(sku):
                 deleted.append(sku)
             else:
                 not_found.append(sku)
@@ -2766,8 +2732,7 @@ def api_sync_active_listings():
 
     Returns { "active": N, "newly_inactive": M, "updated": K, "not_found": [...] }
     """
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
+    _db.ensure_db()
 
     # Step 1: Fetch all active eBay listings via GetSellerList (single call)
     try:
@@ -2783,28 +2748,15 @@ def api_sync_active_listings():
 
     active_by_item_id, active_by_seller_sku = _index_seller_list_items(ebay_items, 'sync-active')
 
-    # Step 2: Scan all local listing JSON files
+    # Step 2: Scan all local listing rows
     active_count = 0
     newly_inactive = 0
     updated_count = 0
     not_found_skus = []
     updated_skus = []
 
-    if not os.path.exists(output_dir):
-        return jsonify({'active': 0, 'newly_inactive': 0, 'updated': 0, 'not_found': []}), 200
-
-    for fname in os.listdir(output_dir):
-        if not fname.endswith('.json'):
-            continue
-        sku = fname[:-5]
-        fpath = os.path.join(output_dir, fname)
-        try:
-            with open(fpath, 'r', encoding='utf-8') as f:
-                local_data = json.load(f)
-        except Exception as e:
-            print(f"[sync-active] Failed to read {fname}: {e}")
-            continue
-
+    for local_data in _db.list_listings():
+        sku = local_data.get('sku', '')
         ebay_listing_id = str(local_data.get('ebayListingId') or '').strip()
         ebay_status = local_data.get('ebay_status', '')
 
@@ -2842,10 +2794,9 @@ def api_sync_active_listings():
 
                 if data_changed:
                     try:
-                        with open(fpath, 'w', encoding='utf-8') as f:
-                            json.dump(local_data, f, indent=2, ensure_ascii=False)
+                        _db.save_listing(local_data)
                     except Exception as e:
-                        print(f"[sync-active] Failed to write {fname}: {e}")
+                        print(f"[sync-active] Failed to write {sku}: {e}")
 
                 active_count += 1
                 if data_changed:
@@ -2857,10 +2808,9 @@ def api_sync_active_listings():
             local_data['ebayListingId'] = ''
             local_data['ebay_status'] = EBAY_STATUS_NOT_FOUND
             try:
-                with open(fpath, 'w', encoding='utf-8') as f:
-                    json.dump(local_data, f, ensure_ascii=False, indent=2)
+                _db.save_listing(local_data)
             except Exception as e:
-                print(f"[sync-active] Failed to write {fname}: {e}")
+                print(f"[sync-active] Failed to write {sku}: {e}")
             not_found_skus.append(sku)
             newly_inactive += 1
             print(f"[sync-active] Marked newly inactive: {sku}")
@@ -2903,8 +2853,7 @@ def api_sync_startup_listings():
     Returns { "removed": N, "healed": M, "aborted": bool, "reason"?: str }.
     Designed to never break app startup: failures return an error payload.
     """
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
+    _db.ensure_db()
 
     try:
         ebay_items = get_seller_list()
@@ -2933,91 +2882,76 @@ def api_sync_startup_listings():
     healed_skus = []
     removed_titles = {}
 
-    if os.path.exists(output_dir):
-        for fname in os.listdir(output_dir):
-            if not fname.endswith('.json'):
-                continue
-            sku = fname[:-5]
-            fpath = os.path.join(output_dir, fname)
-            try:
-                with open(fpath, 'r', encoding='utf-8') as f:
-                    local_data = json.load(f)
-            except Exception as e:
-                print(f"[sync-startup] Failed to read {fname}: {e}")
-                continue
+    for local_data in _db.list_listings():
+        sku = local_data.get('sku', '')
+        ebay_listing_id = str(local_data.get('ebayListingId') or '').strip()
+        was_hidden = bool(local_data.get('hidden'))
+        was_not_found = local_data.get('ebay_status') == EBAY_STATUS_NOT_FOUND
 
-            ebay_listing_id = str(local_data.get('ebayListingId') or '').strip()
-            was_hidden = bool(local_data.get('hidden'))
-            was_not_found = local_data.get('ebay_status') == EBAY_STATUS_NOT_FOUND
+        matched_item = None
+        matched_via = None
+        if ebay_listing_id and ebay_listing_id in active_by_item_id:
+            matched_item = active_by_item_id[ebay_listing_id]
+            matched_via = 'item_id'
+        elif sku in active_by_seller_sku:
+            matched_item = active_by_seller_sku[sku]
+            matched_via = 'seller_sku'
 
-            matched_item = None
-            matched_via = None
-            if ebay_listing_id and ebay_listing_id in active_by_item_id:
-                matched_item = active_by_item_id[ebay_listing_id]
-                matched_via = 'item_id'
-            elif sku in active_by_seller_sku:
-                matched_item = active_by_seller_sku[sku]
-                matched_via = 'seller_sku'
+        # No ebayListingId and no SKU match: draft, skip
+        if not ebay_listing_id and matched_item is None:
+            continue
 
-            # No ebayListingId and no SKU match: draft, skip
-            if not ebay_listing_id and matched_item is None:
-                continue
-
-            if matched_item is not None:
-                if local_data.get('isManualListing'):
-                    write_manual_listing_json(matched_item)
-                    if was_not_found:
-                        set_listing_ebay_status(sku, 'active')
-                    if was_hidden:
-                        # write_manual_listing_json preserves the hidden flag,
-                        # so explicitly clear it.
-                        try:
-                            with open(fpath, 'r', encoding='utf-8') as f:
-                                file_data = json.load(f)
-                            if file_data.pop('hidden', None) is not None:
-                                with open(fpath, 'w', encoding='utf-8') as f:
-                                    json.dump(file_data, f, indent=2, ensure_ascii=False)
-                        except Exception as e:
-                            print(f"[sync-startup] Failed to unhide {fname}: {e}")
-                else:
-                    data_changed = _merge_seller_item_into_axis_listing(
-                        local_data, matched_item, matched_via, ebay_listing_id)
-                    if was_hidden:
-                        local_data.pop('hidden', None)
-                        data_changed = True
-                    if data_changed:
-                        try:
-                            with open(fpath, 'w', encoding='utf-8') as f:
-                                json.dump(local_data, f, indent=2, ensure_ascii=False)
-                        except Exception as e:
-                            print(f"[sync-startup] Failed to write {fname}: {e}")
-                if was_not_found or was_hidden:
-                    healed += 1
-                    healed_skus.append(sku)
-                    print(f"[sync-startup] Healed: {sku}")
-            else:
-                # Has ebayListingId but not found on eBay: ended outside the
-                # app -> soft-delete. Keep ebayListingId so a future relist can
-                # re-match and heal this file.
-                if not was_hidden:
-                    # Snapshot the title before hiding: once soft-deleted the
-                    # listing leaves /api/listings, so lazy title resolution
-                    # would fail for exactly these rows.
-                    title = (local_data.get('inventoryItem', {})
-                             .get('product', {})
-                             .get('title'))
-                    local_data['hidden'] = True
+        if matched_item is not None:
+            if local_data.get('isManualListing'):
+                write_manual_listing_json(matched_item)
+                if was_not_found:
+                    set_listing_ebay_status(sku, 'active')
+                if was_hidden:
+                    # write_manual_listing_json preserves the hidden flag,
+                    # so explicitly clear it.
                     try:
-                        with open(fpath, 'w', encoding='utf-8') as f:
-                            json.dump(local_data, f, ensure_ascii=False, indent=2)
+                        file_data = _db.load_listing(sku)
+                        if file_data and file_data.pop('hidden', None) is not None:
+                            _db.save_listing(file_data)
                     except Exception as e:
-                        print(f"[sync-startup] Failed to write {fname}: {e}")
-                        continue
-                    removed += 1
-                    removed_skus.append(sku)
-                    if title:
-                        removed_titles[sku] = title
-                    print(f"[sync-startup] Soft-deleted externally ended listing: {sku}")
+                        print(f"[sync-startup] Failed to unhide {sku}: {e}")
+            else:
+                data_changed = _merge_seller_item_into_axis_listing(
+                    local_data, matched_item, matched_via, ebay_listing_id)
+                if was_hidden:
+                    local_data.pop('hidden', None)
+                    data_changed = True
+                if data_changed:
+                    try:
+                        _db.save_listing(local_data)
+                    except Exception as e:
+                        print(f"[sync-startup] Failed to write {sku}: {e}")
+            if was_not_found or was_hidden:
+                healed += 1
+                healed_skus.append(sku)
+                print(f"[sync-startup] Healed: {sku}")
+        else:
+            # Has ebayListingId but not found on eBay: ended outside the
+            # app -> soft-delete. Keep ebayListingId so a future relist can
+            # re-match and heal this row.
+            if not was_hidden:
+                # Snapshot the title before hiding: once soft-deleted the
+                # listing leaves /api/listings, so lazy title resolution
+                # would fail for exactly these rows.
+                title = (local_data.get('inventoryItem', {})
+                         .get('product', {})
+                         .get('title'))
+                local_data['hidden'] = True
+                try:
+                    _db.save_listing(local_data)
+                except Exception as e:
+                    print(f"[sync-startup] Failed to write {sku}: {e}")
+                    continue
+                removed += 1
+                removed_skus.append(sku)
+                if title:
+                    removed_titles[sku] = title
+                print(f"[sync-startup] Soft-deleted externally ended listing: {sku}")
 
     log_kwargs = {'removed': removed, 'healed': healed}
     if removed_skus:
@@ -3033,20 +2967,8 @@ def api_sync_startup_listings():
 
 @app.route('/api/logs', methods=['GET'])
 def api_get_logs():
-    log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs.ndjson')
-    if not os.path.exists(log_file):
-        return jsonify({'logs': []})
-    with open(log_file, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-    logs = []
-    for line in reversed(lines):
-        line = line.strip()
-        if line:
-            try:
-                logs.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return jsonify({'logs': logs})
+    _db.ensure_db()
+    return jsonify({'logs': _db.get_logs()})
 
 
 @app.route('/api/testing', methods=['POST'])
@@ -4980,6 +4902,11 @@ def _free_port_from_stale_backend(port: int) -> None:
 
 if __name__ == '__main__':
     _free_port_from_stale_backend(5000)
+    try:
+        # Create axis.db and, on first run, migrate all existing JSON data into it.
+        _db.ensure_db()
+    except Exception as e:
+        print(f"[startup] database initialization failed: {e}")
     try:
         migrate_hide_not_found_listings()
     except Exception as e:

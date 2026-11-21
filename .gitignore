@@ -48,3 +48,8 @@ backend_stdout.txt
 /.scratch/
 .scratch/
 .worktrees/
+
+# SQLite database (runtime artifact; migrated from JSON on first run)
+axis.db
+axis.db-wal
+axis.db-shm

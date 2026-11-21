@@ -16,6 +16,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import backend.db as db
 import app as app_module
 
 
@@ -42,8 +43,9 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(app_module, "log_event", lambda *a, **k: captured.append((a, k)))
     monkeypatch.setattr(app_module, "get_manual_import_last_refreshed", lambda: None)
     monkeypatch.setattr(app_module, "save_manual_import_last_refreshed", lambda ts: None)
-    # Point Generated_Listings at an empty tmp dir so no real files are read.
-    monkeypatch.setattr(app_module, "GENERATED_LISTINGS_DIR", str(tmp_path))
+    # Point the listings store at an empty tmp axis.db so no real rows are read.
+    monkeypatch.setattr(db, "DB_FILE", str(tmp_path / "axis.db"))
+    db.init_db()
 
     app_module.app.config["TESTING"] = True
     with app_module.app.test_client() as c:
@@ -65,14 +67,9 @@ def test_import_log_splits_imported_and_updated(client, monkeypatch):
     # listing -> updated. EBAY_NEW is unknown -> imported.
     monkeypatch.setattr(app_module, "write_manual_listing_json", lambda item: True)
 
-    # Seed the local-file index: one manual file (existing) and one axis file.
-    import json as _json
-
-    gen_dir = app_module.GENERATED_LISTINGS_DIR
-    with open(os.path.join(gen_dir, "SKU_EXISTING.json"), "w", encoding="utf-8") as f:
-        _json.dump({"ebayListingId": "EBAY_EXISTING", "isManualListing": True}, f)
-    with open(os.path.join(gen_dir, "SKU_AXIS.json"), "w", encoding="utf-8") as f:
-        _json.dump({"ebayListingId": "EBAY_AXIS"}, f)
+    # Seed the local-listing index: one manual row (existing) and one axis row.
+    db.save_listing({"sku": "SKU_EXISTING", "ebayListingId": "EBAY_EXISTING", "isManualListing": True})
+    db.save_listing({"sku": "SKU_AXIS", "ebayListingId": "EBAY_AXIS"})
 
     res = client.post("/api/import-listings")
     assert res.status_code == 200

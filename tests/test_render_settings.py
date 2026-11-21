@@ -1,29 +1,14 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import json
-
 import pytest
 
+import backend.db as db
 import backend.copyScripts.combine_data as combine_data
 from app import app
 
-# Minimal config satisfying load_config()'s required keys
-BASE_CONFIG = {
-    "counter": 1,
-    "merchant_location_key": "TestLocation",
-    "default_quantity": 1,
-    "default_dimensions": {"length": "1", "width": "1", "height": "1", "unit": "INCH"},
-    "default_weight": {"value": "1", "unit": "POUND"},
-}
-
-
-@pytest.fixture()
-def config_file(tmp_path, monkeypatch):
-    path = tmp_path / "listingPreferences.json"
-    path.write_text(json.dumps(BASE_CONFIG), encoding="utf-8")
-    monkeypatch.setattr(combine_data, "CONFIG_FILE", str(path))
-    return path
+# The shared `config_file` fixture (tests/conftest.py) seeds a tmp axis.db with
+# the minimal valid config and points the storage layer at it.
 
 
 @pytest.fixture()
@@ -77,11 +62,10 @@ def test_save_render_settings_roundtrip(config_file):
     reread = combine_data.get_render_settings()
     assert reread == saved
 
-    on_disk = json.loads(config_file.read_text(encoding="utf-8"))
-    assert on_disk["render_color"] == "#ff0000"
-    assert on_disk["render_roughness"] == pytest.approx(0.8)
-    assert on_disk["render_resolution"] == 512
-    assert on_disk["render_fov"] == pytest.approx(60)
+    assert db.get_preference("render_color") == "#ff0000"
+    assert db.get_preference("render_roughness") == pytest.approx(0.8)
+    assert db.get_preference("render_resolution") == 512
+    assert db.get_preference("render_fov") == pytest.approx(60)
 
 
 def test_save_render_settings_partial_update(config_file):
@@ -114,11 +98,10 @@ def test_save_render_settings_roundtrips_new_fields(config_file):
     reread = combine_data.get_render_settings()
     assert reread == saved
 
-    on_disk = json.loads(config_file.read_text(encoding="utf-8"))
-    assert on_disk["render_finish"] == "layer-lines"
-    assert on_disk["render_key_energy"] == pytest.approx(300)
-    assert on_disk["render_shadow"] is False
-    assert on_disk["render_exposure"] == pytest.approx(1.5)
+    assert db.get_preference("render_finish") == "layer-lines"
+    assert db.get_preference("render_key_energy") == pytest.approx(300)
+    assert db.get_preference("render_shadow") is False
+    assert db.get_preference("render_exposure") == pytest.approx(1.5)
 
 
 @pytest.mark.parametrize("kwargs", [
