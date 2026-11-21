@@ -49,7 +49,8 @@ DEFAULT_TITLE_STOPWORDS = [
 ]
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_USAGE_FILE = os.path.join(_PROJECT_ROOT, "Collected-Data", "ebay_api_usage.json")
+_COLLECTED_DATA_DIR = os.path.join(_PROJECT_ROOT, "Collected-Data")
+_USAGE_FILE = os.path.join(_COLLECTED_DATA_DIR, "ebay_api_usage.json")
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +222,87 @@ class ApiUsageTracker:
 
 
 # ---------------------------------------------------------------------------
+# Pipeline Run persistence (ticket 06)
+#
+# Each completed run is saved as JSON under Collected-Data/<seller>/runs/
+# <timestamp>.json so past runs can be listed, reloaded, and re-ranked
+# client-side without re-running the pipeline.
+# ---------------------------------------------------------------------------
+
+def _safe_seller_dirname(seller_username):
+    """Filesystem-safe seller folder name (ebay_cli convention)."""
+    return seller_username.replace(" ", "_").replace("/", "_").replace("\\", "_")
+
+
+def save_pipeline_run(run, storage_root=None, now=None):
+    """Persist one Pipeline Run as JSON; returns the saved record.
+
+    `run` carries seller, inputs, weights, and product_candidates; this adds
+    run_id and timestamp. Written to <storage_root>/<seller>/runs/<run_id>.json.
+    """
+    root = storage_root or _COLLECTED_DATA_DIR
+    now = now or datetime.now(timezone.utc)
+    timestamp = now.isoformat()
+    run_id = now.strftime("%Y%m%d_%H%M%S_%f")
+    record = {**run, "run_id": run_id, "timestamp": timestamp}
+
+    runs_dir = os.path.join(root, _safe_seller_dirname(run["seller"]), "runs")
+    os.makedirs(runs_dir, exist_ok=True)
+    path = os.path.join(runs_dir, f"{run_id}.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(record, f, indent=2, ensure_ascii=False)
+    return record
+
+
+def _run_summaries(root):
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for filename in filenames:
+            if not filename.endswith(".json"):
+                continue
+            path = os.path.join(dirpath, filename)
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    run = json.load(f)
+            except (OSError, ValueError):
+                continue
+            yield run
+
+
+def list_pipeline_runs(storage_root=None):
+    """List past Pipeline Runs as summaries (newest first).
+
+    Summary shape: run_id, seller, timestamp, weights, candidate_count.
+    """
+    root = storage_root or _COLLECTED_DATA_DIR
+    if not os.path.isdir(root):
+        return []
+    summaries = [
+        {
+            "run_id": run.get("run_id", ""),
+            "seller": run.get("seller", ""),
+            "timestamp": run.get("timestamp", ""),
+            "weights": run.get("weights"),
+            "candidate_count": len(run.get("product_candidates") or []),
+        }
+        for run in _run_summaries(root)
+        if "product_candidates" in run
+    ]
+    summaries.sort(key=lambda s: s["timestamp"], reverse=True)
+    return summaries
+
+
+def load_pipeline_run(run_id, storage_root=None):
+    """Load one full Pipeline Run (input + weights + candidates) by run_id."""
+    root = storage_root or _COLLECTED_DATA_DIR
+    if not os.path.isdir(root):
+        return None
+    for run in _run_summaries(root):
+        if run.get("run_id") == run_id:
+            return run
+    return None
+
+
+# ---------------------------------------------------------------------------
 # eBay Browse API boundary
 # ---------------------------------------------------------------------------
 
@@ -258,11 +340,13 @@ def single_search_by_query(query, limit=50):
 # Pipeline orchestration
 # ---------------------------------------------------------------------------
 
-def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1):
+def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, weights=None, storage_root=None):
     """Run the Copy Seller pipeline, yielding progress/result/error event dicts.
 
     Emits raw (unranked) Product Candidates; ranking happens client-side from
-    these cached metrics plus the user's current weights.
+    these cached metrics plus the user's current weights. On completion the
+    Pipeline Run (input + weights + candidates) is persisted under
+    Collected-Data/<seller>/runs/ and the milestone is logged.
     """
     tracker = ApiUsageTracker()
     estimated_cost = estimate_api_call_cost(top_n, k)
@@ -367,11 +451,27 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1):
             "copy_seller_run", "completed",
             seller=seller_username, candidates=len(candidates), api_calls=calls_made,
         )
+        saved_run = save_pipeline_run(
+            {
+                "seller": seller_username,
+                "inputs": {"top_n": top_n, "k": k, "min_sold": min_sold},
+                "weights": weights,
+                "product_candidates": candidates,
+            },
+            storage_root=storage_root,
+        )
+        log_event(
+            "copy_seller_run", "saved",
+            seller=seller_username, run_id=saved_run["run_id"], candidates=len(candidates),
+        )
         yield {
             "type": "result",
             "data": {
                 "seller": seller_username,
+                "run_id": saved_run["run_id"],
+                "timestamp": saved_run["timestamp"],
                 "inputs": {"top_n": top_n, "k": k, "min_sold": min_sold},
+                "weights": weights,
                 "api_calls_made": calls_made,
                 "api_calls_used_today": tracker.used_today,
                 "product_candidates": candidates,
