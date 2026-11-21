@@ -16,6 +16,8 @@ interface LogEntry {
   failed_skus?: string[];
   failed_errors?: Record<string, string[]>;
   not_found_skus?: string[];
+  removed_skus?: string[];
+  healed_skus?: string[];
   removed_titles?: Record<string, string>;
   quantity?: number;
   count?: number;
@@ -75,6 +77,8 @@ function getEntryDetail(entry: LogEntry): string {
       }
       return `${entry.count} listing(s) imported`;
     }
+    case "sync_startup":
+      return `${entry.removed ?? 0} removed · ${entry.healed ?? 0} healed`;
     default:
       return entry.error || "";
   }
@@ -243,6 +247,26 @@ function importSections(
   ];
 }
 
+/** Build the expand-panel sections for a sync_startup log entry. */
+function syncStartupSections(
+  entry: LogEntry,
+  titleFor: (sku: string) => string | undefined,
+): SkuSection[] {
+  return [
+    {
+      heading: "Removed (ended on eBay)",
+      skus: entry.removed_skus || [],
+      titleFor,
+    },
+    {
+      heading: "Healed",
+      skus: entry.healed_skus || [],
+      showView: true,
+      titleFor,
+    },
+  ];
+}
+
 export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -293,7 +317,10 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
   }, []);
 
   function titleFor(sku: string, entry: LogEntry): string | undefined {
-    return titlesBySku.get(sku) ?? entry.removed_titles?.[sku];
+    // Removed listings are hidden, so they never appear in the listings map —
+    // the snapshotted title is authoritative for them. Healed (and other)
+    // SKUs resolve lazily from the listings map.
+    return entry.removed_titles?.[sku] ?? titlesBySku.get(sku);
   }
 
   const filtered =
@@ -363,7 +390,8 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
           // count-only entries stay one-liners.
           const isExpandableImport =
             isImport && !!(entry.imported_skus || entry.updated_skus);
-          const isExpandable = isRestock || isExpandableImport;
+          const isSyncStartup = entry.event === "sync_startup";
+          const isExpandable = isRestock || isExpandableImport || isSyncStartup;
           const hasSku = !!entry.sku;
           const isExpanded = expandedRows.has(rowKey);
 
@@ -438,6 +466,13 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
               {isExpandableImport && isExpanded && (
                 <SkuSectionPanel
                   sections={importSections(entry, (sku) => titleFor(sku, entry))}
+                  onOpenListing={onOpenListing}
+                />
+              )}
+
+              {isSyncStartup && isExpanded && (
+                <SkuSectionPanel
+                  sections={syncStartupSections(entry, (sku) => titleFor(sku, entry))}
                   onOpenListing={onOpenListing}
                 />
               )}

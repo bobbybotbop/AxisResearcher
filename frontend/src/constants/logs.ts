@@ -9,6 +9,7 @@ export const LOG_EVENT_LABELS: Record<string, string> = {
   upload: "Upload",
   restock: "Restock",
   import: "Import",
+  sync_startup: "Sync (Startup)",
 };
 
 export const LOG_FILTER_CHIPS: FilterOption[] = [
@@ -18,4 +19,5 @@ export const LOG_FILTER_CHIPS: FilterOption[] = [
   { key: "draft_created", label: "Drafts Created" },
   { key: "draft_completed", label: "Drafts Completed" },
   { key: "import", label: "Imports" },
+  { key: "sync_startup", label: "Syncs (Startup)" },
 ];
