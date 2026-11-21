@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 import requests
 
+from backend.copyScripts.combine_data import load_config, save_config
 from backend.ebay_cli import (
     browse_api_headers,
     getItemIds,
@@ -25,6 +26,27 @@ from backend.logger import log_event
 DAILY_API_BUDGET = 5000
 # Seller setup = one getItemIds page (conservative: sellers can need several).
 SELLER_SETUP_CALLS = 5
+
+# Title-simplification defaults (ticket 07). Editable in the Testing tab via
+# /api/research/title-simplification; persisted in listingPreferences.json.
+DEFAULT_TITLE_MAX_WORDS = 6
+# Common eBay sales filler: quantity/pack terms, colors, condition, and brand
+# filler that make a search phrase too specific to return results.
+DEFAULT_TITLE_STOPWORDS = [
+    # quantity / pack / lot
+    "lot", "pack", "set", "pair", "bundle", "bulk", "wholesale", "case",
+    "qty", "quantity", "pcs", "pc", "piece", "pieces", "count", "ct",
+    # condition
+    "new", "used", "like", "mint", "condition", "brand", "sealed", "open",
+    "box", "oem", "genuine", "original", "authentic", "refurbished", "renewed",
+    # colors
+    "red", "orange", "yellow", "green", "blue", "purple", "pink", "black",
+    "white", "gray", "grey", "brown", "gold", "silver", "beige", "multicolor",
+    # sales filler
+    "free", "shipping", "sale", "hot", "best", "top", "deal", "cheap",
+    "premium", "quality", "gift", "men", "women", "kids", "adult",
+    "for", "with", "and", "the", "of", "a", "an",
+]
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _USAGE_FILE = os.path.join(_PROJECT_ROOT, "Collected-Data", "ebay_api_usage.json")
@@ -69,14 +91,74 @@ def select_top_listings(detailed_items, min_sold, top_n):
     return eligible[:top_n]
 
 
-def simplify_title_to_phrase(title):
-    """Deterministic stub: lowercase, strip punctuation, first 6 words.
+# ---------------------------------------------------------------------------
+# Title simplification (ticket 07) — single swappable seam
+# ---------------------------------------------------------------------------
 
-    Ticket 07 replaces the internals with the real title-simplification
-    prompt; callers must keep going through this single function.
+def get_title_simplification_config():
+    """Read the title-simplification config from listingPreferences.json.
+
+    Returns {"stopwords": [...], "max_words": int} — the editable knobs behind
+    the deterministic trim, surfaced in the Testing tab.
+    """
+    config = load_config()
+    stopwords = config.get("title_simplification_stopwords", DEFAULT_TITLE_STOPWORDS)
+    max_words = config.get("title_simplification_max_words", DEFAULT_TITLE_MAX_WORDS)
+    return {"stopwords": list(stopwords), "max_words": int(max_words)}
+
+
+def save_title_simplification_config(stopwords=None, max_words=None):
+    """Persist title-simplification config to listingPreferences.json.
+
+    Args (all optional; unchanged when None):
+        stopwords (list[str]): sales terms stripped from titles.
+        max_words (int): cap on the simplified phrase length.
+
+    Returns the full config reflecting the saved state.
+
+    Raises ValueError on any invalid provided value.
+    """
+    config = load_config()
+    if stopwords is not None:
+        if not isinstance(stopwords, (list, tuple)) or \
+                not all(isinstance(w, str) for w in stopwords):
+            raise ValueError("stopwords must be a list of strings")
+        config["title_simplification_stopwords"] = [w.strip().lower() for w in stopwords if w.strip()]
+    if max_words is not None:
+        try:
+            max_words = int(max_words)
+        except (TypeError, ValueError):
+            raise ValueError("max_words must be an integer")
+        if max_words < 1:
+            raise ValueError("max_words must be at least 1")
+        config["title_simplification_max_words"] = max_words
+    save_config(config)
+    return get_title_simplification_config()
+
+
+def _deterministic_trim(title, config):
+    """Offline fallback: lowercase, strip punctuation, drop sales terms, cap words.
+
+    Standalone numeric tokens are treated as quantities/sizes and dropped —
+    they make a search phrase too specific without naming the product.
     """
     words = re.sub(r"[^a-z0-9 ]", " ", (title or "").lower()).split()
-    return " ".join(words[:6])
+    stopwords = set(config["stopwords"])
+    kept = [w for w in words if w not in stopwords and not w.isdigit()]
+    return " ".join(kept[:config["max_words"]])
+
+
+def simplify_title_to_phrase(title, config=None):
+    """Reduce a listing title to a short, common search phrase.
+
+    This is the single swappable seam for title simplification. Today it runs
+    the deterministic offline trim; the real prompt (backlog ticket 01) slots
+    in here later without touching the pipeline. Callers must keep going
+    through this function.
+    """
+    if config is None:
+        config = get_title_simplification_config()
+    return _deterministic_trim(title, config)
 
 
 def estimate_api_call_cost(top_n, k):
