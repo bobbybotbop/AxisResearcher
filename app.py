@@ -3135,6 +3135,61 @@ def serp_lens_search():
         return jsonify({"error": f"SerpAPI search failed: {str(e)}"}), 500
 
 
+DEFAULT_TITLE_SEARCH_MODEL = "anthropic/claude-haiku-4.5"
+
+
+@app.route('/api/optimize-title/prompt', methods=['GET'])
+def get_optimize_title_prompt():
+    """Return the default title-optimization prompt template (with {title} placeholder)."""
+    try:
+        return jsonify({"prompt": _load_prompt("title/optimizeTitleForSearch.txt")}), 200
+    except FileNotFoundError:
+        return jsonify({"error": "Default title optimization prompt not found"}), 500
+
+
+@app.route('/api/optimize-title', methods=['POST'])
+def optimize_title():
+    """
+    Optimize an eBay listing title into a search query for 3D file sites
+    (strip sales terms: quantity, color, condition, shipping, marketing filler).
+
+    Expects JSON: {
+        "title": "original eBay listing title",
+        "prompt": "custom prompt template with {title} placeholder" (optional;
+            defaults to prompts/title/optimizeTitleForSearch.txt),
+        "text_model": "model id" (optional; defaults to Claude Haiku)
+    }
+    Returns JSON: {"optimized_title": "..."}
+    """
+    try:
+        data = request.get_json()
+        if not data or not data.get("title", "").strip():
+            return jsonify({"error": "title is required"}), 400
+
+        title = data["title"].strip()
+        template = data.get("prompt")
+        if not template or not template.strip():
+            template = _load_prompt("title/optimizeTitleForSearch.txt")
+        prompt = template.replace("{title}", title)
+
+        text_model = data.get("text_model") or DEFAULT_TITLE_SEARCH_MODEL
+        print(f"[API] /api/optimize-title model={text_model} title='{title}'")
+
+        raw = call_text_llm(prompt, model=text_model)
+        optimized = _sanitize_title(raw)
+        if not optimized:
+            return jsonify({"error": "Failed to get response from AI"}), 502
+
+        print(f"[API] /api/optimize-title result: '{optimized}'")
+        return jsonify({"optimized_title": optimized}), 200
+
+    except FileNotFoundError:
+        return jsonify({"error": "Default title optimization prompt not found"}), 500
+    except Exception as e:
+        print(f"[API] /api/optimize-title error: {e}")
+        return jsonify({"error": f"Title optimization failed: {str(e)}"}), 500
+
+
 @app.route('/api/serp-text-search', methods=['POST'])
 def serp_text_search():
     """
