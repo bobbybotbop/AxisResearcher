@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { RefreshCw, CheckCircle, XCircle, ChevronRight, ChevronDown, ExternalLink } from "lucide-react";
-import { LOG_EVENT_LABELS, LOG_FILTER_CHIPS } from "../constants/logs";
+import { LOG_EVENT_LABELS, LOG_FILTER_CHIPS, LOG_SECTION_LABELS } from "../constants/logs";
 import type { FilterOption } from "../constants/logs";
 
 interface LogEntry {
@@ -121,7 +121,7 @@ function SkuSectionPanel({
   if (visible.length === 0) {
     return (
       <div className="ml-9 mb-1 rounded-md border border-border-default">
-        <p className="px-3 py-2 text-xs text-text-muted">No SKUs</p>
+        <p className="px-3 py-2 text-xs text-text-muted">{LOG_SECTION_LABELS.noSkus}</p>
       </div>
     );
   }
@@ -210,20 +210,20 @@ function restockSections(
   const failed = (entry.failed_skus || []).filter((s) => !notFoundSet.has(s));
   return [
     {
-      heading: "Restocked",
+      heading: LOG_SECTION_LABELS.restocked,
       skus: entry.skus || [],
       ebayIds: entry.ebay_ids || [],
       showView: true,
       titleFor,
     },
     {
-      heading: "Failed",
+      heading: LOG_SECTION_LABELS.failed,
       skus: failed,
       errors: entry.failed_errors || {},
       variant: "danger",
     },
     {
-      heading: "Not found on eBay",
+      heading: LOG_SECTION_LABELS.notFound,
       skus: notFound,
     },
   ];
@@ -236,13 +236,13 @@ function importSections(
 ): SkuSection[] {
   return [
     {
-      heading: "Imported",
+      heading: LOG_SECTION_LABELS.imported,
       skus: entry.imported_skus || [],
       showView: true,
       titleFor,
     },
     {
-      heading: "Updated",
+      heading: LOG_SECTION_LABELS.updated,
       skus: entry.updated_skus || [],
       showView: true,
       titleFor,
@@ -257,12 +257,12 @@ function syncActiveSections(
 ): SkuSection[] {
   return [
     {
-      heading: "Newly inactive",
+      heading: LOG_SECTION_LABELS.newlyInactive,
       skus: entry.newly_inactive_skus || [],
       titleFor,
     },
     {
-      heading: "Updated",
+      heading: LOG_SECTION_LABELS.updated,
       skus: entry.updated_skus || [],
       showView: true,
       titleFor,
@@ -277,12 +277,12 @@ function syncStartupSections(
 ): SkuSection[] {
   return [
     {
-      heading: "Removed (ended on eBay)",
+      heading: LOG_SECTION_LABELS.removedEnded,
       skus: entry.removed_skus || [],
       titleFor,
     },
     {
-      heading: "Healed",
+      heading: LOG_SECTION_LABELS.healed,
       skus: entry.healed_skus || [],
       showView: true,
       titleFor,
@@ -415,15 +415,30 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
             isImport && !!(entry.imported_skus || entry.updated_skus);
           const isSyncStartup = entry.event === "sync_startup";
           const isSyncActive = entry.event === "sync_active";
+          // Old sync_startup entries (counts only, no SKU lists) stay one-liners.
+          const isSyncStartupExpandable =
+            isSyncStartup &&
+            ((entry.removed_skus || []).length > 0 ||
+              (entry.healed_skus || []).length > 0);
           // Old sync_active entries (counts only, no SKU lists) stay one-liners.
           const isSyncActiveExpandable =
             isSyncActive &&
             ((entry.newly_inactive_skus || []).length > 0 ||
               (entry.updated_skus || []).length > 0);
+          // Restock expands only when there is at least one section worth showing.
+          const isRestockExpandable =
+            isRestock &&
+            ((entry.skus || []).length > 0 ||
+              (entry.failed_skus || []).length > 0 ||
+              (entry.not_found_skus || []).length > 0);
           const isExpandable =
-            isRestock || isExpandableImport || isSyncStartup || isSyncActiveExpandable;
+            isRestockExpandable ||
+            isExpandableImport ||
+            isSyncStartupExpandable ||
+            isSyncActiveExpandable;
           const hasSku = !!entry.sku;
           const isExpanded = expandedRows.has(rowKey);
+          const resolveTitle = (sku: string) => titleFor(sku, entry);
 
           const isClickable = isExpandable || (hasSku && !!onNavigateToSku);
 
@@ -486,30 +501,30 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
                 )}
               </div>
 
-              {isRestock && isExpanded && (
+              {isRestockExpandable && isExpanded && (
                 <SkuSectionPanel
-                  sections={restockSections(entry, (sku) => titleFor(sku, entry))}
+                  sections={restockSections(entry, resolveTitle)}
                   onOpenListing={onOpenListing}
                 />
               )}
 
               {isExpandableImport && isExpanded && (
                 <SkuSectionPanel
-                  sections={importSections(entry, (sku) => titleFor(sku, entry))}
+                  sections={importSections(entry, resolveTitle)}
                   onOpenListing={onOpenListing}
                 />
               )}
 
-              {isSyncStartup && isExpanded && (
+              {isSyncStartupExpandable && isExpanded && (
                 <SkuSectionPanel
-                  sections={syncStartupSections(entry, (sku) => titleFor(sku, entry))}
+                  sections={syncStartupSections(entry, resolveTitle)}
                   onOpenListing={onOpenListing}
                 />
               )}
 
               {isSyncActiveExpandable && isExpanded && (
                 <SkuSectionPanel
-                  sections={syncActiveSections(entry, (sku) => titleFor(sku, entry))}
+                  sections={syncActiveSections(entry, resolveTitle)}
                   onOpenListing={onOpenListing}
                 />
               )}

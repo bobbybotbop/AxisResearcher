@@ -13,6 +13,18 @@ export const LOG_EVENT_LABELS: Record<string, string> = {
   sync_active: "Sync (Active)",
 };
 
+export const LOG_SECTION_LABELS = {
+  restocked: "Restocked",
+  failed: "Failed",
+  notFound: "Not found on eBay",
+  imported: "Imported",
+  updated: "Updated",
+  newlyInactive: "Newly inactive",
+  removedEnded: "Removed (ended on eBay)",
+  healed: "Healed",
+  noSkus: "No SKUs",
+} as const;
+
 export const LOG_FILTER_CHIPS: FilterOption[] = [
   { key: "all", label: "All" },
   { key: "upload", label: "Uploads" },
