@@ -58,14 +58,33 @@ def test_demand_coefficient_zero_active_returns_zero():
 
 
 # ---------------------------------------------------------------------------
+# _extract_sold_quantity
+# ---------------------------------------------------------------------------
+
+def test_extract_sold_quantity_reads_estimated_availabilities():
+    item = {"estimatedAvailabilities": [{"estimatedSoldQuantity": 42}]}
+    assert copy_seller._extract_sold_quantity(item) == 42
+
+
+def test_extract_sold_quantity_falls_back_to_top_level():
+    assert copy_seller._extract_sold_quantity({"estimatedSoldQuantity": 7}) == 7
+
+
+def test_extract_sold_quantity_missing_returns_none():
+    assert copy_seller._extract_sold_quantity({}) is None
+    assert copy_seller._extract_sold_quantity({"estimatedAvailabilities": []}) is None
+
+
+# ---------------------------------------------------------------------------
 # select_top_listings
 # ---------------------------------------------------------------------------
 
 def _listing(item_id, sold, title="t", created="2026-01-01T00:00:00.000Z"):
+    # Realistic getItem shape: sold quantity lives under estimatedAvailabilities.
     return {
         "itemId": item_id,
         "title": title,
-        "estimatedSoldQuantity": sold,
+        "estimatedAvailabilities": [{"estimatedSoldQuantity": sold}],
         "itemCreationDate": created,
         "itemWebUrl": f"https://www.ebay.com/itm/{item_id}",
     }
@@ -74,7 +93,7 @@ def _listing(item_id, sold, title="t", created="2026-01-01T00:00:00.000Z"):
 def test_select_top_listings_skips_below_min_sold_and_caps_at_n():
     items = [_listing(str(i), sold) for i, sold in enumerate([0, 1, 5, 3, 100, 2])]
     selected = copy_seller.select_top_listings(items, min_sold=2, top_n=3)
-    assert [l["estimatedSoldQuantity"] for l in selected] == [100, 5, 3]
+    assert [copy_seller._extract_sold_quantity(l) for l in selected] == [100, 5, 3]
 
 
 def test_select_top_listings_sorts_descending_by_sold():
@@ -137,11 +156,12 @@ def test_api_usage_tracker_persists_across_instances(tmp_path):
 # ---------------------------------------------------------------------------
 
 def _details_for(item_id, sold, days_old=10):
+    # Realistic getItem shape: sold quantity lives under estimatedAvailabilities.
     created = (datetime.now(timezone.utc) - timedelta(days=days_old)).isoformat()
     return {
         "itemId": item_id,
         "title": f"Some Product {item_id}",
-        "estimatedSoldQuantity": sold,
+        "estimatedAvailabilities": [{"estimatedSoldQuantity": sold}],
         "itemCreationDate": created,
         "itemWebUrl": f"https://www.ebay.com/itm/{item_id}",
         "price": {"value": "9.99", "currency": "USD"},
@@ -151,19 +171,36 @@ def _details_for(item_id, sold, days_old=10):
 
 def test_run_copy_seller_collects_metrics_and_streams_events(monkeypatch, tmp_path):
     seller_items = [_listing("1", 100), _listing("2", 50), _listing("3", 0)]
+    # Seller's own listing details (fetched one getItem per listing).
     details = {"1": _details_for("1", 100), "2": _details_for("2", 50)}
+    # Competitor detail responses for the top-K demand-coefficient sum. The
+    # search returns item ids only (itemSummaries carry no sold quantity); each
+    # top-K result is then fetched via getItem as "v1|<id>|0".
+    competitor_details = {
+        "v1|c1|0": _details_for("c1", 10),
+        "v1|c2|0": _details_for("c2", 10),
+        "v1|c3|0": _details_for("c3", 10),
+    }
 
     monkeypatch.setattr(copy_seller, "getItemIds", lambda seller: [i["itemId"] for i in seller_items])
-    monkeypatch.setattr(
-        copy_seller, "single_get_detailed_item_data",
-        lambda item_id, verbose=False: details.get(item_id),
-    )
+
+    detail_calls = []
+
+    def fake_detail(item_id, verbose=False):
+        detail_calls.append(item_id)
+        if item_id in details:
+            return details[item_id]
+        return competitor_details.get(item_id)
+
+    monkeypatch.setattr(copy_seller, "single_get_detailed_item_data", fake_detail)
 
     search_calls = []
 
     def fake_search(query, limit=50):
         search_calls.append(query)
-        return {"total_items": 40, "items": [{"estimatedSoldQuantity": 10}] * limit}
+        # Realistic itemSummaries: item ids, no estimatedSoldQuantity.
+        items = [{"itemId": f"c{i}"} for i in range(1, limit + 1)]
+        return {"total_items": 40, "items": items}
 
     monkeypatch.setattr(copy_seller, "single_search_by_query", fake_search)
     real_tracker_cls = copy_seller.ApiUsageTracker
@@ -186,13 +223,16 @@ def test_run_copy_seller_collects_metrics_and_streams_events(monkeypatch, tmp_pa
     # ordered by sold desc: item 1 first
     assert candidates[0]["listing_url"] == "https://www.ebay.com/itm/1"
     assert candidates[0]["competition_count"] == 40
-    # demand coefficient: top-K sold sum (3 results × 10) ÷ active total (40)
+    # demand coefficient: top-K sold sum (3 detail calls × 10) ÷ active total (40)
     assert candidates[0]["demand_coefficient"] == pytest.approx(30 / 40)
     # sold velocity: 100 sold ÷ 10 days
     assert candidates[0]["sold_velocity"] == pytest.approx(10.0)
     assert candidates[0]["search_phrase"]
     # one phrase search per candidate
     assert len(search_calls) == 2
+    # top-K competitor detail calls per candidate (K=3), as v1|<id>|0 getItem ids
+    competitor_calls = [c for c in detail_calls if c.startswith("v1|")]
+    assert competitor_calls == ["v1|c1|0", "v1|c2|0", "v1|c3|0"] * 2
 
 
 def test_run_copy_seller_emits_error_when_budget_exceeded(monkeypatch, tmp_path):
