@@ -134,19 +134,33 @@ const isDownloadSupported = (link: string) =>
   /makerworld\.com\/[^/]+\/models\/\d+/.test(link) ||
   /cults3d\.com\/[^/]+\/3d-model\/[^/]+\/[^/?#]+/.test(link);
 
+// Metadata about the eBay listing + pipeline that produced the current Step 3
+// URL — sent with the download request so the backend auto-saves a Saved 3D
+// File record (ticket 09)
+interface DownloadMeta {
+  ebayUrl: string;
+  ebayTitle: string;
+  pipeline: "image_search" | "title_search";
+  matchLabel: "confirmed_image_match" | "unconfirmed_title_match";
+}
+
 interface SharedDownloadRenderProps {
   addToast?: (type: string, message: string) => void;
   fileDownloadDelay?: number;
   externalUrl?: string;
+  externalMeta?: DownloadMeta | null;
   onExternalUrlConsumed?: () => void;
 }
 
-function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, onExternalUrlConsumed }: SharedDownloadRenderProps) {
+function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, externalMeta, onExternalUrlConsumed }: SharedDownloadRenderProps) {
   // Step 3 — Download 3D File
   const [step3Url, setStep3Url] = useState("");
   const [step3LoadingMode, setStep3LoadingMode] = useState<DownloadMode | null>(null);
   const [step3Result, setStep3Result] = useState<{ filename: string; bytes: number; fileCount?: number } | null>(null);
   const [step3Error, setStep3Error] = useState<string | null>(null);
+  // Listing/pipeline metadata attached to the current Step 3 URL (set when a
+  // pipeline forwards a link; cleared on manual edits) — drives the auto-save
+  const [step3Meta, setStep3Meta] = useState<DownloadMeta | null>(null);
 
   // Step 4 — Studio Render (renderFile = best renderable file from the Step 3 download;
   // previewFile = the Render Mesh the preview shows — the upload itself for native
@@ -192,10 +206,12 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, on
   const [step4View, setStep4View] = useState<"dropdown" | "editor">("dropdown");
   const [editingProfile, setEditingProfile] = useState<string | null | "create">(null);
 
-  // Accept an external URL (from either pipeline) into the Step 3 input
+  // Accept an external URL (from either pipeline) into the Step 3 input,
+  // along with the listing/pipeline metadata for the download auto-save
   useEffect(() => {
     if (externalUrl) {
       setStep3Url(externalUrl);
+      setStep3Meta(externalMeta ?? null);
       setStep3Result(null);
       setStep3Error(null);
       resetStep4();
@@ -376,7 +392,18 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, on
       const res = await fetch("/api/download-3d-file", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ link, file_download_delay: fileDownloadDelay, mode: wireMode }),
+        body: JSON.stringify({
+          link,
+          file_download_delay: fileDownloadDelay,
+          mode: wireMode,
+          // Pipeline metadata → backend auto-saves a Saved 3D File record
+          ...(step3Meta && {
+            ebay_listing_url: step3Meta.ebayUrl,
+            ebay_listing_title: step3Meta.ebayTitle,
+            pipeline: step3Meta.pipeline,
+            match_label: step3Meta.matchLabel,
+          }),
+        }),
       });
       if (!res.ok) {
         let errMsg = `Download failed (${res.status})`;
@@ -413,6 +440,7 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, on
       setDownloadHasAmf(entries.some((e) => modelExtensionOf(e.path[e.path.length - 1]) === ".amf"));
       applyRenderCandidates(pickRenderCandidates(entries));
       setStep3Result({ filename, bytes: blob.size });
+      if (step3Meta) addToast?.("success", "Saved to Saved 3D Files");
     } catch (err) {
       setStep3Error((err as Error).message || "Download failed");
     } finally {
@@ -509,6 +537,7 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, on
               value={step3Url}
               onChange={(val) => {
                 setStep3Url(val);
+                setStep3Meta(null); // manual edit: no pipeline metadata to auto-save
                 setStep3Result(null);
                 setStep3Error(null);
                 resetStep4();

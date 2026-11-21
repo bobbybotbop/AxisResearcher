@@ -65,6 +65,18 @@ CREATE TABLE IF NOT EXISTS prompts (
     content    TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS saved_3d_files (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    ebay_listing_url   TEXT,
+    ebay_listing_title TEXT,
+    source_site        TEXT,
+    source_url         TEXT,
+    match_label        TEXT,
+    pipeline           TEXT,
+    file_path          TEXT,
+    images_dir         TEXT,
+    created_at         TEXT
+);
 """
 
 
@@ -373,6 +385,119 @@ def list_prompts(prompt_type):
         if "/" not in rest and rest.endswith(".txt"):
             files.append(rest)
     return sorted(files)
+
+
+# --- saved_3d_files ---
+
+def save_saved_3d_file(record):
+    """Insert a Saved 3D File record (GLOSSARY: "Saved 3D File") and return its id.
+    created_at is stamped here (UTC ISO) when not supplied."""
+    created_at = record.get("created_at") or datetime.now(timezone.utc).isoformat()
+    with _lock:
+        conn = _connect()
+        try:
+            cur = conn.execute(
+                """
+                INSERT INTO saved_3d_files (
+                    ebay_listing_url, ebay_listing_title, source_site, source_url,
+                    match_label, pipeline, file_path, images_dir, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record.get("ebay_listing_url"),
+                    record.get("ebay_listing_title"),
+                    record.get("source_site"),
+                    record.get("source_url"),
+                    record.get("match_label"),
+                    record.get("pipeline"),
+                    record.get("file_path"),
+                    record.get("images_dir"),
+                    created_at,
+                ),
+            )
+            conn.commit()
+            return cur.lastrowid
+        finally:
+            conn.close()
+
+
+def _saved_3d_file_row(row):
+    return {
+        "id": row["id"],
+        "ebay_listing_url": row["ebay_listing_url"],
+        "ebay_listing_title": row["ebay_listing_title"],
+        "source_site": row["source_site"],
+        "source_url": row["source_url"],
+        "match_label": row["match_label"],
+        "pipeline": row["pipeline"],
+        "file_path": row["file_path"],
+        "images_dir": row["images_dir"],
+        "created_at": row["created_at"],
+    }
+
+
+def get_saved_3d_file(entry_id):
+    with _lock:
+        conn = _connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM saved_3d_files WHERE id = ?", (entry_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+    if row is None:
+        return None
+    return _saved_3d_file_row(row)
+
+
+def list_saved_3d_files(page=1, page_size=25):
+    """Paginated Saved 3D File records, newest first. Returns a dict with
+    items/total/page/page_size."""
+    page = max(1, int(page))
+    page_size = max(1, int(page_size))
+    offset = (page - 1) * page_size
+    with _lock:
+        conn = _connect()
+        try:
+            total = conn.execute("SELECT COUNT(*) AS n FROM saved_3d_files").fetchone()["n"]
+            rows = conn.execute(
+                "SELECT * FROM saved_3d_files ORDER BY id DESC LIMIT ? OFFSET ?",
+                (page_size, offset),
+            ).fetchall()
+        finally:
+            conn.close()
+    return {
+        "items": [_saved_3d_file_row(row) for row in rows],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+def update_saved_3d_file_paths(entry_id, file_path=None, images_dir=None):
+    """Update the on-disk paths of a Saved 3D File after its files are written."""
+    with _lock:
+        conn = _connect()
+        try:
+            conn.execute(
+                "UPDATE saved_3d_files SET file_path = COALESCE(?, file_path), "
+                "images_dir = COALESCE(?, images_dir) WHERE id = ?",
+                (file_path, images_dir, entry_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def delete_saved_3d_file(entry_id):
+    with _lock:
+        conn = _connect()
+        try:
+            cur = conn.execute("DELETE FROM saved_3d_files WHERE id = ?", (entry_id,))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
 
 
 # --- migration ---

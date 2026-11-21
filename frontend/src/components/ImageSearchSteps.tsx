@@ -18,12 +18,21 @@ const canForwardToDownload = (link: string) =>
   /makerworld\.com\/[^/]+\/models\/\d+/.test(link) ||
   /cults3d\.com\/[^/]+\/3d-model\/[^/]+\/[^/?#]+/.test(link);
 
+// Metadata forwarded with a picked link so the shared download step can
+// auto-save a Saved 3D File record (ticket 09)
+interface ForwardedLinkMeta {
+  ebayUrl: string;
+  ebayTitle: string;
+  pipeline: "image_search" | "title_search";
+  matchLabel: "confirmed_image_match" | "unconfirmed_title_match";
+}
+
 interface ImageSearchStepsProps {
   addToast?: (type: string, message: string) => void;
   siteStatus?: ThreeDSiteStatus | null;
   enabledSites?: string[];
   sitePriority?: string[];
-  onUseLink?: (link: string) => void;
+  onUseLink?: (link: string, meta: ForwardedLinkMeta) => void;
 }
 
 function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePriority, onUseLink }: ImageSearchStepsProps) {
@@ -33,6 +42,9 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
   const [step1Title, setStep1Title] = useState("");
   const [step1Loading, setStep1Loading] = useState(false);
   const [step1Selected, setStep1Selected] = useState<string | null>(null);
+  // The eBay listing URL/photo set the current results came from — kept after
+  // the input clears so a forwarded link can be tied back to the listing
+  const [fetchedListingUrl, setFetchedListingUrl] = useState("");
 
   // Step 2 — Reverse Image Search
   const [step2ImageUrl, setStep2ImageUrl] = useState("");
@@ -61,6 +73,7 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
       const photos = data.photos || [];
       setStep1Photos(photos);
       setStep1Title(data.listing?.title || "");
+      setFetchedListingUrl(trimmed);
       if (photos.length > 0) setStep1Selected(photos[0]);
     } catch (err) {
       addToast?.("error", (err as Error).message || "Failed to fetch listing photos");
@@ -242,7 +255,12 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
                         type="button"
                         aria-label={`Use in download step: ${r.title || hostname}`}
                         className={btnPillSm}
-                        onClick={() => onUseLink?.(r.link)}
+                        onClick={() => onUseLink?.(r.link, {
+                          ebayUrl: fetchedListingUrl,
+                          ebayTitle: step1Title,
+                          pipeline: "image_search",
+                          matchLabel: "confirmed_image_match",
+                        })}
                       >
                         Use →
                       </button>

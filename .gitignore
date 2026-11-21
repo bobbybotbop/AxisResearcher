@@ -24,6 +24,8 @@ generated-images/
 # Generated 3D files & downloads
 /downloaded_files/
 downloaded_files/
+/Saved_3D_Files/
+Saved_3D_Files/
 *.3mf
 *.stl
 *.lock
