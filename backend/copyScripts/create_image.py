@@ -515,23 +515,23 @@ def generate_image_from_urls(
         prompt_text = custom_prompt.strip()
         print(f"📝 Using custom prompt (length: {len(prompt_text)} chars)")
     else:
-        # Load the appropriate prompt file based on image_type
-        # Resolve path relative to project root (same directory as this script's parent)
-        script_dir = Path(__file__).parent.parent.parent
+        # Load the appropriate prompt from the prompts table based on image_type
+        from backend import db as _db
 
         filename = prompt_filename or DEFAULT_IMAGE_PROMPTS.get(image_type.value, "generateImageFromWorld.txt")
-        prompt_file_path = script_dir / "prompts" / "image" / filename
-        
+        prompt_name = f"image/{filename}"
+
         try:
-            with open(prompt_file_path, 'r', encoding='utf-8') as f:
-                prompt_text = f.read().strip()
+            _db.ensure_db()
+            prompt_text = _db.get_prompt(prompt_name)
+            if prompt_text is None:
+                raise FileNotFoundError(prompt_name)
+            prompt_text = prompt_text.strip()
         except FileNotFoundError:
-            print(f"❌ Prompt file not found: {prompt_file_path}")
-            print(f"Current working directory: {os.getcwd()}")
-            print(f"Script directory: {script_dir}")
+            print(f"❌ Prompt not found: {prompt_name}")
             return None
         except Exception as e:
-            print(f"❌ Error loading prompt file: {e}")
+            print(f"❌ Error loading prompt: {e}")
             import traceback
             traceback.print_exc()
             return None
@@ -1039,18 +1039,17 @@ def categorize_image(image_url, model="bytedance-seed/seed-1.6-flash"):
         print("ERROR: image_url must be a non-empty string")
         return None
     
-    # Load the prompt file - resolve path relative to project root
-    # Get the directory of this script, go up one level to project root
-    script_dir = Path(__file__).parent.parent.parent
-    prompt_file_path = script_dir / "prompts" / "categorizeImage.txt"
-    
+    # Load the categorize prompt from the prompts table
+    from backend import db as _db
+
     try:
-        with open(prompt_file_path, 'r', encoding='utf-8') as f:
-            prompt_text = f.read().strip()
+        _db.ensure_db()
+        prompt_text = _db.get_prompt("categorizeImage.txt")
+        if prompt_text is None:
+            raise FileNotFoundError("categorizeImage.txt")
+        prompt_text = prompt_text.strip()
     except FileNotFoundError:
-        print(f"ERROR: Prompt file not found: {prompt_file_path}")
-        print(f"Current working directory: {os.getcwd()}")
-        print(f"Script directory: {script_dir}")
+        print("ERROR: Prompt not found: categorizeImage.txt")
         return None
     except Exception as e:
         print(f"ERROR: Error loading prompt file: {e}")
