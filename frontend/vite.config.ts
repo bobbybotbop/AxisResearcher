@@ -7,6 +7,9 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     port: 4000,
+    warmup: {
+      clientFiles: ['./src/App.tsx', './src/components/CreateWorkflow.tsx'],
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:5000',
