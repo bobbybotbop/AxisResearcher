@@ -4,6 +4,7 @@ import ProgressIndicator from "./ProgressIndicator";
 import ProductCandidateRow from "./ProductCandidateRow";
 import NumberInput from "./NumberInput";
 import { btnPill } from "../styles/buttonPill";
+import { rankCandidates } from "../utils/ranking";
 import type { CopySellerResult, ProductCandidate } from "../types/research";
 
 /** Mirrors SELLER_SETUP_CALLS in backend/copy_seller.py. */
@@ -51,6 +52,18 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
   const [runSummary, setRunSummary] = useState<CopySellerResult | null>(null);
 
   const estimatedCost = useMemo(() => estimateApiCallCost(topN, k), [topN, k]);
+
+  // Live re-ranking: recomputed from cached metrics whenever a weight slider
+  // moves — no pipeline re-run.
+  const rankedCandidates = useMemo(
+    () =>
+      rankCandidates(candidates, {
+        demand: weightDemand,
+        competition: weightCompetition,
+        velocity: weightVelocity,
+      }),
+    [candidates, weightDemand, weightCompetition, weightVelocity],
+  );
 
   const handleRun = async (): Promise<void> => {
     const trimmedSeller = seller.trim();
@@ -132,9 +145,8 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
           Research Pipeline — Copy Seller
         </h3>
         <p className="text-sm text-text-muted">
-          Find a seller's best products and score them by demand metrics. Raw
-          metrics are streamed live; weight sliders will re-rank in a later
-          ticket.
+          Find a seller's best products and score them by demand metrics.
+          Weight sliders re-rank instantly from cached metrics — no re-run.
         </p>
       </div>
 
@@ -195,7 +207,7 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
           </label>
         </div>
 
-        {/* Weight sliders (live re-ranking lands in ticket 05) */}
+        {/* Weight sliders — re-rank live from cached metrics */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <label className="flex flex-col gap-1">
             <span className="text-xs text-text-muted">
@@ -292,11 +304,10 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
               ? ` — ${runSummary.api_calls_made} API calls made, ${runSummary.api_calls_used_today} used today`
               : ""}
           </p>
-          {candidates.map((candidate, index) => (
+          {rankedCandidates.map((ranked, index) => (
             <ProductCandidateRow
-              key={`${candidate.listing_url}-${index}`}
-              candidate={candidate}
-              rank={index + 1}
+              key={`${ranked.candidate.listing_url}-${index}`}
+              ranked={ranked}
             />
           ))}
         </div>
