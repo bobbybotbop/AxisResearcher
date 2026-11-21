@@ -19,6 +19,10 @@ interface LogEntry {
   removed_titles?: Record<string, string>;
   quantity?: number;
   count?: number;
+  imported_count?: number;
+  updated_count?: number;
+  imported_skus?: string[];
+  updated_skus?: string[];
   error?: string;
   timestamp: string;
   [key: string]: unknown;
@@ -65,8 +69,12 @@ function getEntryDetail(entry: LogEntry): string {
       const failCount = (entry.failed_skus || []).length;
       return `${src} — ${count} listing(s) → qty ${entry.quantity}${failCount ? `, ${failCount} failed` : ""}`;
     }
-    case "import":
+    case "import": {
+      if (entry.imported_count != null || entry.updated_count != null) {
+        return `${entry.imported_count ?? 0} imported · ${entry.updated_count ?? 0} updated`;
+      }
       return `${entry.count} listing(s) imported`;
+    }
     default:
       return entry.error || "";
   }
@@ -214,6 +222,27 @@ function restockSections(
   ];
 }
 
+/** Build the expand-panel sections for an import log entry. */
+function importSections(
+  entry: LogEntry,
+  titleFor: (sku: string) => string | undefined,
+): SkuSection[] {
+  return [
+    {
+      heading: "Imported",
+      skus: entry.imported_skus || [],
+      showView: true,
+      titleFor,
+    },
+    {
+      heading: "Updated",
+      skus: entry.updated_skus || [],
+      showView: true,
+      titleFor,
+    },
+  ];
+}
+
 export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -329,13 +358,19 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
           const rowKey = `${entry.timestamp}:${entry.event}:${index}`;
           const isError = entry.status === "error";
           const isRestock = entry.event === "restock";
+          const isImport = entry.event === "import";
+          // Only new-style import entries (split SKU lists) expand; old
+          // count-only entries stay one-liners.
+          const isExpandableImport =
+            isImport && !!(entry.imported_skus || entry.updated_skus);
+          const isExpandable = isRestock || isExpandableImport;
           const hasSku = !!entry.sku;
           const isExpanded = expandedRows.has(rowKey);
 
-          const isClickable = isRestock || (hasSku && !!onNavigateToSku);
+          const isClickable = isExpandable || (hasSku && !!onNavigateToSku);
 
           const handleRowClick = () => {
-            if (isRestock) {
+            if (isExpandable) {
               toggleRow(rowKey);
             } else if (hasSku && onNavigateToSku) {
               onNavigateToSku(entry.sku!);
@@ -382,7 +417,7 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
                 <span className="shrink-0 whitespace-nowrap text-xs text-text-muted">
                   {formatTimestamp(entry.timestamp)}
                 </span>
-                {isRestock && (
+                {isExpandable && (
                   <span className="shrink-0 text-text-muted">
                     {isExpanded ? (
                       <ChevronDown size={14} />
@@ -396,6 +431,13 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
               {isRestock && isExpanded && (
                 <SkuSectionPanel
                   sections={restockSections(entry, (sku) => titleFor(sku, entry))}
+                  onOpenListing={onOpenListing}
+                />
+              )}
+
+              {isExpandableImport && isExpanded && (
+                <SkuSectionPanel
+                  sections={importSections(entry, (sku) => titleFor(sku, entry))}
                   onOpenListing={onOpenListing}
                 />
               )}
