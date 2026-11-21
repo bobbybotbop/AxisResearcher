@@ -14,6 +14,7 @@ interface LogEntry {
   skus?: string[];
   ebay_ids?: string[];
   failed_skus?: string[];
+  removed_titles?: Record<string, string>;
   quantity?: number;
   count?: number;
   error?: string;
@@ -75,6 +76,7 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [filter, setFilter] = useState("all");
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [titlesBySku, setTitlesBySku] = useState<Map<string, string>>(new Map());
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -95,16 +97,42 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
     fetchLogs();
   }, [fetchLogs]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/listings");
+        if (!res.ok) return;
+        const data = await res.json() as { listings?: { sku?: string; title?: string }[] };
+        if (cancelled) return;
+        const map = new Map<string, string>();
+        for (const listing of data.listings || []) {
+          if (listing.sku && listing.title) map.set(listing.sku, listing.title);
+        }
+        setTitlesBySku(map);
+      } catch {
+        // Title resolution is best-effort; rows fall back to SKU-only display.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function titleFor(sku: string, entry: LogEntry): string | undefined {
+    return titlesBySku.get(sku) ?? entry.removed_titles?.[sku];
+  }
+
   const filtered =
     filter === "all" ? logs : logs.filter((e) => e.event === filter);
 
-  function toggleRow(timestamp: string) {
+  function toggleRow(rowKey: string) {
     setExpandedRows((prev) => {
       const next = new Set(prev);
-      if (next.has(timestamp)) {
-        next.delete(timestamp);
+      if (next.has(rowKey)) {
+        next.delete(rowKey);
       } else {
-        next.add(timestamp);
+        next.add(rowKey);
       }
       return next;
     });
@@ -153,24 +181,25 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
       )}
 
       <div className="flex flex-col gap-1">
-        {filtered.map((entry) => {
+        {filtered.map((entry, index) => {
+          const rowKey = `${entry.timestamp}:${entry.event}:${index}`;
           const isError = entry.status === "error";
           const isRestock = entry.event === "restock";
           const hasSku = !!entry.sku;
-          const isExpanded = expandedRows.has(entry.timestamp);
+          const isExpanded = expandedRows.has(rowKey);
 
           const isClickable = isRestock || (hasSku && !!onNavigateToSku);
 
           const handleRowClick = () => {
             if (isRestock) {
-              toggleRow(entry.timestamp);
+              toggleRow(rowKey);
             } else if (hasSku && onNavigateToSku) {
               onNavigateToSku(entry.sku!);
             }
           };
 
           return (
-            <div key={entry.timestamp} className="flex flex-col">
+            <div key={rowKey} className="flex flex-col">
               <div
                 className={`flex items-start gap-3 rounded-md px-3 py-2.5 text-sm ${
                   isError ? "bg-danger/5 hover:bg-danger/10" : "hover:bg-surface-hover"
@@ -224,12 +253,16 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
                 <div className="ml-9 mb-1 flex flex-col divide-y divide-border-default rounded-md border border-border-default">
                   {(entry.skus || []).map((sku, j) => {
                     const ebayId = (entry.ebay_ids || [])[j] ?? "";
+                    const title = titleFor(sku, entry);
                     return (
                       <div
                         key={sku}
                         className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-surface-hover"
                       >
                         <span className="font-medium text-text-primary">{sku}</span>
+                        {title && (
+                          <span className="truncate text-text-secondary">{title}</span>
+                        )}
                         {ebayId && (
                           <a
                             href={`https://www.ebay.com/itm/${ebayId}`}
