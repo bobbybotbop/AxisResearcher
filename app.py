@@ -3098,8 +3098,9 @@ def serp_lens_search():
     Reverse-image-search an eBay listing photo via SerpAPI Google reverse image,
     filtered to 3D-print file hosting sites.
 
-    Expects JSON: {"image_url": "https://...", "enabled_sites": ["printables.com", ...] (optional)}
-    Returns JSON: {"results": [{"title", "link", "source", "thumbnail"}, ...]}
+    Expects JSON: {"image_url": "https://...", "enabled_sites": ["printables.com", ...] (optional),
+                   "site_priorities": ["printables.com", ...] (optional; domains in priority order)}
+    Returns JSON: {"results": [{"title", "link", "source", "thumbnail", "priority_rank"}, ...]}
     """
     try:
         data = request.get_json()
@@ -3110,11 +3111,15 @@ def serp_lens_search():
         enabled_sites = data.get("enabled_sites")  # list[str] | None; None means all sites
         if enabled_sites is not None and not isinstance(enabled_sites, list):
             return jsonify({"error": "enabled_sites must be a list of strings"}), 400
+        site_priorities = data.get("site_priorities")  # list[str] | None; domains in priority order
+        if site_priorities is not None and not isinstance(site_priorities, list):
+            return jsonify({"error": "site_priorities must be a list of strings"}), 400
         print(f"[API] SerpAPI reverse image search for: {image_url}")
 
         raw = search_by_image(image_url)
         links = extract_top_links(raw, limit=10)
         links = filter_links_by_enabled_sites(links, enabled_sites)
+        links = order_by_site_priority(links, site_priorities)
 
         print(f"[API] SerpAPI returned {len(links)} results")
         return jsonify({"results": links}), 200
