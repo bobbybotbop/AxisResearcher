@@ -2,6 +2,7 @@
 import {
   FilePlus,
   History,
+  Database,
   Route,
   FlaskConical,
   ScrollText,
@@ -20,6 +21,7 @@ import UploadListingsToolbar from "./components/UploadListingsToolbar";
 import ApiKeyManagementSection from "./components/ApiKeyManagementSection";
 import TestAiModelSection from "./components/TestAiModelSection";
 import LogsTab from "./components/LogsTab";
+import DataBrowser from "./components/DataBrowser";
 import ImageSearchSteps from "./components/ImageSearchSteps";
 import SharedDownloadRender from "./components/SharedDownloadRender";
 import TitleSearchPipeline from "./components/TitleSearchPipeline";
@@ -167,6 +169,7 @@ function App() {
     const p = normalizePathname(location.pathname);
     if (p === "/" || p === TAB_PATHS.create) return "create";
     if (p === TAB_PATHS.upload) return "upload";
+    if (p === TAB_PATHS["data-browser"]) return "data-browser";
     if (p === TAB_PATHS.logs) return "logs";
     if (p === TAB_PATHS["test-workflow"]) return "test-workflow";
     if (p === TAB_PATHS.testing) return "testing";
@@ -3935,6 +3938,15 @@ function App() {
             </button>
             <button
               type="button"
+              className={navItemClass("data-browser", sidebarCollapsed)}
+              onClick={() => handleTabChange("data-browser")}
+              title={sidebarCollapsed ? "Data Browser" : undefined}
+            >
+              <Database size={20} strokeWidth={1.75} className="shrink-0" />
+              {!sidebarCollapsed && <span>Data Browser</span>}
+            </button>
+            <button
+              type="button"
               className={navItemClass("logs", sidebarCollapsed)}
               onClick={() => handleTabChange("logs")}
               title={sidebarCollapsed ? "Logs" : undefined}
@@ -4175,6 +4187,8 @@ function App() {
               onError={(msg) => addToast("error", msg)}
             />
           )}
+          {activeTab === "data-browser" && <DataBrowser />}
+
           {activeTab === "logs" && (
             <LogsTab
               onNavigateToSku={(sku) => {
