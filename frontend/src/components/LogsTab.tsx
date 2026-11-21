@@ -14,6 +14,8 @@ interface LogEntry {
   skus?: string[];
   ebay_ids?: string[];
   failed_skus?: string[];
+  failed_errors?: Record<string, string[]>;
+  not_found_skus?: string[];
   removed_titles?: Record<string, string>;
   quantity?: number;
   count?: number;
@@ -68,6 +70,148 @@ function getEntryDetail(entry: LogEntry): string {
     default:
       return entry.error || "";
   }
+}
+
+/**
+ * One headed group of SKU rows inside an expanded log panel.
+ * Generic so any event type (restock, sync, import) can declare its own sections.
+ */
+interface SkuSection {
+  heading: string;
+  skus: string[];
+  /** Parallel to skus: eBay listing ID to link out to ("" = no link). */
+  ebayIds?: string[];
+  /** Per-SKU exact error strings, rendered under the SKU (danger styling). */
+  errors?: Record<string, string[]>;
+  /** Visual variant: "default" or "danger" (failed rows). */
+  variant?: "default" | "danger";
+  /** Show a View button that opens the listing. */
+  showView?: boolean;
+  /** Resolve a display title for a SKU (rendered next to it when present). */
+  titleFor?: (sku: string) => string | undefined;
+}
+
+/**
+ * Reusable multi-section expand panel: renders a list of headed SKU-row groups.
+ * Sections with zero SKUs are omitted entirely.
+ */
+function SkuSectionPanel({
+  sections,
+  onOpenListing,
+}: {
+  sections: SkuSection[];
+  onOpenListing: (sku: string) => void;
+}) {
+  const visible = sections.filter((s) => s.skus.length > 0);
+  if (visible.length === 0) {
+    return (
+      <div className="ml-9 mb-1 rounded-md border border-border-default">
+        <p className="px-3 py-2 text-xs text-text-muted">No SKUs</p>
+      </div>
+    );
+  }
+  return (
+    <div className="ml-9 mb-1 flex flex-col gap-2">
+      {visible.map((section) => (
+        <div
+          key={section.heading}
+          className="flex flex-col rounded-md border border-border-default"
+        >
+          <p
+            className={`px-3 pt-2 pb-1 text-xs font-semibold uppercase tracking-wide ${
+              section.variant === "danger" ? "text-danger" : "text-text-muted"
+            }`}
+          >
+            {section.heading}
+          </p>
+          <div className="flex flex-col divide-y divide-border-default">
+            {section.skus.map((sku, j) => {
+              const ebayId = section.ebayIds?.[j] ?? "";
+              const skuErrors = section.errors?.[sku] ?? [];
+              const title = section.titleFor?.(sku);
+              return (
+                <div
+                  key={sku}
+                  className="flex flex-col gap-0.5 px-3 py-2 text-sm hover:bg-surface-hover"
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`font-medium ${
+                        section.variant === "danger" ? "text-danger" : "text-text-primary"
+                      }`}
+                    >
+                      {sku}
+                    </span>
+                    {title && (
+                      <span className="truncate text-text-secondary">{title}</span>
+                    )}
+                    {ebayId && (
+                      <a
+                        href={`https://www.ebay.com/itm/${ebayId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex items-center gap-0.5 text-xs text-text-muted hover:text-primary"
+                      >
+                        <ExternalLink size={11} />
+                        {ebayId}
+                      </a>
+                    )}
+                    {section.showView && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenListing(sku);
+                        }}
+                        className="ml-auto text-xs text-text-muted hover:text-primary"
+                      >
+                        View
+                      </button>
+                    )}
+                  </div>
+                  {skuErrors.map((msg, k) => (
+                    <p key={k} className="text-xs text-danger/80">
+                      {msg}
+                    </p>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Build the expand-panel sections for a restock log entry. */
+function restockSections(
+  entry: LogEntry,
+  titleFor: (sku: string) => string | undefined,
+): SkuSection[] {
+  const notFound = entry.not_found_skus || [];
+  const notFoundSet = new Set(notFound);
+  // Failed = failed_skus minus not-found (not-found SKUs get their own section).
+  const failed = (entry.failed_skus || []).filter((s) => !notFoundSet.has(s));
+  return [
+    {
+      heading: "Restocked",
+      skus: entry.skus || [],
+      ebayIds: entry.ebay_ids || [],
+      showView: true,
+      titleFor,
+    },
+    {
+      heading: "Failed",
+      skus: failed,
+      errors: entry.failed_errors || {},
+      variant: "danger",
+    },
+    {
+      heading: "Not found on eBay",
+      skus: notFound,
+    },
+  ];
 }
 
 export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps) {
@@ -250,47 +394,10 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
               </div>
 
               {isRestock && isExpanded && (
-                <div className="ml-9 mb-1 flex flex-col divide-y divide-border-default rounded-md border border-border-default">
-                  {(entry.skus || []).map((sku, j) => {
-                    const ebayId = (entry.ebay_ids || [])[j] ?? "";
-                    const title = titleFor(sku, entry);
-                    return (
-                      <div
-                        key={sku}
-                        className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-surface-hover"
-                      >
-                        <span className="font-medium text-text-primary">{sku}</span>
-                        {title && (
-                          <span className="truncate text-text-secondary">{title}</span>
-                        )}
-                        {ebayId && (
-                          <a
-                            href={`https://www.ebay.com/itm/${ebayId}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="flex items-center gap-0.5 text-xs text-text-muted hover:text-primary"
-                          >
-                            <ExternalLink size={11} />
-                            {ebayId}
-                          </a>
-                        )}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onOpenListing(sku);
-                          }}
-                          className="ml-auto text-xs text-text-muted hover:text-primary"
-                        >
-                          View
-                        </button>
-                      </div>
-                    );
-                  })}
-                  {(entry.skus || []).length === 0 && (
-                    <p className="px-3 py-2 text-xs text-text-muted">No SKUs</p>
-                  )}
-                </div>
+                <SkuSectionPanel
+                  sections={restockSections(entry, (sku) => titleFor(sku, entry))}
+                  onOpenListing={onOpenListing}
+                />
               )}
             </div>
           );
