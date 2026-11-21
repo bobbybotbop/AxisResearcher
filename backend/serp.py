@@ -62,6 +62,31 @@ def extract_top_links(serpapi_response: dict, limit: int = 10) -> list[dict]:
     return unique[:limit]
 
 
+def sort_links_by_priority(links: list[dict], site_priority: list[str] | None) -> list[dict]:
+    """Order whitelisted results by the user's site priority (most-preferred first).
+
+    Whitelisted results whose site appears in site_priority are ranked by that
+    order; whitelisted results absent from the list and all non-whitelisted
+    results keep their original relative order and follow after. None or an
+    empty list means no preference — the original order is returned unchanged.
+    """
+    if not site_priority:
+        return links
+
+    def rank(link: dict) -> int:
+        host = _extract_host(link["link"])
+        for i, s in enumerate(site_priority):
+            if host == s or host.endswith("." + s):
+                return i
+        return len(site_priority)
+
+    whitelisted = [r for r in links if r.get("site_type") == SITE_TYPE_WHITELISTED]
+    rest = [r for r in links if r.get("site_type") != SITE_TYPE_WHITELISTED]
+    # Python's sort is stable, so unlisted whitelisted sites keep Google rank.
+    whitelisted.sort(key=rank)
+    return whitelisted + rest
+
+
 def filter_links_by_enabled_sites(links: list[dict], enabled_sites: list[str] | None) -> list[dict]:
     """Drop whitelisted results whose host is not in enabled_sites.
     None means all sites are enabled (backward-compatible default)."""

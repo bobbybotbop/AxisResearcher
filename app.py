@@ -39,7 +39,7 @@ from flask import Flask, jsonify, request, Response, stream_with_context
 from flask_cors import CORS
 from werkzeug.serving import WSGIRequestHandler
 from backend.copyScripts.CopyListingMain import copy_listing_main, testing_function
-from backend.serp import search_by_image, extract_top_links, filter_links_by_enabled_sites
+from backend.serp import search_by_image, extract_top_links, filter_links_by_enabled_sites, sort_links_by_priority
 from backend.downloaders.thingiverse import extract_thing_id, stream_zip as tv_stream_zip, probe as probe_thingiverse
 from backend.downloaders.printables import extract_model_id as printables_model_id, build_zip as printables_build_zip, probe as probe_printables
 from backend.downloaders.makerworld import extract_model_info as mw_extract_model_info, download_3mf as mw_download_3mf, probe as probe_makerworld, open_session as mw_open_session, session_status as mw_session_status, close_session as mw_close_session
@@ -3098,7 +3098,8 @@ def serp_lens_search():
     Reverse-image-search an eBay listing photo via SerpAPI Google reverse image,
     filtered to 3D-print file hosting sites.
 
-    Expects JSON: {"image_url": "https://...", "enabled_sites": ["printables.com", ...] (optional)}
+    Expects JSON: {"image_url": "https://...", "enabled_sites": ["printables.com", ...] (optional),
+                   "site_priority": ["printables.com", ...] (optional)}
     Returns JSON: {"results": [{"title", "link", "source", "thumbnail"}, ...]}
     """
     try:
@@ -3110,11 +3111,15 @@ def serp_lens_search():
         enabled_sites = data.get("enabled_sites")  # list[str] | None; None means all sites
         if enabled_sites is not None and not isinstance(enabled_sites, list):
             return jsonify({"error": "enabled_sites must be a list of strings"}), 400
+        site_priority = data.get("site_priority")  # list[str] | None; None means keep Google rank
+        if site_priority is not None and not isinstance(site_priority, list):
+            return jsonify({"error": "site_priority must be a list of strings"}), 400
         print(f"[API] SerpAPI reverse image search for: {image_url}")
 
         raw = search_by_image(image_url)
         links = extract_top_links(raw, limit=10)
         links = filter_links_by_enabled_sites(links, enabled_sites)
+        links = sort_links_by_priority(links, site_priority)
 
         print(f"[API] SerpAPI returned {len(links)} results")
         return jsonify({"results": links}), 200

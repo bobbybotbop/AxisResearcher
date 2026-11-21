@@ -27,6 +27,18 @@ export type ThreeDSiteStatus = Record<string, { ok: boolean; message: string }>;
 export const THREE_D_SITE_STATUS_STORAGE_KEY = "axis3dSiteStatus";
 export const THREE_D_SITE_TESTED_AT_STORAGE_KEY = "axis3dSiteTestedAt";
 export const THREE_D_SITES_ENABLED_STORAGE_KEY = "axis3dSitesEnabled";
+export const THREE_D_SITE_PRIORITY_STORAGE_KEY = "axis3dSitePriority";
+
+// The user's site-priority order, most-preferred first. Stored order may be
+// stale (sites added/removed), so reconcile against the canonical list:
+// keep stored sites that still exist, then append any new sites in default order.
+export function normalizeThreeDSitePriority(stored: unknown): string[] {
+  const all = THREE_D_SITES.map(({ site }) => site);
+  const storedList = Array.isArray(stored) ? stored.filter((s): s is string => typeof s === "string") : [];
+  const kept = storedList.filter((s) => all.includes(s));
+  const missing = all.filter((s) => !kept.includes(s));
+  return [...kept, ...missing];
+}
 
 // Map a result link to its 3D site key (e.g. "printables.com"), or null if not a known site
 export function threeDSiteKeyFromLink(link: string): string | null {
