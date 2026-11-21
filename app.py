@@ -39,7 +39,7 @@ from flask import Flask, jsonify, request, Response, stream_with_context
 from flask_cors import CORS
 from werkzeug.serving import WSGIRequestHandler
 from backend.copyScripts.CopyListingMain import copy_listing_main, testing_function
-from backend.serp import search_by_image, extract_top_links, filter_links_by_enabled_sites
+from backend.serp import search_by_image, extract_top_links, filter_links_by_enabled_sites, search_by_text, order_by_site_priority
 from backend.downloaders.thingiverse import extract_thing_id, stream_zip as tv_stream_zip, probe as probe_thingiverse
 from backend.downloaders.printables import extract_model_id as printables_model_id, build_zip as printables_build_zip, probe as probe_printables
 from backend.downloaders.makerworld import extract_model_info as mw_extract_model_info, download_3mf as mw_download_3mf, probe as probe_makerworld, open_session as mw_open_session, session_status as mw_session_status, close_session as mw_close_session
@@ -3126,6 +3126,54 @@ def serp_lens_search():
         return jsonify({"error": "SerpAPI request failed"}), 502
     except Exception as e:
         print(f"[API] SerpAPI lens error: {e}")
+        return jsonify({"error": f"SerpAPI search failed: {str(e)}"}), 500
+
+
+@app.route('/api/serp-text-search', methods=['POST'])
+def serp_text_search():
+    """
+    Google text search via SerpAPI, classified against whitelisted/blacklisted
+    3D-print file hosting sites, filtered by enabled sites, ordered by site priority.
+
+    Expects JSON: {
+        "query": "benchy 3d file",
+        "enabled_sites": ["printables.com", ...] (optional; omitted means all sites),
+        "max_results": 35 (optional),
+        "site_priorities": ["thingiverse.com", ...] (optional; domains in priority order)
+    }
+    Returns JSON: {"results": [{"title", "link", "snippet", "site_type", "priority_rank"}, ...]}
+    """
+    try:
+        data = request.get_json()
+        if not data or not data.get("query"):
+            return jsonify({"error": "query is required"}), 400
+
+        query = data["query"]
+        enabled_sites = data.get("enabled_sites")  # list[str] | None; None means all sites
+        if enabled_sites is not None and not isinstance(enabled_sites, list):
+            return jsonify({"error": "enabled_sites must be a list of strings"}), 400
+        site_priorities = data.get("site_priorities")  # list[str] | None; domains in priority order
+        if site_priorities is not None and not isinstance(site_priorities, list):
+            return jsonify({"error": "site_priorities must be a list of strings"}), 400
+        max_results = data.get("max_results", 35)
+        if not isinstance(max_results, int) or max_results < 1:
+            return jsonify({"error": "max_results must be a positive integer"}), 400
+        print(f"[API] SerpAPI text search for: {query}")
+
+        results = search_by_text(query, max_results=max_results)
+        results = filter_links_by_enabled_sites(results, enabled_sites)
+        results = order_by_site_priority(results, site_priorities)
+
+        print(f"[API] SerpAPI text search returned {len(results)} results")
+        return jsonify({"results": results}), 200
+
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 400
+    except requests.exceptions.RequestException as e:
+        print(f"[API] SerpAPI HTTP error: {e}")
+        return jsonify({"error": "SerpAPI request failed"}), 502
+    except Exception as e:
+        print(f"[API] SerpAPI text search error: {e}")
         return jsonify({"error": f"SerpAPI search failed: {str(e)}"}), 500
 
 

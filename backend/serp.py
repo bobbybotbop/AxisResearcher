@@ -23,6 +23,37 @@ def _classify_site(link: str) -> str:
     return "neutral"
 
 
+def search_by_text(query: str, max_results: int = 35) -> list[dict]:
+    api_key = os.getenv("serp_api_token")
+    if not api_key:
+        raise ValueError("serp_api_token is not set in .env")
+
+    search = GoogleSearch({
+        "engine": "google",
+        "q": query,
+        "num": max_results,
+        "api_key": api_key,
+    })
+    raw = search.get_dict()
+
+    results = []
+    seen = set()
+    for item in raw.get("organic_results", []):
+        link = item.get("link")
+        if not link or link in seen:
+            continue
+        seen.add(link)
+        results.append({
+            "title": item.get("title", ""),
+            "link": link,
+            "snippet": item.get("snippet", ""),
+            "site_type": _classify_site(link),
+        })
+        if len(results) >= max_results:
+            break
+    return results
+
+
 def search_by_image(image_url: str) -> dict:
     api_key = os.getenv("serp_api_token")
     if not api_key:
@@ -60,6 +91,28 @@ def extract_top_links(serpapi_response: dict, limit: int = 10) -> list[dict]:
             unique.append(r)
 
     return unique[:limit]
+
+
+def order_by_site_priority(links: list[dict], site_priorities: list[str] | None) -> list[dict]:
+    """Order results so links from higher-priority sites come first.
+
+    site_priorities is a list of domains in priority order (index 0 = highest).
+    Each result gets a priority_rank: the site's index in site_priorities, or
+    None when the site is unlisted. Unlisted sites keep their relative order
+    after all prioritized results. None site_priorities preserves input order."""
+    if site_priorities is None:
+        return [{**r, "priority_rank": None} for r in links]
+
+    def rank_of(link: str) -> int | None:
+        host = _extract_host(link)
+        for i, site in enumerate(site_priorities):
+            if host == site or host.endswith("." + site):
+                return i
+        return None
+
+    ranked = [(rank_of(r["link"]), idx, r) for idx, r in enumerate(links)]
+    ranked.sort(key=lambda t: (t[0] is None, t[0] if t[0] is not None else t[1]))
+    return [{**r, "priority_rank": rank} for rank, _, r in ranked]
 
 
 def filter_links_by_enabled_sites(links: list[dict], enabled_sites: list[str] | None) -> list[dict]:
