@@ -56,7 +56,11 @@ from backend.copyScripts.create_image import (
 )
 from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, migrate_hide_not_found_listings, get_render_settings, save_render_settings, get_render_profiles, save_render_profile, delete_render_profile, get_active_render_profile, set_active_render_profile, validate_rig
 from backend.helper_functions import remove_html_tags
-from backend.copy_seller import run_copy_seller
+from backend.copy_seller import (
+    get_title_simplification_config,
+    run_copy_seller,
+    save_title_simplification_config,
+)
 import os
 import json
 import glob
@@ -285,6 +289,33 @@ def research_copy_seller():
             yield json.dumps(event) + "\n"
 
     return streaming_response(generate())
+
+@app.route('/api/research/title-simplification', methods=['GET', 'POST'])
+def api_title_simplification():
+    """
+    Read or update the Copy Seller title-simplification config (ticket 07).
+
+    GET:        returns {"stopwords": [...], "max_words": int} — the editable
+                knobs behind the deterministic trim.
+    POST:       JSON body with any subset of those keys; persists and returns
+                the saved state.
+    """
+    if request.method == 'GET':
+        try:
+            return jsonify(get_title_simplification_config()), 200
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    body = request.get_json(silent=True) or {}
+    try:
+        config = save_title_simplification_config(
+            stopwords=body.get('stopwords'),
+            max_words=body.get('max_words'),
+        )
+        return jsonify(config), 200
+    except (TypeError, ValueError) as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/generate-text', methods=['POST'])
 def generate_text():
