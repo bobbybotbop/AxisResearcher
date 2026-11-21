@@ -667,9 +667,11 @@ function App() {
     return merged;
   };
 
-  const handleRefreshTokens = async (): Promise<void> => {
-    setIsRefreshing(true);
-    setTokenMessage(null);
+  // Single refresh attempt. Resolves once the backend has answered the
+  // request (even if eBay reported a problem); rejects when the request
+  // itself failed — e.g. the backend isn't listening yet. Quiet on failure:
+  // the caller decides whether to surface the error.
+  const attemptTokenRefresh = async (): Promise<void> => {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 45000);
     try {
@@ -697,6 +699,16 @@ function App() {
       fetchTokenInfo();
     } catch (err) {
       clearTimeout(timer);
+      throw err;
+    }
+  };
+
+  const handleRefreshTokens = async (): Promise<void> => {
+    setIsRefreshing(true);
+    setTokenMessage(null);
+    try {
+      await attemptTokenRefresh();
+    } catch (err) {
       const e = err as Error;
       setTokenMessage({
         type: "error",
@@ -729,16 +741,36 @@ function App() {
   }
 
   // Auto-refresh tokens on every launch so eBay API calls never start with an expired token.
-  // Same function as the manual Refresh button — no separate code path.
+  // Same refresh as the manual Refresh button — no separate code path. The frontend now
+  // starts in parallel with the backend, so the first attempt can land before the backend
+  // is listening: retry with backoff until it answers, and only mark the auto-refresh as
+  // done once an attempt succeeds. Failures stay quiet (no error toast) — the retry loop
+  // is the normal cold-boot path, not an error condition.
   const hasAutoRefreshed = useRef<boolean>(false);
   useEffect(() => {
     let alive = true;
+    // Sleep in short slices so an unmount wakes the retry loop promptly
+    // instead of waiting out a long backoff.
+    const sleep = async (ms: number) => {
+      const slice = 100;
+      for (let elapsed = 0; alive && elapsed < ms; elapsed += slice) {
+        await new Promise<void>((resolve) => setTimeout(resolve, Math.min(slice, ms - elapsed)));
+      }
+    };
     (async () => {
       await fetchTokenInfo(); // sync display state first
-      if (!alive) return;
-      if (hasAutoRefreshed.current) return;
-      hasAutoRefreshed.current = true;
-      await handleRefreshTokens();
+      if (!alive || hasAutoRefreshed.current) return;
+      let attempt = 0;
+      while (alive && !hasAutoRefreshed.current) {
+        try {
+          await attemptTokenRefresh();
+          if (!alive) return;
+          hasAutoRefreshed.current = true;
+        } catch {
+          attempt += 1;
+          await sleep(Math.min(1000 * 2 ** attempt, 10000));
+        }
+      }
       if (!alive) return;
       importListingsFromEbay();
     })();
