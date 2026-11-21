@@ -59,6 +59,7 @@ from backend.copyScripts.combine_data import get_next_sku, create_listing_with_p
 from backend.helper_functions import remove_html_tags
 import os
 import json
+import sqlite3
 import time
 from datetime import datetime, timezone
 import uuid
@@ -2969,6 +2970,47 @@ def api_sync_startup_listings():
 def api_get_logs():
     _db.ensure_db()
     return jsonify({'logs': _db.get_logs()})
+
+
+_DATA_BROWSER_TABLES = {"listings", "preferences", "logs", "prompts"}
+_DATA_BROWSER_MAX_PAGE_SIZE = 200
+
+
+@app.route('/api/data-browser/<table>', methods=['GET'])
+def api_data_browser(table):
+    if table not in _DATA_BROWSER_TABLES:
+        return jsonify({"error": f"Unknown table: {table}"}), 400
+    _db.ensure_db()
+    page = request.args.get("page", 1, type=int)
+    page_size = request.args.get("page_size", 25, type=int)
+    page = max(1, page)
+    page_size = max(1, min(page_size, _DATA_BROWSER_MAX_PAGE_SIZE))
+    offset = (page - 1) * page_size
+
+    conn = sqlite3.connect(_db.DB_FILE, timeout=30)
+    conn.row_factory = sqlite3.Row
+    try:
+        total_rows = conn.execute(f"SELECT COUNT(*) FROM [{table}]").fetchone()[0]
+        columns = [row[1] for row in conn.execute(f"PRAGMA table_info([{table}])").fetchall()]
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                f"SELECT * FROM [{table}] LIMIT ? OFFSET ?", (page_size, offset)
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+
+    total_pages = max(1, -(-total_rows // page_size))  # ceiling division
+    return jsonify({
+        "table": table,
+        "columns": columns,
+        "rows": rows,
+        "page": page,
+        "page_size": page_size,
+        "total_rows": total_rows,
+        "total_pages": total_pages,
+    })
 
 
 @app.route('/api/testing', methods=['POST'])
