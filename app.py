@@ -1794,6 +1794,7 @@ def api_import_listings():
 
     imported = updated = skipped = 0
     imported_skus = []
+    updated_skus = []
     for item in items:
         if item['item_id'] in axis_item_ids:
             skipped += 1
@@ -1801,11 +1802,13 @@ def api_import_listings():
         is_new = item['item_id'] not in manual_item_ids
         written = write_manual_listing_json(item)
         if written:
+            sku = str(item.get('seller_sku') or '').strip() or item['item_id']
             if is_new:
                 imported += 1
-                imported_skus.append(str(item.get('seller_sku') or '').strip() or item['item_id'])
+                imported_skus.append(sku)
             else:
                 updated += 1
+                updated_skus.append(sku)
         else:
             skipped += 1
 
@@ -1813,7 +1816,14 @@ def api_import_listings():
         datetime.now(timezone.utc).isoformat()
     )
     if imported or updated:
-        log_event("import", "success", count=imported + updated, imported_skus=imported_skus)
+        log_event(
+            "import", "success",
+            count=imported + updated,
+            imported_count=imported,
+            updated_count=updated,
+            imported_skus=imported_skus,
+            updated_skus=updated_skus,
+        )
     return jsonify({'imported': imported, 'updated': updated, 'skipped': skipped})
 
 @app.route('/api/listings/<sku>', methods=['GET'])
@@ -2647,6 +2657,8 @@ def api_restock_listings():
         all_failed = failed + not_found_skus
         if all_failed:
             restock_kwargs["failed_skus"] = all_failed
+        if failed_errors:
+            restock_kwargs["failed_errors"] = failed_errors
         if not updated:
             restock_kwargs["error"] = f"{len(all_failed)} SKU(s) failed to restock"
         if not_found_skus:
@@ -2769,6 +2781,7 @@ def api_sync_active_listings():
     newly_inactive = 0
     updated_count = 0
     not_found_skus = []
+    updated_skus = []
 
     if not os.path.exists(output_dir):
         return jsonify({'active': 0, 'newly_inactive': 0, 'updated': 0, 'not_found': []}), 200
@@ -2814,6 +2827,7 @@ def api_sync_active_listings():
                 active_count += 1
                 if file_changed or was_not_found:
                     updated_count += 1
+                    updated_skus.append(sku)
             else:
                 # AXIS_ listing: merge only the fields GetSellerList provides
                 data_changed = _merge_seller_item_into_axis_listing(
@@ -2829,6 +2843,7 @@ def api_sync_active_listings():
                 active_count += 1
                 if data_changed:
                     updated_count += 1
+                    updated_skus.append(sku)
 
         else:
             # Has ebayListingId but not found in active maps: mark as inactive
@@ -2844,10 +2859,16 @@ def api_sync_active_listings():
             print(f"[sync-active] Marked newly inactive: {sku}")
 
     # Step 3: Log the sync event
-    log_event("sync_active", "success",
-              active=active_count,
-              newly_inactive=newly_inactive,
-              updated=updated_count)
+    log_fields = {
+        'active': active_count,
+        'newly_inactive': newly_inactive,
+        'updated': updated_count,
+    }
+    if not_found_skus:
+        log_fields['newly_inactive_skus'] = not_found_skus
+    if updated_skus:
+        log_fields['updated_skus'] = updated_skus
+    log_event("sync_active", "success", **log_fields)
 
     # Step 4: Return response
     return jsonify({
@@ -2901,6 +2922,9 @@ def api_sync_startup_listings():
 
     removed = 0
     healed = 0
+    removed_skus = []
+    healed_skus = []
+    removed_titles = {}
 
     if os.path.exists(output_dir):
         for fname in os.listdir(output_dir):
@@ -2962,12 +2986,19 @@ def api_sync_startup_listings():
                             print(f"[sync-startup] Failed to write {fname}: {e}")
                 if was_not_found or was_hidden:
                     healed += 1
+                    healed_skus.append(sku)
                     print(f"[sync-startup] Healed: {sku}")
             else:
                 # Has ebayListingId but not found on eBay: ended outside the
                 # app -> soft-delete. Keep ebayListingId so a future relist can
                 # re-match and heal this file.
                 if not was_hidden:
+                    # Snapshot the title before hiding: once soft-deleted the
+                    # listing leaves /api/listings, so lazy title resolution
+                    # would fail for exactly these rows.
+                    title = (local_data.get('inventoryItem', {})
+                             .get('product', {})
+                             .get('title'))
                     local_data['hidden'] = True
                     try:
                         with open(fpath, 'w', encoding='utf-8') as f:
@@ -2976,9 +3007,19 @@ def api_sync_startup_listings():
                         print(f"[sync-startup] Failed to write {fname}: {e}")
                         continue
                     removed += 1
+                    removed_skus.append(sku)
+                    if title:
+                        removed_titles[sku] = title
                     print(f"[sync-startup] Soft-deleted externally ended listing: {sku}")
 
-    log_event("sync_startup", "success", removed=removed, healed=healed)
+    log_kwargs = {'removed': removed, 'healed': healed}
+    if removed_skus:
+        log_kwargs['removed_skus'] = removed_skus
+    if healed_skus:
+        log_kwargs['healed_skus'] = healed_skus
+    if removed_titles:
+        log_kwargs['removed_titles'] = removed_titles
+    log_event("sync_startup", "success", **log_kwargs)
 
     return jsonify({'removed': removed, 'healed': healed, 'aborted': False}), 200
 

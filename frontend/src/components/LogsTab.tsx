@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { RefreshCw, CheckCircle, XCircle, ChevronRight, ChevronDown, ExternalLink } from "lucide-react";
-import { LOG_EVENT_LABELS, LOG_FILTER_CHIPS } from "../constants/logs";
+import { LOG_EVENT_LABELS, LOG_FILTER_CHIPS, LOG_SECTION_LABELS } from "../constants/logs";
 import type { FilterOption } from "../constants/logs";
 
 interface LogEntry {
@@ -14,8 +14,18 @@ interface LogEntry {
   skus?: string[];
   ebay_ids?: string[];
   failed_skus?: string[];
+  failed_errors?: Record<string, string[]>;
+  not_found_skus?: string[];
+  removed_skus?: string[];
+  healed_skus?: string[];
+  newly_inactive_skus?: string[];
+  removed_titles?: Record<string, string>;
   quantity?: number;
   count?: number;
+  imported_count?: number;
+  updated_count?: number;
+  imported_skus?: string[];
+  updated_skus?: string[];
   error?: string;
   timestamp: string;
   [key: string]: unknown;
@@ -62,11 +72,222 @@ function getEntryDetail(entry: LogEntry): string {
       const failCount = (entry.failed_skus || []).length;
       return `${src} — ${count} listing(s) → qty ${entry.quantity}${failCount ? `, ${failCount} failed` : ""}`;
     }
-    case "import":
+    case "import": {
+      if (entry.imported_count != null || entry.updated_count != null) {
+        return `${entry.imported_count ?? 0} imported · ${entry.updated_count ?? 0} updated`;
+      }
       return `${entry.count} listing(s) imported`;
+    }
+    case "sync_startup":
+      return `${entry.removed ?? 0} removed · ${entry.healed ?? 0} healed`;
+    case "sync_active":
+      return `${entry.active ?? 0} active · ${entry.newly_inactive ?? 0} newly inactive · ${entry.updated ?? 0} updated`;
     default:
       return entry.error || "";
   }
+}
+
+/**
+ * One headed group of SKU rows inside an expanded log panel.
+ * Generic so any event type (restock, sync, import) can declare its own sections.
+ */
+interface SkuSection {
+  heading: string;
+  skus: string[];
+  /** Parallel to skus: eBay listing ID to link out to ("" = no link). */
+  ebayIds?: string[];
+  /** Per-SKU exact error strings, rendered under the SKU (danger styling). */
+  errors?: Record<string, string[]>;
+  /** Visual variant: "default" or "danger" (failed rows). */
+  variant?: "default" | "danger";
+  /** Show a View button that opens the listing. */
+  showView?: boolean;
+  /** Resolve a display title for a SKU (rendered next to it when present). */
+  titleFor?: (sku: string) => string | undefined;
+}
+
+/**
+ * Reusable multi-section expand panel: renders a list of headed SKU-row groups.
+ * Sections with zero SKUs are omitted entirely.
+ */
+function SkuSectionPanel({
+  sections,
+  onOpenListing,
+}: {
+  sections: SkuSection[];
+  onOpenListing: (sku: string) => void;
+}) {
+  const visible = sections.filter((s) => s.skus.length > 0);
+  if (visible.length === 0) {
+    return (
+      <div className="ml-9 mb-1 rounded-md border border-border-default">
+        <p className="px-3 py-2 text-xs text-text-muted">{LOG_SECTION_LABELS.noSkus}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="ml-9 mb-1 flex flex-col gap-2">
+      {visible.map((section) => (
+        <div
+          key={section.heading}
+          className="flex flex-col rounded-md border border-border-default"
+        >
+          <p
+            className={`px-3 pt-2 pb-1 text-xs font-semibold uppercase tracking-wide ${
+              section.variant === "danger" ? "text-danger" : "text-text-muted"
+            }`}
+          >
+            {section.heading}
+          </p>
+          <div className="flex flex-col divide-y divide-border-default">
+            {section.skus.map((sku, j) => {
+              const ebayId = section.ebayIds?.[j] ?? "";
+              const skuErrors = section.errors?.[sku] ?? [];
+              const title = section.titleFor?.(sku);
+              return (
+                <div
+                  key={sku}
+                  className="flex flex-col gap-0.5 px-3 py-2 text-sm hover:bg-surface-hover"
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`font-medium ${
+                        section.variant === "danger" ? "text-danger" : "text-text-primary"
+                      }`}
+                    >
+                      {sku}
+                    </span>
+                    {title && (
+                      <span className="truncate text-text-secondary">{title}</span>
+                    )}
+                    {ebayId && (
+                      <a
+                        href={`https://www.ebay.com/itm/${ebayId}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="flex items-center gap-0.5 text-xs text-text-muted hover:text-primary"
+                      >
+                        <ExternalLink size={11} />
+                        {ebayId}
+                      </a>
+                    )}
+                    {section.showView && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenListing(sku);
+                        }}
+                        className="ml-auto text-xs text-text-muted hover:text-primary"
+                      >
+                        View
+                      </button>
+                    )}
+                  </div>
+                  {skuErrors.map((msg, k) => (
+                    <p key={k} className="text-xs text-danger/80">
+                      {msg}
+                    </p>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Build the expand-panel sections for a restock log entry. */
+function restockSections(
+  entry: LogEntry,
+  titleFor: (sku: string) => string | undefined,
+): SkuSection[] {
+  const notFound = entry.not_found_skus || [];
+  const notFoundSet = new Set(notFound);
+  // Failed = failed_skus minus not-found (not-found SKUs get their own section).
+  const failed = (entry.failed_skus || []).filter((s) => !notFoundSet.has(s));
+  return [
+    {
+      heading: LOG_SECTION_LABELS.restocked,
+      skus: entry.skus || [],
+      ebayIds: entry.ebay_ids || [],
+      showView: true,
+      titleFor,
+    },
+    {
+      heading: LOG_SECTION_LABELS.failed,
+      skus: failed,
+      errors: entry.failed_errors || {},
+      variant: "danger",
+    },
+    {
+      heading: LOG_SECTION_LABELS.notFound,
+      skus: notFound,
+    },
+  ];
+}
+
+/** Build the expand-panel sections for an import log entry. */
+function importSections(
+  entry: LogEntry,
+  titleFor: (sku: string) => string | undefined,
+): SkuSection[] {
+  return [
+    {
+      heading: LOG_SECTION_LABELS.imported,
+      skus: entry.imported_skus || [],
+      showView: true,
+      titleFor,
+    },
+    {
+      heading: LOG_SECTION_LABELS.updated,
+      skus: entry.updated_skus || [],
+      showView: true,
+      titleFor,
+    },
+  ];
+}
+
+/** Build the expand-panel sections for a sync_active log entry. */
+function syncActiveSections(
+  entry: LogEntry,
+  titleFor: (sku: string) => string | undefined,
+): SkuSection[] {
+  return [
+    {
+      heading: LOG_SECTION_LABELS.newlyInactive,
+      skus: entry.newly_inactive_skus || [],
+      titleFor,
+    },
+    {
+      heading: LOG_SECTION_LABELS.updated,
+      skus: entry.updated_skus || [],
+      showView: true,
+      titleFor,
+    },
+  ];
+}
+
+/** Build the expand-panel sections for a sync_startup log entry. */
+function syncStartupSections(
+  entry: LogEntry,
+  titleFor: (sku: string) => string | undefined,
+): SkuSection[] {
+  return [
+    {
+      heading: LOG_SECTION_LABELS.removedEnded,
+      skus: entry.removed_skus || [],
+      titleFor,
+    },
+    {
+      heading: LOG_SECTION_LABELS.healed,
+      skus: entry.healed_skus || [],
+      showView: true,
+      titleFor,
+    },
+  ];
 }
 
 export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps) {
@@ -75,6 +296,7 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [filter, setFilter] = useState("all");
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [titlesBySku, setTitlesBySku] = useState<Map<string, string>>(new Map());
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -95,16 +317,45 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
     fetchLogs();
   }, [fetchLogs]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/listings");
+        if (!res.ok) return;
+        const data = await res.json() as { listings?: { sku?: string; title?: string }[] };
+        if (cancelled) return;
+        const map = new Map<string, string>();
+        for (const listing of data.listings || []) {
+          if (listing.sku && listing.title) map.set(listing.sku, listing.title);
+        }
+        setTitlesBySku(map);
+      } catch {
+        // Title resolution is best-effort; rows fall back to SKU-only display.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function titleFor(sku: string, entry: LogEntry): string | undefined {
+    // Removed listings are hidden, so they never appear in the listings map —
+    // the snapshotted title is authoritative for them. Healed (and other)
+    // SKUs resolve lazily from the listings map.
+    return entry.removed_titles?.[sku] ?? titlesBySku.get(sku);
+  }
+
   const filtered =
     filter === "all" ? logs : logs.filter((e) => e.event === filter);
 
-  function toggleRow(timestamp: string) {
+  function toggleRow(rowKey: string) {
     setExpandedRows((prev) => {
       const next = new Set(prev);
-      if (next.has(timestamp)) {
-        next.delete(timestamp);
+      if (next.has(rowKey)) {
+        next.delete(rowKey);
       } else {
-        next.add(timestamp);
+        next.add(rowKey);
       }
       return next;
     });
@@ -153,24 +404,54 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
       )}
 
       <div className="flex flex-col gap-1">
-        {filtered.map((entry) => {
+        {filtered.map((entry, index) => {
+          const rowKey = `${entry.timestamp}:${entry.event}:${index}`;
           const isError = entry.status === "error";
           const isRestock = entry.event === "restock";
+          const isImport = entry.event === "import";
+          // Only new-style import entries (split SKU lists) expand; old
+          // count-only entries stay one-liners.
+          const isExpandableImport =
+            isImport && !!(entry.imported_skus || entry.updated_skus);
+          const isSyncStartup = entry.event === "sync_startup";
+          const isSyncActive = entry.event === "sync_active";
+          // Old sync_startup entries (counts only, no SKU lists) stay one-liners.
+          const isSyncStartupExpandable =
+            isSyncStartup &&
+            ((entry.removed_skus || []).length > 0 ||
+              (entry.healed_skus || []).length > 0);
+          // Old sync_active entries (counts only, no SKU lists) stay one-liners.
+          const isSyncActiveExpandable =
+            isSyncActive &&
+            ((entry.newly_inactive_skus || []).length > 0 ||
+              (entry.updated_skus || []).length > 0);
+          // Restock expands only when there is at least one section worth showing.
+          const isRestockExpandable =
+            isRestock &&
+            ((entry.skus || []).length > 0 ||
+              (entry.failed_skus || []).length > 0 ||
+              (entry.not_found_skus || []).length > 0);
+          const isExpandable =
+            isRestockExpandable ||
+            isExpandableImport ||
+            isSyncStartupExpandable ||
+            isSyncActiveExpandable;
           const hasSku = !!entry.sku;
-          const isExpanded = expandedRows.has(entry.timestamp);
+          const isExpanded = expandedRows.has(rowKey);
+          const resolveTitle = (sku: string) => titleFor(sku, entry);
 
-          const isClickable = isRestock || (hasSku && !!onNavigateToSku);
+          const isClickable = isExpandable || (hasSku && !!onNavigateToSku);
 
           const handleRowClick = () => {
-            if (isRestock) {
-              toggleRow(entry.timestamp);
+            if (isExpandable) {
+              toggleRow(rowKey);
             } else if (hasSku && onNavigateToSku) {
               onNavigateToSku(entry.sku!);
             }
           };
 
           return (
-            <div key={entry.timestamp} className="flex flex-col">
+            <div key={rowKey} className="flex flex-col">
               <div
                 className={`flex items-start gap-3 rounded-md px-3 py-2.5 text-sm ${
                   isError ? "bg-danger/5 hover:bg-danger/10" : "hover:bg-surface-hover"
@@ -209,7 +490,7 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
                 <span className="shrink-0 whitespace-nowrap text-xs text-text-muted">
                   {formatTimestamp(entry.timestamp)}
                 </span>
-                {isRestock && (
+                {isExpandable && (
                   <span className="shrink-0 text-text-muted">
                     {isExpanded ? (
                       <ChevronDown size={14} />
@@ -220,44 +501,32 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
                 )}
               </div>
 
-              {isRestock && isExpanded && (
-                <div className="ml-9 mb-1 flex flex-col divide-y divide-border-default rounded-md border border-border-default">
-                  {(entry.skus || []).map((sku, j) => {
-                    const ebayId = (entry.ebay_ids || [])[j] ?? "";
-                    return (
-                      <div
-                        key={sku}
-                        className="flex items-center gap-2 px-3 py-2 text-sm hover:bg-surface-hover"
-                      >
-                        <span className="font-medium text-text-primary">{sku}</span>
-                        {ebayId && (
-                          <a
-                            href={`https://www.ebay.com/itm/${ebayId}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                            className="flex items-center gap-0.5 text-xs text-text-muted hover:text-primary"
-                          >
-                            <ExternalLink size={11} />
-                            {ebayId}
-                          </a>
-                        )}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onOpenListing(sku);
-                          }}
-                          className="ml-auto text-xs text-text-muted hover:text-primary"
-                        >
-                          View
-                        </button>
-                      </div>
-                    );
-                  })}
-                  {(entry.skus || []).length === 0 && (
-                    <p className="px-3 py-2 text-xs text-text-muted">No SKUs</p>
-                  )}
-                </div>
+              {isRestockExpandable && isExpanded && (
+                <SkuSectionPanel
+                  sections={restockSections(entry, resolveTitle)}
+                  onOpenListing={onOpenListing}
+                />
+              )}
+
+              {isExpandableImport && isExpanded && (
+                <SkuSectionPanel
+                  sections={importSections(entry, resolveTitle)}
+                  onOpenListing={onOpenListing}
+                />
+              )}
+
+              {isSyncStartupExpandable && isExpanded && (
+                <SkuSectionPanel
+                  sections={syncStartupSections(entry, resolveTitle)}
+                  onOpenListing={onOpenListing}
+                />
+              )}
+
+              {isSyncActiveExpandable && isExpanded && (
+                <SkuSectionPanel
+                  sections={syncActiveSections(entry, resolveTitle)}
+                  onOpenListing={onOpenListing}
+                />
               )}
             </div>
           );
