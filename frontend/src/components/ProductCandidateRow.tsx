@@ -1,8 +1,7 @@
-import type { ProductCandidate } from "../types/research";
+import type { RankedCandidate } from "../utils/ranking";
 
 interface ProductCandidateRowProps {
-  candidate: ProductCandidate;
-  rank: number;
+  ranked: RankedCandidate;
 }
 
 function LinkIcon() {
@@ -38,9 +37,9 @@ function formatPrice(value: number | null, currency: string | null): string {
 }
 
 export default function ProductCandidateRow({
-  candidate,
-  rank,
+  ranked,
 }: ProductCandidateRowProps) {
+  const { candidate, normalized, score, rank } = ranked;
   const title = candidate.title || "No title";
 
   return (
@@ -86,7 +85,7 @@ export default function ProductCandidateRow({
             <div className="flex items-center gap-2">
               <span
                 className="shrink-0 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary"
-                title="Rank within this run"
+                title="Rank by weighted score within this run"
               >
                 #{rank}
               </span>
@@ -97,23 +96,35 @@ export default function ProductCandidateRow({
             <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0 text-sm text-text-muted">
               <span
                 className="whitespace-nowrap"
-                title="Demand Coefficient: top-K sold sum ÷ active listings (higher is better)"
+                title={`Demand Coefficient: top-K sold sum ÷ active listings (higher is better). Normalized ${formatMetric(normalized.demand)} across this run.`}
               >
                 Demand {formatMetric(candidate.demand_coefficient)}
+                <span className="text-text-muted">
+                  {" "}
+                  ({formatMetric(normalized.demand)})
+                </span>
               </span>
               <span className="text-text-muted">·</span>
               <span
                 className="whitespace-nowrap"
-                title="Competition Count: active listings for the search phrase (fewer is better)"
+                title={`Competition Count: active listings for the search phrase (fewer is better). Normalized ${formatMetric(normalized.competition)} — inverted so higher is better.`}
               >
                 Competition {candidate.competition_count.toLocaleString()}
+                <span className="text-text-muted">
+                  {" "}
+                  ({formatMetric(normalized.competition)})
+                </span>
               </span>
               <span className="text-text-muted">·</span>
               <span
                 className="whitespace-nowrap"
-                title="Sold Velocity: estimated sold ÷ listing age in days (higher is better)"
+                title={`Sold Velocity: estimated sold ÷ listing age in days (higher is better). Normalized ${formatMetric(normalized.velocity)} across this run.`}
               >
                 Velocity {formatMetric(candidate.sold_velocity)}/day
+                <span className="text-text-muted">
+                  {" "}
+                  ({formatMetric(normalized.velocity)})
+                </span>
               </span>
               <span className="text-text-muted">·</span>
               <span
@@ -125,6 +136,12 @@ export default function ProductCandidateRow({
             </p>
           </div>
           <div className="shrink-0 text-right">
+            <div
+              className="text-sm font-semibold text-primary"
+              title="Weighted score: sum of the three normalized metrics × their weights"
+            >
+              Score {formatMetric(score)}
+            </div>
             <div className="text-lg font-bold text-text-primary">
               {formatPrice(candidate.price, candidate.currency)}
             </div>
