@@ -12,13 +12,9 @@
  * all-equal metric gives no product an edge, and 1 keeps the metric's
  * weight meaningful in the weighted sum rather than zeroing it out.
  */
-import type { ProductCandidate } from "../types/research";
+import type { ProductCandidate, RankingWeights } from "../types/research";
 
-export interface RankingWeights {
-  demand: number;
-  competition: number;
-  velocity: number;
-}
+export type { RankingWeights };
 
 export interface NormalizedMetrics {
   demand: number;

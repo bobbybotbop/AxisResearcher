@@ -58,6 +58,8 @@ from backend.copyScripts.combine_data import get_next_sku, create_listing_with_p
 from backend.helper_functions import remove_html_tags
 from backend.copy_seller import (
     get_title_simplification_config,
+    list_pipeline_runs,
+    load_pipeline_run,
     run_copy_seller,
     save_title_simplification_config,
 )
@@ -283,12 +285,44 @@ def research_copy_seller():
         except (TypeError, ValueError):
             yield error_event("top_n, k, and min_sold must be integers")
             return
+        weights = data.get("weights")
+        if weights is not None and not isinstance(weights, dict):
+            yield error_event("weights must be an object")
+            return
 
         print(f"[API] /api/research/copy-seller: seller={seller} top_n={top_n} k={k} min_sold={min_sold}")
-        for event in run_copy_seller(seller, top_n=top_n, k=k, min_sold=min_sold):
+        for event in run_copy_seller(seller, top_n=top_n, k=k, min_sold=min_sold, weights=weights):
             yield json.dumps(event) + "\n"
 
     return streaming_response(generate())
+
+@app.route('/api/research/copy-seller/runs', methods=['GET'])
+def list_copy_seller_runs():
+    """
+    List past Copy Seller Pipeline Runs as summaries (newest first).
+    Follows the /api/listings read-many-JSON pattern.
+    """
+    try:
+        print("[API] /api/research/copy-seller/runs endpoint called")
+        return jsonify({"runs": list_pipeline_runs(), "error": None}), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e), "runs": []}), 500
+
+@app.route('/api/research/copy-seller/runs/<run_id>', methods=['GET'])
+def get_copy_seller_run(run_id):
+    """Fetch one full Pipeline Run (input + weights + candidates) by run_id."""
+    try:
+        print(f"[API] /api/research/copy-seller/runs/{run_id} endpoint called")
+        run = load_pipeline_run(run_id)
+        if run is None:
+            return jsonify({"error": f"Run not found: {run_id}", "run": None}), 404
+        return jsonify({"run": run, "error": None}), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e), "run": None}), 500
 
 @app.route('/api/research/title-simplification', methods=['GET', 'POST'])
 def api_title_simplification():

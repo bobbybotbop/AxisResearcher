@@ -1,11 +1,16 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
 import ProgressIndicator from "./ProgressIndicator";
 import ProductCandidateRow from "./ProductCandidateRow";
 import NumberInput from "./NumberInput";
 import { btnPill } from "../styles/buttonPill";
 import { rankCandidates } from "../utils/ranking";
-import type { CopySellerResult, ProductCandidate } from "../types/research";
+import type {
+  CopySellerResult,
+  PipelineRun,
+  PipelineRunSummary,
+  ProductCandidate,
+} from "../types/research";
 
 /** Mirrors SELLER_SETUP_CALLS in backend/copy_seller.py. */
 const SELLER_SETUP_CALLS = 5;
@@ -51,7 +56,68 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
   const [candidates, setCandidates] = useState<ProductCandidate[]>([]);
   const [runSummary, setRunSummary] = useState<CopySellerResult | null>(null);
 
+  const [pastRuns, setPastRuns] = useState<PipelineRunSummary[]>([]);
+  const [loadedRunId, setLoadedRunId] = useState<string | null>(null);
+  const [isLoadingRun, setIsLoadingRun] = useState(false);
+
   const estimatedCost = useMemo(() => estimateApiCallCost(topN, k), [topN, k]);
+
+  const fetchPastRuns = async (): Promise<void> => {
+    try {
+      const res = await fetch("/api/research/copy-seller/runs");
+      const body = (await res.json()) as {
+        runs?: PipelineRunSummary[];
+        error?: string | null;
+      };
+      if (res.ok && Array.isArray(body.runs)) {
+        setPastRuns(body.runs);
+      }
+    } catch {
+      // Past runs are a convenience; a fetch failure must not break the form.
+    }
+  };
+
+  // Load past runs on mount so a previous Pipeline Run can be reloaded.
+  useEffect(() => {
+    void fetchPastRuns();
+  }, []);
+
+  const handleLoadRun = async (runId: string): Promise<void> => {
+    setIsLoadingRun(true);
+    try {
+      const res = await fetch(`/api/research/copy-seller/runs/${runId}`);
+      const body = (await res.json()) as { run?: PipelineRun; error?: string | null };
+      if (!res.ok || !body.run) {
+        addToast?.("error", body.error || "Failed to load run");
+        return;
+      }
+      const run = body.run;
+      const loadedCandidates = Array.isArray(run.product_candidates)
+        ? run.product_candidates
+        : [];
+      // Feed the loaded run's cached candidates + weights into live re-ranking
+      // (ticket 05) — no pipeline re-run.
+      setCandidates(loadedCandidates);
+      if (run.weights) {
+        setWeightDemand(run.weights.demand);
+        setWeightCompetition(run.weights.competition);
+        setWeightVelocity(run.weights.velocity);
+      }
+      setSeller(run.seller);
+      setRunSummary(null);
+      setLoadedRunId(run.run_id);
+      setCompletedSteps([]);
+      setCurrentStep(null);
+      addToast?.(
+        "success",
+        `Loaded run from ${new Date(run.timestamp).toLocaleString()} — ${loadedCandidates.length} Product Candidates`,
+      );
+    } catch (err) {
+      addToast?.("error", (err as Error).message || "Failed to load run");
+    } finally {
+      setIsLoadingRun(false);
+    }
+  };
 
   // Live re-ranking: recomputed from cached metrics whenever a weight slider
   // moves — no pipeline re-run.
@@ -77,6 +143,7 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
     setMetricsProgress(null);
     setCandidates([]);
     setRunSummary(null);
+    setLoadedRunId(null);
 
     try {
       const data = (await fetchWithProgress(
@@ -89,6 +156,11 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
             top_n: topN,
             k,
             min_sold: minSold,
+            weights: {
+              demand: weightDemand,
+              competition: weightCompetition,
+              velocity: weightVelocity,
+            },
           }),
         },
         (event) => {
@@ -124,12 +196,15 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
       setCandidates(
         Array.isArray(data?.product_candidates) ? data.product_candidates : [],
       );
+      setLoadedRunId(data?.run_id ?? null);
       setCompletedSteps(PIPELINE_STEPS);
       setCurrentStep(null);
       addToast?.(
         "success",
         `Copy Seller run complete: ${data?.product_candidates?.length ?? 0} Product Candidates`,
       );
+      // The run was persisted on the backend; refresh the past-runs list.
+      void fetchPastRuns();
     } catch (err) {
       addToast?.("error", (err as Error).message || "Copy Seller run failed");
     } finally {
@@ -276,6 +351,54 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
           </span>
         </div>
       </div>
+
+      {/* Past runs — reload one to re-rank its cached candidates live */}
+      {pastRuns.length > 0 && (
+        <div className="flex flex-col gap-2 rounded-xl border border-border-default bg-surface-panel p-4">
+          <h4 className="text-sm font-semibold text-text-primary">
+            Past Pipeline Runs
+          </h4>
+          <p className="text-xs text-text-muted">
+            Reload a run to restore its metrics and weights, then compare weight
+            configurations live — no re-run.
+          </p>
+          <ul className="flex flex-col divide-y divide-border-default">
+            {pastRuns.map((run) => (
+              <li key={run.run_id}>
+                <button
+                  type="button"
+                  onClick={() => void handleLoadRun(run.run_id)}
+                  disabled={isRunning || isLoadingRun}
+                  className={`flex w-full flex-wrap items-center gap-x-3 gap-y-1 py-2 text-left text-sm transition-colors hover:text-primary ${
+                    loadedRunId === run.run_id
+                      ? "font-semibold text-primary"
+                      : "text-text-primary"
+                  }`}
+                >
+                  <span className="font-medium">{run.seller}</span>
+                  <span className="text-text-muted">
+                    {new Date(run.timestamp).toLocaleString()}
+                  </span>
+                  <span className="text-text-muted">
+                    {run.candidate_count} candidate
+                    {run.candidate_count !== 1 ? "s" : ""}
+                  </span>
+                  {run.weights && (
+                    <span className="text-xs text-text-muted">
+                      w: {run.weights.demand.toFixed(2)} /{" "}
+                      {run.weights.competition.toFixed(2)} /{" "}
+                      {run.weights.velocity.toFixed(2)}
+                    </span>
+                  )}
+                  {loadedRunId === run.run_id && (
+                    <span className="text-xs text-primary">(loaded)</span>
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Live progress */}
       {(isRunning || completedSteps.length > 0) && (
