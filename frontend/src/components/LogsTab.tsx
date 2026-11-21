@@ -16,6 +16,7 @@ interface LogEntry {
   failed_skus?: string[];
   failed_errors?: Record<string, string[]>;
   not_found_skus?: string[];
+  removed_titles?: Record<string, string>;
   quantity?: number;
   count?: number;
   error?: string;
@@ -86,6 +87,8 @@ interface SkuSection {
   variant?: "default" | "danger";
   /** Show a View button that opens the listing. */
   showView?: boolean;
+  /** Resolve a display title for a SKU (rendered next to it when present). */
+  titleFor?: (sku: string) => string | undefined;
 }
 
 /**
@@ -125,6 +128,7 @@ function SkuSectionPanel({
             {section.skus.map((sku, j) => {
               const ebayId = section.ebayIds?.[j] ?? "";
               const skuErrors = section.errors?.[sku] ?? [];
+              const title = section.titleFor?.(sku);
               return (
                 <div
                   key={sku}
@@ -138,6 +142,9 @@ function SkuSectionPanel({
                     >
                       {sku}
                     </span>
+                    {title && (
+                      <span className="truncate text-text-secondary">{title}</span>
+                    )}
                     {ebayId && (
                       <a
                         href={`https://www.ebay.com/itm/${ebayId}`}
@@ -178,7 +185,10 @@ function SkuSectionPanel({
 }
 
 /** Build the expand-panel sections for a restock log entry. */
-function restockSections(entry: LogEntry): SkuSection[] {
+function restockSections(
+  entry: LogEntry,
+  titleFor: (sku: string) => string | undefined,
+): SkuSection[] {
   const notFound = entry.not_found_skus || [];
   const notFoundSet = new Set(notFound);
   // Failed = failed_skus minus not-found (not-found SKUs get their own section).
@@ -189,6 +199,7 @@ function restockSections(entry: LogEntry): SkuSection[] {
       skus: entry.skus || [],
       ebayIds: entry.ebay_ids || [],
       showView: true,
+      titleFor,
     },
     {
       heading: "Failed",
@@ -209,6 +220,7 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [filter, setFilter] = useState("all");
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [titlesBySku, setTitlesBySku] = useState<Map<string, string>>(new Map());
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
@@ -229,16 +241,42 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
     fetchLogs();
   }, [fetchLogs]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/listings");
+        if (!res.ok) return;
+        const data = await res.json() as { listings?: { sku?: string; title?: string }[] };
+        if (cancelled) return;
+        const map = new Map<string, string>();
+        for (const listing of data.listings || []) {
+          if (listing.sku && listing.title) map.set(listing.sku, listing.title);
+        }
+        setTitlesBySku(map);
+      } catch {
+        // Title resolution is best-effort; rows fall back to SKU-only display.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function titleFor(sku: string, entry: LogEntry): string | undefined {
+    return titlesBySku.get(sku) ?? entry.removed_titles?.[sku];
+  }
+
   const filtered =
     filter === "all" ? logs : logs.filter((e) => e.event === filter);
 
-  function toggleRow(timestamp: string) {
+  function toggleRow(rowKey: string) {
     setExpandedRows((prev) => {
       const next = new Set(prev);
-      if (next.has(timestamp)) {
-        next.delete(timestamp);
+      if (next.has(rowKey)) {
+        next.delete(rowKey);
       } else {
-        next.add(timestamp);
+        next.add(rowKey);
       }
       return next;
     });
@@ -287,24 +325,25 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
       )}
 
       <div className="flex flex-col gap-1">
-        {filtered.map((entry) => {
+        {filtered.map((entry, index) => {
+          const rowKey = `${entry.timestamp}:${entry.event}:${index}`;
           const isError = entry.status === "error";
           const isRestock = entry.event === "restock";
           const hasSku = !!entry.sku;
-          const isExpanded = expandedRows.has(entry.timestamp);
+          const isExpanded = expandedRows.has(rowKey);
 
           const isClickable = isRestock || (hasSku && !!onNavigateToSku);
 
           const handleRowClick = () => {
             if (isRestock) {
-              toggleRow(entry.timestamp);
+              toggleRow(rowKey);
             } else if (hasSku && onNavigateToSku) {
               onNavigateToSku(entry.sku!);
             }
           };
 
           return (
-            <div key={entry.timestamp} className="flex flex-col">
+            <div key={rowKey} className="flex flex-col">
               <div
                 className={`flex items-start gap-3 rounded-md px-3 py-2.5 text-sm ${
                   isError ? "bg-danger/5 hover:bg-danger/10" : "hover:bg-surface-hover"
@@ -356,7 +395,7 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
 
               {isRestock && isExpanded && (
                 <SkuSectionPanel
-                  sections={restockSections(entry)}
+                  sections={restockSections(entry, (sku) => titleFor(sku, entry))}
                   onOpenListing={onOpenListing}
                 />
               )}
