@@ -2647,6 +2647,8 @@ def api_restock_listings():
         all_failed = failed + not_found_skus
         if all_failed:
             restock_kwargs["failed_skus"] = all_failed
+        if failed_errors:
+            restock_kwargs["failed_errors"] = failed_errors
         if not updated:
             restock_kwargs["error"] = f"{len(all_failed)} SKU(s) failed to restock"
         if not_found_skus:
