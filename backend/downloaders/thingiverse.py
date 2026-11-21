@@ -82,6 +82,45 @@ def _get_files(session: cloudscraper.CloudScraper, thing_id: str) -> list[dict]:
     return [{"name": f["name"], "url": f["url"]} for f in zip_files if f.get("name") and f.get("url")]
 
 
+def scrape_images(link: str) -> list[str]:
+    """Return the main gallery image URLs for a Thingiverse thing via the v2 API."""
+    thing_id = extract_thing_id(link)
+    session = _make_session()
+    # Load the main page first so cloudscraper can pass the Cloudflare challenge
+    r = session.get(f"{THINGIVERSE_BASE}/thing:{thing_id}", timeout=15)
+    r.raise_for_status()
+
+    referer = f"{THINGIVERSE_BASE}/thing:{thing_id}"
+    token_r = session.get(
+        f"{THINGIVERSE_BASE}/api/v2/auth/view",
+        headers={**_XHR_HEADERS, "Referer": referer},
+        timeout=15,
+    )
+    token_r.raise_for_status()
+    token = token_r.json()["access"]
+
+    complete_r = session.get(
+        f"{THINGIVERSE_BASE}/api/v2/things/{thing_id}/complete",
+        headers={**_XHR_HEADERS, "Authorization": f"Bearer {token}", "Referer": referer},
+        timeout=30,
+    )
+    complete_r.raise_for_status()
+    data = complete_r.json()
+
+    return [img["url"] for img in (data.get("images") or []) if img.get("url")]
+
+
+def probe_images() -> tuple[bool, str]:
+    """Probe the image scraper against a known public thing."""
+    try:
+        urls = scrape_images(f"{THINGIVERSE_BASE}/thing:3539464")
+        if urls:
+            return True, f"{len(urls)} image(s) found"
+        return False, "API returned no images"
+    except Exception as e:
+        return False, str(e)
+
+
 def probe() -> tuple[bool, str]:
     probe_thing_id = "3539464"
     try:

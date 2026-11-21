@@ -42,6 +42,17 @@ mutation GetDownloadLink($id: ID!, $printId: ID!, $fileType: DownloadFileTypeEnu
 }
 """
 
+LIST_IMAGES_QUERY = """
+query ModelImages($id: ID!) {
+  print(id: $id) {
+    id
+    images { filePath }
+  }
+}
+"""
+
+MEDIA_BASE = "https://media.printables.com/"
+
 
 def extract_model_id(link: str) -> str:
     """Return the numeric model ID from a Printables URL or raise ValueError."""
@@ -99,6 +110,30 @@ def _get_download_link(file_id: str, model_id: str, file_type: str) -> str:
     if not link:
         raise RuntimeError(f"getDownloadLink returned ok=True but no link for file {file_id}")
     return link
+
+
+def scrape_images(link: str) -> list[str]:
+    """Return the main gallery image URLs for a Printables model via GraphQL."""
+    model_id = extract_model_id(link)
+    data = _gql(LIST_IMAGES_QUERY, {"id": model_id})["print"]
+    if data is None:
+        raise ValueError(f"Model {model_id} not found on Printables")
+    return [
+        MEDIA_BASE + img["filePath"]
+        for img in (data.get("images") or [])
+        if img.get("filePath")
+    ]
+
+
+def probe_images() -> tuple[bool, str]:
+    """Probe the image scraper against a known public model."""
+    try:
+        urls = scrape_images("https://www.printables.com/model/68734")
+        if urls:
+            return True, f"{len(urls)} image(s) found"
+        return False, "GraphQL returned no images"
+    except Exception as e:
+        return False, str(e)
 
 
 def probe() -> tuple[bool, str]:

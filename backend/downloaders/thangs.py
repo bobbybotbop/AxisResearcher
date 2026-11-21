@@ -79,6 +79,50 @@ def _download_part(session: cffi_requests.Session, model_id: str, filename: str,
     return r.content
 
 
+def scrape_images(link: str) -> list[str]:
+    """Return the main gallery image URLs for a Thangs model from __NEXT_DATA__."""
+    model_id = extract_model_id(link)
+    session = _make_session()
+    r = session.get(link, timeout=30)
+    r.raise_for_status()
+
+    match = re.search(
+        r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.DOTALL
+    )
+    if not match:
+        raise RuntimeError("Could not find __NEXT_DATA__ in the Thangs page — the site layout may have changed.")
+
+    try:
+        page_data = json.loads(match.group(1))
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Failed to parse __NEXT_DATA__: {e}") from e
+
+    fallback = (page_data.get("props") or {}).get("pageProps", {}).get("fallback") or {}
+    entry = fallback.get(f"models/v2/{model_id}?likes=false")
+    if entry is None:
+        raise RuntimeError(
+            "Could not locate model data in the Thangs page. "
+            "The model may require login or the URL may be invalid."
+        )
+
+    return [
+        att["imageUrl"]
+        for att in (entry.get("attachments") or [])
+        if att.get("imageUrl")
+    ]
+
+
+def probe_images() -> tuple[bool, str]:
+    """Probe the image scraper against a known public model."""
+    try:
+        urls = scrape_images(f"{THANGS_BASE}/designer/probe/3d-model/probe-1412046")
+        if urls:
+            return True, f"{len(urls)} image(s) found"
+        return False, "Page returned no images"
+    except Exception as e:
+        return False, str(e)
+
+
 def probe() -> tuple[bool, str]:
     """
     Quick connectivity probe: call the plans API for a known public model.
