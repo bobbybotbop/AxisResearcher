@@ -144,9 +144,14 @@ def apply_material(model, color, roughness, finish="smooth", layer_height_mm=0.2
         wave.inputs["Scale"].default_value = ASSUMED_MODEL_HEIGHT_MM / layer_height_mm
         bump = nt.nodes.new("ShaderNodeBump")
         bump.inputs["Strength"].default_value = layer_depth
-        # Groove depth in scene units: about half the layer spacing
-        # (spacing = STANDARD_SIZE / band count), per the research.
-        bump.inputs["Distance"].default_value = 0.5 * STANDARD_SIZE * layer_height_mm / ASSUMED_MODEL_HEIGHT_MM
+        # Groove depth in scene units, driven by the layer_depth knob. The
+        # research's "half the layer spacing" (0.5 * spacing = 0.0033 units at
+        # 0.2mm) is invisible on vertical walls: bump only perturbs the shading
+        # normal, and at a glancing angle a groove that small produces no
+        # luminance change — only the face-lit roof showed texture. A render
+        # sweep showed walls need Distance >= ~0.01 and read clearly at 0.02,
+        # so map the 0-1 depth knob to 0-0.05 units (default 0.4 -> 0.02).
+        bump.inputs["Distance"].default_value = layer_depth * 0.05
         nt.links.new(tex_coord.outputs["Generated"], wave.inputs["Vector"])
         nt.links.new(wave.outputs["Fac"], bump.inputs["Height"])
         nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])

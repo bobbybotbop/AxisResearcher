@@ -80,3 +80,35 @@ def test_smooth_finish_adds_no_bump_nodes():
     assert apply, "apply_material() not found"
     body = apply.group(0)
     assert re.search(r"if\s+finish\s*==\s*['\"]layer-lines['\"]", body)
+
+
+def test_bump_distance_is_large_enough_to_show_on_vertical_walls():
+    """Regression: layer lines were invisible on vertical walls (only the roof,
+    lit face-on, showed texture) because the Bump Distance (groove depth in
+    scene units) was derived as 0.5 x layer spacing = 0.0033 units — too small
+    to register a shading change at a glancing angle. A render sweep showed
+    walls need Distance >= ~0.01 and read clearly at 0.02 (at the default
+    0.2mm layer height). Assert the default-settings Distance meets the 0.01
+    floor. Distance must also scale with layer_depth so the user knob controls
+    visible depth."""
+    apply = re.search(r"def apply_material\(.*?\n(?=\ndef )", SOURCE, re.S)
+    assert apply, "apply_material() not found"
+    body = apply.group(0)
+    # Distance must reference layer_depth (the user knob), not be a fixed
+    # fraction of layer spacing alone.
+    dist_line = re.search(r'bump\.inputs\["Distance"\]\.default_value\s*=\s*(.+)', body)
+    assert dist_line, "Bump Distance assignment not found"
+    expr = dist_line.group(1)
+    assert "layer_depth" in expr, (
+        "Bump Distance must scale with layer_depth so the line-depth knob "
+        "controls visible groove depth (fixed 0.5xspacing was wall-invisible)")
+    # Evaluate the default: layer_depth=0.4, layer_height_mm=0.2, and the
+    # script's constants. The result must clear the 0.01 wall-visibility floor.
+    assumed = float(re.search(r"ASSUMED_MODEL_HEIGHT_MM\s*=\s*([\d.]+)", SOURCE).group(1))
+    std = float(re.search(r"STANDARD_SIZE\s*=\s*([\d.]+)", SOURCE).group(1))
+    env = {"layer_depth": 0.4, "layer_height_mm": 0.2,
+           "ASSUMED_MODEL_HEIGHT_MM": assumed, "STANDARD_SIZE": std}
+    value = eval(expr, {"__builtins__": {}}, env)  # noqa: S307 - arithmetic expr only
+    assert value >= 0.01, (
+        f"default Bump Distance {value:.4f} is below the 0.01 wall-visibility "
+        "floor; walls will render smooth")

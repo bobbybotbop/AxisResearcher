@@ -11,8 +11,11 @@ CONVERTIBLE_RENDER_EXTENSIONS: tuple[str, ...] = (".3mf", ".step", ".stp")
 
 SUPPORTED_RENDER_EXTENSIONS: tuple[str, ...] = NATIVE_RENDER_EXTENSIONS + CONVERTIBLE_RENDER_EXTENSIONS
 
-# Render Settings defaults (spec: near-black, slightly glossy, 1024x1024)
-DEFAULT_RENDER_COLOR = "#1a1a1a"
+# Render Settings defaults (spec: near-black, slightly glossy, 1024x1024).
+# Color is a deep black (#0d0d0d); the 3-point rig + world ambient lift it in
+# the render, so the hex reads darker than the on-screen result. Roughness 0.3
+# keeps the glossy highlights.
+DEFAULT_RENDER_COLOR = "#0d0d0d"
 DEFAULT_RENDER_ROUGHNESS = 0.3
 DEFAULT_RENDER_RESOLUTION = 1024
 RENDER_RESOLUTIONS: tuple[int, ...] = (512, 1024, 2048)

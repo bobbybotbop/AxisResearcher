@@ -16,7 +16,7 @@ export const modelExtensionOf = (name: string) => name.slice(name.lastIndexOf(".
 // roughness (glossiness = 1 − roughness). Lighting/shadow/exposure defaults
 // reproduce the original hardcoded rig exactly.
 export const RENDER_SETTINGS_DEFAULTS = {
-  color: "#1a1a1a",
+  color: "#0d0d0d",
   roughness: 0.3,
   resolution: 1024,
   fov: 40,
@@ -171,7 +171,7 @@ export const PREVIEW_FRAME_MARGIN = 1.15;
 export const DEFAULT_VIEW_DIRECTION: [number, number, number] = [0.6243, 0.4695, -0.6243];
 // Placeholder material for the lightweight preview; the real Render Settings
 // color/roughness only apply to the Blender render
-export const PREVIEW_MATERIAL_DEFAULTS = { color: "#1a1a1a", roughness: 0.3, metalness: 0 };
+export const PREVIEW_MATERIAL_DEFAULTS = { color: "#0d0d0d", roughness: 0.3, metalness: 0 };
 // Initial Canvas camera; PreviewScene re-frames to the model's bounds on load
 export const PREVIEW_INITIAL_CAMERA: { position: [number, number, number]; near: number; far: number } = {
   position: [3, 2.3, -3],

@@ -34,7 +34,7 @@ def client():
 # --- persistence seam: get_render_settings / save_render_settings ---
 
 SPEC_DEFAULTS = {
-    "color": "#1a1a1a",
+    "color": "#0d0d0d",
     "roughness": 0.3,
     "resolution": 1024,
     "fov": 40,
@@ -160,7 +160,7 @@ def test_save_render_settings_rejects_invalid_values(config_file, kwargs):
     with pytest.raises(ValueError):
         combine_data.save_render_settings(**kwargs)
     # nothing was written
-    assert combine_data.get_render_settings()["color"] == "#1a1a1a"
+    assert combine_data.get_render_settings()["color"] == "#0d0d0d"
 
 
 # --- HTTP seam: /api/render-settings ---
@@ -169,7 +169,7 @@ def test_render_settings_route_get_defaults(client, config_file):
     res = client.get("/api/render-settings")
     assert res.status_code == 200
     payload = res.get_json()
-    assert payload["color"] == "#1a1a1a"
+    assert payload["color"] == "#0d0d0d"
     assert payload["roughness"] == pytest.approx(0.3)
     assert payload["resolution"] == 1024
     assert payload["fov"] == pytest.approx(40)
@@ -247,4 +247,4 @@ def test_render_settings_route_post_rejects_invalid(client, config_file):
     assert res.status_code == 400
 
     # rejected writes did not stick
-    assert client.get("/api/render-settings").get_json()["color"] == "#1a1a1a"
+    assert client.get("/api/render-settings").get_json()["color"] == "#0d0d0d"
