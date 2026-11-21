@@ -324,10 +324,17 @@ function App() {
     return THREE_D_SITES.map(({ site }) => site);
   });
   const [threeDSiteTesting, setThreeDSiteTesting] = useState(false);
-  // Link forwarded from either pipeline (Image Search or Title Search) to the
-  // shared Steps 3-4 download step. Consumed by SharedDownloadRender via the
-  // externalUrl prop; cleared after consumption.
+  // Link + metadata forwarded from either pipeline (Image Search or Title
+  // Search) to the shared Steps 3-4 download step. Consumed by
+  // SharedDownloadRender via the externalUrl/externalMeta props; cleared after
+  // consumption. The metadata auto-saves a Saved 3D File record on download.
   const [sharedDownloadLink, setSharedDownloadLink] = useState("");
+  const [sharedDownloadMeta, setSharedDownloadMeta] = useState<{
+    ebayUrl: string;
+    ebayTitle: string;
+    pipeline: "image_search" | "title_search";
+    matchLabel: "confirmed_image_match" | "unconfirmed_title_match";
+  } | null>(null);
   const [imageSearchOpen, setImageSearchOpen] = useState(false);
   const threeDSiteAutoTestRan = useRef(false);
   // Shared cooldown (hours) for automatic background operations: History-tab
@@ -4469,8 +4476,9 @@ function App() {
                       siteStatus={threeDSiteStatus}
                       enabledSites={THREE_D_SITES.map(({ site }) => site).filter(site => threeDSitesEnabled[site] ?? true)}
                       sitePriority={threeDSitePriority}
-                      onUseLink={(link) => {
+                      onUseLink={(link, meta) => {
                         setSharedDownloadLink(link);
+                        setSharedDownloadMeta(meta);
                         addToast("success", `Link ready for the download step: ${link}`);
                       }}
                     />
@@ -4484,8 +4492,9 @@ function App() {
                   enabledSites={THREE_D_SITES.map(({ site }) => site).filter(site => threeDSitesEnabled[site] ?? true)}
                   sitePriority={threeDSitePriority}
                   textModel={textModel}
-                  onUseLink={(link) => {
+                  onUseLink={(link, meta) => {
                     setSharedDownloadLink(link);
+                    setSharedDownloadMeta(meta);
                     addToast("success", `Link ready for the download step: ${link}`);
                   }}
                 />
@@ -4495,7 +4504,8 @@ function App() {
                   addToast={addToast as (type: string, message: string) => void}
                   fileDownloadDelay={threeDDownloadDelay}
                   externalUrl={sharedDownloadLink}
-                  onExternalUrlConsumed={() => setSharedDownloadLink("")}
+                  externalMeta={sharedDownloadMeta}
+                  onExternalUrlConsumed={() => { setSharedDownloadLink(""); setSharedDownloadMeta(null); }}
                 />
               </div>
             </div>

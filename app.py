@@ -79,7 +79,7 @@ from backend.constants.listing import (
     CATEGORY_TO_IMAGE_TYPE, EBAY_STATUS_NOT_FOUND,
 )
 from backend.constants.ebay import EBAY_MARKETPLACE_ID, EBAY_BROWSE_API_BASE, EBAY_INVENTORY_API_BASE
-from backend.constants.paths import GENERATED_IMAGES_DIR
+from backend.constants.paths import GENERATED_IMAGES_DIR, SAVED_3D_FILES_DIR as _SAVED_3D_FILES_DIR_NAME
 from backend.constants.render import (
     DEFAULT_RENDER_AMBIENT, DEFAULT_RENDER_AZIMUTH, DEFAULT_RENDER_COLOR,
     DEFAULT_RENDER_ELEVATION, DEFAULT_RENDER_EXPOSURE, DEFAULT_RENDER_FILL_ENERGY,
@@ -101,6 +101,7 @@ from backend.render.normalize import normalize_to_render_mesh
 from backend.render.camera import compute_blender_camera
 from backend.render.validate import validate_fov, validate_resolution, validate_roughness
 import re
+import shutil
 import tempfile
 import requests
 from dotenv import load_dotenv
@@ -3668,6 +3669,87 @@ def update_makerworld_email_credentials():
         return jsonify({"error": f"Failed to save credentials: {str(e)}"}), 500
 
 
+# Root directory for persisted Saved 3D Files (GLOSSARY: "Saved 3D File") —
+# the downloaded 3D file and its site-image directory live under here; the
+# database stores the paths. Module-level so tests can monkeypatch it.
+SAVED_3D_FILES_DIR = _SAVED_3D_FILES_DIR_NAME
+
+# Source-site label for a 3D file page URL (the first whitelisted host that appears)
+_SOURCE_SITE_HOSTS = ("thingiverse.com", "printables.com", "makerworld.com", "cults3d.com", "thangs.com", "yeggi.com")
+
+
+def _source_site_from_link(link):
+    for host in _SOURCE_SITE_HOSTS:
+        if host in link:
+            return host
+    return ""
+
+
+def _autosave_saved_3d_file(data, link, out_filename, out_bytes):
+    """Persist a Saved 3D File (GLOSSARY) after a successful download, when the
+    pipeline sent the metadata. Best-effort: any failure is logged, never raised,
+    so it can never break the download response.
+
+    - The 3D file is written to Saved_3D_Files/<id>.<ext>
+    - Site images are scraped and downloaded into Saved_3D_Files/<id>_images/
+      (eBay photos are NOT stored — only the listing URL)
+    - The record is inserted into the saved_3d_files table
+    """
+    ebay_listing_url = str(data.get("ebay_listing_url") or "").strip()
+    pipeline = str(data.get("pipeline") or "").strip()
+    if not ebay_listing_url or not pipeline:
+        return  # no pipeline metadata — a manual Step 3 download, nothing to save
+    try:
+        _db.ensure_db()
+        ext = os.path.splitext(out_filename)[1] or ".zip"
+        os.makedirs(SAVED_3D_FILES_DIR, exist_ok=True)
+
+        # Reserve the id first so the on-disk names can use it
+        record_id = _db.save_saved_3d_file({
+            "ebay_listing_url": ebay_listing_url,
+            "ebay_listing_title": str(data.get("ebay_listing_title") or "").strip(),
+            "source_site": _source_site_from_link(link),
+            "source_url": link,
+            "match_label": str(data.get("match_label") or "").strip(),
+            "pipeline": pipeline,
+            "file_path": "",
+            "images_dir": "",
+        })
+
+        file_path = os.path.join(SAVED_3D_FILES_DIR, f"{record_id}{ext}")
+        with open(file_path, "wb") as f:
+            f.write(out_bytes)
+
+        # Site images are best-effort: scrape + download, skip any that fail
+        images_dir = ""
+        try:
+            image_urls = _scrape_site_image_urls(link)
+            if image_urls:
+                images_dir = os.path.join(SAVED_3D_FILES_DIR, f"{record_id}_images")
+                os.makedirs(images_dir, exist_ok=True)
+                for index, url in enumerate(image_urls):
+                    try:
+                        content = _download_image(url)
+                        img_ext = os.path.splitext(url.split("?")[0])[1].lower()
+                        if img_ext not in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
+                            img_ext = ".jpg"
+                        name = os.path.basename(url.split("?")[0]) or f"image_{index}{img_ext}"
+                        if not os.path.splitext(name)[1]:
+                            name += img_ext
+                        with open(os.path.join(images_dir, name), "wb") as f:
+                            f.write(content)
+                    except Exception as e:
+                        print(f"[API] saved-3d-files: skipping undownloadable site image {url}: {e}")
+        except Exception as e:
+            print(f"[API] saved-3d-files: site image scrape failed for {link}: {e}")
+            images_dir = ""
+
+        _db.update_saved_3d_file_paths(record_id, file_path=file_path, images_dir=images_dir)
+        print(f"[API] Saved 3D file #{record_id}: {out_filename} ({pipeline})")
+    except Exception as e:
+        print(f"[API] saved-3d-files autosave failed: {e}")
+
+
 @app.route('/api/download-3d-file', methods=['POST'])
 def download_3d_file():
     """
@@ -3740,24 +3822,24 @@ def download_3d_file():
             return jsonify({"error": "Unsupported site — supported: thingiverse.com, printables.com, makerworld.com, cults3d.com, thangs.com"}), 400
 
         # --- Apply mode ---
+        out_filename = filename
+        out_bytes = raw_bytes
+        mime = "application/zip" if is_zip else "application/octet-stream"
         if mode == DOWNLOAD_MODE_SINGLE_FILE and is_zip:
             try:
-                single_filename, single_bytes = extract_best_3d_file(raw_bytes)
+                out_filename, out_bytes = extract_best_3d_file(raw_bytes)
             except ValueError as e:
                 return jsonify({"error": str(e)}), 500
-            return Response(
-                single_bytes,
-                status=200,
-                mimetype="application/octet-stream",
-                headers={"Content-Disposition": f'attachment; filename="{single_filename}"'},
-            )
+            mime = "application/octet-stream"
 
-        mime = "application/zip" if is_zip else "application/octet-stream"
+        # --- Auto-save a Saved 3D File record when the pipeline sent metadata ---
+        _autosave_saved_3d_file(data, link, out_filename, out_bytes)
+
         return Response(
-            raw_bytes,
+            out_bytes,
             status=200,
             mimetype=mime,
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={"Content-Disposition": f'attachment; filename="{out_filename}"'},
         )
 
     except (Cults3DPaidModelError, ThangsPaidModelError) as e:
@@ -3776,6 +3858,54 @@ def download_3d_file():
     except Exception as e:
         print(f"[API] download-3d-file error: {e}")
         return jsonify({"error": f"Download failed: {str(e)}"}), 500
+
+
+@app.route('/api/saved-3d-files', methods=['GET'])
+def list_saved_3d_files():
+    """Paginated list of Saved 3D Files, newest first.
+
+    Query params: page (default 1), page_size (default 25).
+    Returns JSON: {"items": [...], "total": int, "page": int, "page_size": int}
+    """
+    try:
+        page = int(request.args.get("page", 1))
+        page_size = int(request.args.get("page_size", 25))
+    except (TypeError, ValueError):
+        return jsonify({"error": "page and page_size must be integers"}), 400
+    _db.ensure_db()
+    return jsonify(_db.list_saved_3d_files(page=page, page_size=page_size)), 200
+
+
+@app.route('/api/saved-3d-files/<int:entry_id>', methods=['GET'])
+def get_saved_3d_file(entry_id):
+    """Full detail for one Saved 3D File."""
+    _db.ensure_db()
+    row = _db.get_saved_3d_file(entry_id)
+    if row is None:
+        return jsonify({"error": "Saved 3D file not found"}), 404
+    return jsonify(row), 200
+
+
+@app.route('/api/saved-3d-files/<int:entry_id>', methods=['DELETE'])
+def delete_saved_3d_file(entry_id):
+    """Delete a Saved 3D File: removes the database record and its on-disk
+    3D file + site-image directory."""
+    _db.ensure_db()
+    row = _db.get_saved_3d_file(entry_id)
+    if row is None:
+        return jsonify({"error": "Saved 3D file not found"}), 404
+    for path, is_dir in ((row.get("file_path"), False), (row.get("images_dir"), True)):
+        if not path:
+            continue
+        try:
+            if is_dir:
+                shutil.rmtree(path, ignore_errors=True)
+            elif os.path.exists(path):
+                os.remove(path)
+        except OSError as e:
+            print(f"[API] saved-3d-files delete: could not remove {path}: {e}")
+    _db.delete_saved_3d_file(entry_id)
+    return jsonify({"success": True}), 200
 
 
 @app.route('/api/remove-background', methods=['POST'])

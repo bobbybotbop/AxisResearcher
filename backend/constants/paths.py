@@ -5,3 +5,4 @@ LOG_FILE_NAME = "logs.ndjson"
 MAX_LOG_ENTRIES = 1000
 DB_FILE_NAME = "axis.db"
 PROMPTS_DIR = "prompts"
+SAVED_3D_FILES_DIR = "Saved_3D_Files"

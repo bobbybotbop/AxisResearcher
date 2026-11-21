@@ -11,12 +11,22 @@ interface TextSearchResult {
   priority_rank: number | null;
 }
 
-// Step 3 match label: pHash image comparison lands in ticket 07 — until then
-// every scraped link is an unconfirmed title match.
+// Step 3 match label from the pHash image confirmation (ticket 07):
+// "confirmed" = an eBay photo matched a site image; "unconfirmed" = no match
+// (or comparison impossible) — the download is never blocked either way.
 type MatchLabel = "checking" | "confirmed" | "unconfirmed";
 
 const DEFAULT_MAX_RESULTS = 35;
 const DEFAULT_OPTIMIZE_PROMPT = "";
+
+// Metadata forwarded with the top link so the shared download step can
+// auto-save a Saved 3D File record (ticket 09)
+interface ForwardedLinkMeta {
+  ebayUrl: string;
+  ebayTitle: string;
+  pipeline: "image_search" | "title_search";
+  matchLabel: "confirmed_image_match" | "unconfirmed_title_match";
+}
 
 interface TitleSearchPipelineProps {
   addToast?: (type: string, message: string) => void;
@@ -24,7 +34,7 @@ interface TitleSearchPipelineProps {
   sitePriority?: string[];
   siteStatus?: ThreeDSiteStatus | null;
   textModel?: string;
-  onUseLink?: (link: string) => void;
+  onUseLink?: (link: string, meta: ForwardedLinkMeta) => void;
 }
 
 function TitleSearchPipeline({
@@ -136,7 +146,7 @@ function TitleSearchPipeline({
     }
   };
 
-  const confirmTopLink = async (top: TextSearchResult) => {
+  const confirmTopLink = async (top: TextSearchResult, ebayPhotos: string[]) => {
     setMatchLabel("checking");
     setSiteImages([]);
     try {
@@ -147,9 +157,26 @@ function TitleSearchPipeline({
       });
       const data = (await res.json()) as { images?: string[]; error?: string };
       if (!res.ok || data.error) throw new Error(data.error || "Image scrape failed");
-      setSiteImages(data.images || []);
-      // pHash comparison against the eBay photos is ticket 07 — placeholder label for now
-      setMatchLabel("unconfirmed");
+      const images = data.images || [];
+      setSiteImages(images);
+      // pHash image confirmation (ticket 07): compare the eBay listing photos
+      // against the site images. Non-blocking — a comparison failure or no
+      // photos to compare just leaves the match unconfirmed.
+      if (ebayPhotos.length > 0 && images.length > 0) {
+        try {
+          const cmpRes = await fetch("/api/compare-images", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ebay_photos: ebayPhotos, site_url: top.link }),
+          });
+          const cmpData = (await cmpRes.json()) as { match?: boolean };
+          setMatchLabel(cmpData.match ? "confirmed" : "unconfirmed");
+        } catch {
+          setMatchLabel("unconfirmed");
+        }
+      } else {
+        setMatchLabel("unconfirmed");
+      }
     } catch (err) {
       setMatchLabel(null);
       addToast?.("error", (err as Error).message || "Failed to scrape site images");
@@ -201,7 +228,7 @@ function TitleSearchPipeline({
       }
       const top = filtered[0];
       setTopLink(top);
-      void confirmTopLink(top);
+      void confirmTopLink(top, photos);
     } catch (err) {
       addToast?.("error", (err as Error).message || "Search failed");
     } finally {
@@ -211,7 +238,12 @@ function TitleSearchPipeline({
 
   const handleUseLink = () => {
     if (!topLink) return;
-    onUseLink?.(topLink.link);
+    onUseLink?.(topLink.link, {
+      ebayUrl: step1Link.trim(),
+      ebayTitle: originalTitle,
+      pipeline: "title_search",
+      matchLabel: matchLabel === "confirmed" ? "confirmed_image_match" : "unconfirmed_title_match",
+    });
   };
 
   const togglePrompt = async () => {
