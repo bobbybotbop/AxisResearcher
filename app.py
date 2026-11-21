@@ -56,6 +56,7 @@ from backend.copyScripts.create_image import (
 )
 from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, migrate_hide_not_found_listings, get_render_settings, save_render_settings, get_render_profiles, save_render_profile, delete_render_profile, get_active_render_profile, set_active_render_profile, validate_rig
 from backend.helper_functions import remove_html_tags
+from backend.copy_seller import run_copy_seller
 import os
 import json
 import glob
@@ -253,6 +254,37 @@ def streaming_response(generator):
             'X-Accel-Buffering': 'no'
         }
     )
+
+@app.route('/api/research/copy-seller', methods=['POST'])
+def research_copy_seller():
+    """
+    Run the Copy Seller research pipeline for an eBay seller.
+    Streams progress events and the final raw (unranked) Product Candidates as NDJSON.
+    Body: { seller, top_n?, k?, min_sold? }
+    """
+    data = request.get_json()
+
+    def generate():
+        if not data:
+            yield error_event("Request body must be JSON")
+            return
+        seller = (data.get("seller") or "").strip()
+        if not seller:
+            yield error_event("seller is required")
+            return
+        try:
+            top_n = int(data.get("top_n", 25))
+            k = int(data.get("k", 20))
+            min_sold = int(data.get("min_sold", 1))
+        except (TypeError, ValueError):
+            yield error_event("top_n, k, and min_sold must be integers")
+            return
+
+        print(f"[API] /api/research/copy-seller: seller={seller} top_n={top_n} k={k} min_sold={min_sold}")
+        for event in run_copy_seller(seller, top_n=top_n, k=k, min_sold=min_sold):
+            yield json.dumps(event) + "\n"
+
+    return streaming_response(generate())
 
 @app.route('/api/generate-text', methods=['POST'])
 def generate_text():
