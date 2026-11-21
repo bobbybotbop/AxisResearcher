@@ -21,6 +21,7 @@ import ApiKeyManagementSection from "./components/ApiKeyManagementSection";
 import TestAiModelSection from "./components/TestAiModelSection";
 import LogsTab from "./components/LogsTab";
 import ThreeDFileFinder from "./components/ThreeDFileFinder";
+import TitleSearchPipeline from "./components/TitleSearchPipeline";
 import NumberInput from "./components/NumberInput";
 import { MOCK_DATA, MOCK_GENERATED_TITLE, MOCK_GENERATED_DESCRIPTION } from "./mockData";
 import { createTestWorkflowState } from "./testWorkflowState";
@@ -319,6 +320,9 @@ function App() {
     return THREE_D_SITES.map(({ site }) => site);
   });
   const [threeDSiteTesting, setThreeDSiteTesting] = useState(false);
+  // Link forwarded from the Title Search pipeline to the shared download step.
+  // Consumed by the Steps 3-4 restructure in ticket 08; surfaced via toast for now.
+  const [sharedDownloadLink, setSharedDownloadLink] = useState("");
   const threeDSiteAutoTestRan = useRef(false);
   // Shared cooldown (hours) for automatic background operations: History-tab
   // stock refresh and the 3D site auto-test. Fetched from the backend on
@@ -4430,6 +4434,17 @@ function App() {
                   </div>
                 )}
                 <hr className="border-border-default" />
+                <TitleSearchPipeline
+                  addToast={addToast as (type: string, message: string) => void}
+                  siteStatus={threeDSiteStatus}
+                  enabledSites={THREE_D_SITES.map(({ site }) => site).filter(site => threeDSitesEnabled[site] ?? true)}
+                  sitePriority={threeDSitePriority}
+                  textModel={textModel}
+                  onUseLink={(link) => {
+                    setSharedDownloadLink(link);
+                    addToast("success", `Link ready for the download step: ${link}`);
+                  }}
+                />
                 <ThreeDFileFinder
                   addToast={addToast as (type: string, message: string) => void}
                   fileDownloadDelay={threeDDownloadDelay}

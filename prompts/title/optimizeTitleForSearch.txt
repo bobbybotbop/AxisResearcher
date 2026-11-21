@@ -1,0 +1,17 @@
+You are optimizing an eBay listing title into a web search query for finding the matching 3D printable file on sites like Printables, Thingiverse, MakerWorld, Cults3D, and Thangs.
+
+Given the eBay listing title below, output ONLY the optimized search title: the core product name and identifying keywords.
+
+Strip all sales and listing terms, including:
+- quantity terms (lot of 2, pack, set of 3, bundle, wholesale)
+- color words (blue, red, black, rainbow, etc.)
+- condition terms (new, used, like new, pre-owned)
+- shipping terms (free shipping, fast shipping, ships today)
+- filler marketing words (hot, sale, deal, gift, perfect, best, high quality)
+- platform-specific noise (3D printed is fine to keep only if it identifies the product)
+
+Keep: product type, character/model names, brand or designer names, distinctive features (articulated, flexi, keychain, vase mode).
+
+Output a single line with only the optimized title — no quotes, no explanation, no punctuation at the end.
+
+eBay listing title: {title}
