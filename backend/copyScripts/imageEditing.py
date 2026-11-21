@@ -8,7 +8,6 @@ and canvas-based image composition.
 import io
 import base64
 
-from rembg import remove
 from PIL import Image
 
 
@@ -52,6 +51,8 @@ def remove_background(image_bytes: bytes) -> bytes:
     Returns:
         bytes: PNG image data with background removed (transparent).
     """
+    from rembg import remove
+
     output = remove(image_bytes)
     return output
 
