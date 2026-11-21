@@ -1794,6 +1794,7 @@ def api_import_listings():
 
     imported = updated = skipped = 0
     imported_skus = []
+    updated_skus = []
     for item in items:
         if item['item_id'] in axis_item_ids:
             skipped += 1
@@ -1801,11 +1802,13 @@ def api_import_listings():
         is_new = item['item_id'] not in manual_item_ids
         written = write_manual_listing_json(item)
         if written:
+            sku = str(item.get('seller_sku') or '').strip() or item['item_id']
             if is_new:
                 imported += 1
-                imported_skus.append(str(item.get('seller_sku') or '').strip() or item['item_id'])
+                imported_skus.append(sku)
             else:
                 updated += 1
+                updated_skus.append(sku)
         else:
             skipped += 1
 
@@ -1813,7 +1816,14 @@ def api_import_listings():
         datetime.now(timezone.utc).isoformat()
     )
     if imported or updated:
-        log_event("import", "success", count=imported + updated, imported_skus=imported_skus)
+        log_event(
+            "import", "success",
+            count=imported + updated,
+            imported_count=imported,
+            updated_count=updated,
+            imported_skus=imported_skus,
+            updated_skus=updated_skus,
+        )
     return jsonify({'imported': imported, 'updated': updated, 'skipped': skipped})
 
 @app.route('/api/listings/<sku>', methods=['GET'])
