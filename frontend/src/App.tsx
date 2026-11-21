@@ -21,6 +21,7 @@ import ApiKeyManagementSection from "./components/ApiKeyManagementSection";
 import TestAiModelSection from "./components/TestAiModelSection";
 import LogsTab from "./components/LogsTab";
 import ThreeDFileFinder from "./components/ThreeDFileFinder";
+import ResearchPipeline from "./components/ResearchPipeline";
 import NumberInput from "./components/NumberInput";
 import { MOCK_DATA, MOCK_GENERATED_TITLE, MOCK_GENERATED_DESCRIPTION } from "./mockData";
 import { createTestWorkflowState } from "./testWorkflowState";
@@ -4406,6 +4407,10 @@ function App() {
                     </pre>
                   </div>
                 )}
+                <hr className="border-border-default" />
+                <ResearchPipeline
+                  addToast={addToast as (type: string, message: string) => void}
+                />
                 <hr className="border-border-default" />
                 <ThreeDFileFinder
                   addToast={addToast as (type: string, message: string) => void}
