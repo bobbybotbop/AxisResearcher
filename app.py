@@ -47,6 +47,7 @@ from backend.downloaders.cults3d import extract_slug as cults3d_extract_slug, st
 from backend.downloaders.thangs import extract_model_id as thangs_extract_model_id, build_zip as thangs_build_zip, probe as probe_thangs, PaidModelError as ThangsPaidModelError, scrape_images as thangs_scrape_images, probe_images as probe_images_thangs
 from backend.constants.files_3d import DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, DOWNLOAD_MODES
 from backend.downloaders.zip_utils import extract_best_3d_file
+from backend.image_compare import find_matching_pairs, DEFAULT_THRESHOLD as COMPARE_IMAGES_THRESHOLD
 from backend.copyScripts.create_image import (
     generate_image_from_urls,
     ImageType,
@@ -3252,6 +3253,89 @@ def scrape_site_images():
     except Exception as e:
         print(f"[API] scrape-site-images error: {e}")
         return jsonify({"error": f"Image scrape failed: {str(e)}"}), 500
+
+
+def _download_image(url, timeout=10):
+    """Download one image and return its raw bytes. Raises on failure."""
+    r = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
+    r.raise_for_status()
+    return r.content
+
+
+def _scrape_site_image_urls(link):
+    """Dispatch to the per-site image scraper, mirroring /api/scrape-site-images."""
+    if "thingiverse.com" in link:
+        return tv_scrape_images(link)
+    if "printables.com" in link:
+        return printables_scrape_images(link)
+    if "makerworld.com" in link:
+        return mw_scrape_images(link)
+    if "cults3d.com" in link:
+        return cults3d_scrape_images(link)
+    if "thangs.com" in link:
+        return thangs_scrape_images(link)
+    if "yeggi.com" in link:
+        return []
+    raise ValueError("Unsupported site — supported: thingiverse.com, printables.com, makerworld.com, cults3d.com, thangs.com, yeggi.com")
+
+
+def _download_images_as_pil(urls):
+    """Download image URLs, skipping any that fail, and return PIL images."""
+    from PIL import Image
+    images = []
+    for url in urls:
+        try:
+            images.append(Image.open(io.BytesIO(_download_image(url))).convert("RGB"))
+        except Exception as e:
+            print(f"[API] compare-images: skipping undownloadable image {url}: {e}")
+    return images
+
+
+@app.route('/api/compare-images', methods=['POST'])
+def compare_images():
+    """
+    Confirm a candidate 3D file page against an eBay listing's photos.
+
+    Expects JSON: {"ebay_photos": ["https://...", ...], "site_url": "https://..."}
+    Returns JSON: {"match": bool, "matched_pairs": [{"ebay_index", "site_index", "distance"}, ...],
+                   "ebay_image_count": int, "site_image_count": int}
+    On failure returns {"match": false, "error": "..."} — the comparison is
+    non-blocking, so errors never prevent the downstream download.
+    """
+    try:
+        data = request.get_json()
+        if not data or "ebay_photos" not in data:
+            return jsonify({"error": "ebay_photos is required"}), 400
+        if not data.get("site_url"):
+            return jsonify({"error": "site_url is required"}), 400
+
+        ebay_photos = data["ebay_photos"]
+        if not isinstance(ebay_photos, list) or not all(isinstance(u, str) for u in ebay_photos):
+            return jsonify({"error": "ebay_photos must be a list of strings"}), 400
+
+        site_url = data["site_url"].strip()
+
+        try:
+            site_image_urls = _scrape_site_image_urls(site_url)
+        except Exception as e:
+            print(f"[API] compare-images scrape error: {e}")
+            return jsonify({"match": False, "error": f"Image scrape failed: {str(e)}"}), 200
+
+        ebay_images = _download_images_as_pil(ebay_photos)
+        site_images = _download_images_as_pil(site_image_urls)
+
+        matched_pairs = find_matching_pairs(ebay_images, site_images, threshold=COMPARE_IMAGES_THRESHOLD)
+
+        return jsonify({
+            "match": len(matched_pairs) > 0,
+            "matched_pairs": matched_pairs,
+            "ebay_image_count": len(ebay_images),
+            "site_image_count": len(site_images),
+        }), 200
+
+    except Exception as e:
+        print(f"[API] compare-images error: {e}")
+        return jsonify({"match": False, "error": f"Image comparison failed: {str(e)}"}), 200
 
 
 @app.route('/api/test-3d-site-images', methods=['GET'])
