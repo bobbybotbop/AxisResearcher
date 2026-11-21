@@ -66,7 +66,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from backend.copyScripts.create_text import create_text, create_text_stream
 from backend.ebay_cli import call_text_llm, get_seller_list, revise_inventory_status_batch, get_item_available_quantity
-from backend.copyScripts.imageEditing import remove_background, compile_images, downscale_image_bytes
+from backend.copyScripts.imageEditing import remove_background, compile_images, downscale_image_bytes, warm_rembg
 from backend.copyScripts.upload_to_ebay import upload_complete_listing
 from backend.promoted_listings import promote_listing, PromotionError
 from backend.logger import log_event
@@ -4532,4 +4532,8 @@ if __name__ == '__main__':
         migrate_hide_not_found_listings()
     except Exception as e:
         print(f"[startup] migrate_hide_not_found_listings failed: {e}")
+    # Warm the lazy rembg import off the critical path so the first
+    # background-removal request doesn't pay the ~2.5s import. Daemon thread:
+    # never blocks shutdown, and warm_rembg swallows its own import errors.
+    threading.Thread(target=warm_rembg, daemon=True).start()
     app.run(debug=True, use_reloader=False, port=5000, request_handler=_QuietTokensRequestHandler)

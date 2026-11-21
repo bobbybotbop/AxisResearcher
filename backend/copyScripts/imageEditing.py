@@ -41,6 +41,20 @@ def downscale_image_bytes(image_bytes: bytes, max_dimension: int = 1024) -> byte
     return buf.getvalue()
 
 
+def warm_rembg() -> None:
+    """
+    Trigger the lazy rembg import so a later real request does not pay it.
+
+    Intended to be called from a background thread after the server starts
+    listening. Failure-safe: any import error is swallowed here so the server
+    keeps running; the first real remove_background() call will surface it.
+    """
+    try:
+        import rembg  # noqa: F401
+    except Exception:
+        pass
+
+
 def remove_background(image_bytes: bytes) -> bytes:
     """
     Remove the background from an image.
