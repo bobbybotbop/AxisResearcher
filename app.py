@@ -40,11 +40,11 @@ from flask_cors import CORS
 from werkzeug.serving import WSGIRequestHandler
 from backend.copyScripts.CopyListingMain import copy_listing_main, testing_function
 from backend.serp import search_by_image, extract_top_links, filter_links_by_enabled_sites
-from backend.downloaders.thingiverse import extract_thing_id, stream_zip as tv_stream_zip, probe as probe_thingiverse
-from backend.downloaders.printables import extract_model_id as printables_model_id, build_zip as printables_build_zip, probe as probe_printables
-from backend.downloaders.makerworld import extract_model_info as mw_extract_model_info, download_3mf as mw_download_3mf, probe as probe_makerworld, open_session as mw_open_session, session_status as mw_session_status, close_session as mw_close_session
-from backend.downloaders.cults3d import extract_slug as cults3d_extract_slug, stream_zip as cults3d_stream_zip, probe as probe_cults3d, PaidModelError as Cults3DPaidModelError, load_cookies_from_browser as cults3d_load_cookies_from_browser
-from backend.downloaders.thangs import extract_model_id as thangs_extract_model_id, build_zip as thangs_build_zip, probe as probe_thangs, PaidModelError as ThangsPaidModelError
+from backend.downloaders.thingiverse import extract_thing_id, stream_zip as tv_stream_zip, probe as probe_thingiverse, scrape_images as tv_scrape_images, probe_images as probe_images_thingiverse
+from backend.downloaders.printables import extract_model_id as printables_model_id, build_zip as printables_build_zip, probe as probe_printables, scrape_images as printables_scrape_images, probe_images as probe_images_printables
+from backend.downloaders.makerworld import extract_model_info as mw_extract_model_info, download_3mf as mw_download_3mf, probe as probe_makerworld, open_session as mw_open_session, session_status as mw_session_status, close_session as mw_close_session, scrape_images as mw_scrape_images, probe_images as probe_images_makerworld
+from backend.downloaders.cults3d import extract_slug as cults3d_extract_slug, stream_zip as cults3d_stream_zip, probe as probe_cults3d, PaidModelError as Cults3DPaidModelError, load_cookies_from_browser as cults3d_load_cookies_from_browser, scrape_images as cults3d_scrape_images, probe_images as probe_images_cults3d
+from backend.downloaders.thangs import extract_model_id as thangs_extract_model_id, build_zip as thangs_build_zip, probe as probe_thangs, PaidModelError as ThangsPaidModelError, scrape_images as thangs_scrape_images, probe_images as probe_images_thangs
 from backend.constants.files_3d import DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, DOWNLOAD_MODES
 from backend.downloaders.zip_utils import extract_best_3d_file
 from backend.copyScripts.create_image import (
@@ -3143,6 +3143,83 @@ def test_3d_sites():
             ok, message = False, str(e)
         if not ok:
             print(f"[test-3d-sites] {site} FAILED: {message}")
+        return site, {"ok": ok, "message": message}
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=len(probes)) as executor:
+        futures = [executor.submit(run_probe, site, fn) for site, fn in probes]
+        for future in as_completed(futures):
+            site, result = future.result()
+            results[site] = result
+    return jsonify({"results": results})
+
+
+@app.route('/api/scrape-site-images', methods=['POST'])
+def scrape_site_images():
+    """
+    Return the main model gallery image URLs for a 3D file site page.
+
+    Expects JSON: {"link": "https://..."}
+    Returns JSON: {"images": ["https://...", ...]}
+    Supported: thingiverse.com, printables.com, makerworld.com, cults3d.com, thangs.com
+    Yeggi has no scraper and always returns an empty list.
+    """
+    try:
+        data = request.get_json()
+        if not data or not data.get("link"):
+            return jsonify({"error": "link is required"}), 400
+
+        link = data["link"].strip()
+
+        if "thingiverse.com" in link:
+            images = tv_scrape_images(link)
+        elif "printables.com" in link:
+            images = printables_scrape_images(link)
+        elif "makerworld.com" in link:
+            images = mw_scrape_images(link)
+        elif "cults3d.com" in link:
+            images = cults3d_scrape_images(link)
+        elif "thangs.com" in link:
+            images = thangs_scrape_images(link)
+        elif "yeggi.com" in link:
+            images = []
+        else:
+            return jsonify({"error": "Unsupported site — supported: thingiverse.com, printables.com, makerworld.com, cults3d.com, thangs.com, yeggi.com"}), 400
+
+        return jsonify({"images": images}), 200
+
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except RuntimeError as e:
+        print(f"[API] scrape-site-images upstream error: {e}")
+        return jsonify({"error": str(e)}), 502
+    except requests.exceptions.RequestException as e:
+        print(f"[API] scrape-site-images request error: {e}")
+        return jsonify({"error": "Image scrape request failed"}), 502
+    except Exception as e:
+        print(f"[API] scrape-site-images error: {e}")
+        return jsonify({"error": f"Image scrape failed: {str(e)}"}), 500
+
+
+@app.route('/api/test-3d-site-images', methods=['GET'])
+def test_3d_site_images():
+    """Probe each site's image scraper against a known public model. Probes run
+    concurrently — the Cults3D probe launches a browser and can take a minute."""
+    probes = [
+        ("printables.com", probe_images_printables),
+        ("thingiverse.com", probe_images_thingiverse),
+        ("makerworld.com", probe_images_makerworld),
+        ("cults3d.com", probe_images_cults3d),
+        ("thangs.com", probe_images_thangs),
+    ]
+
+    def run_probe(site, probe_fn):
+        try:
+            ok, message = probe_fn()
+        except Exception as e:
+            ok, message = False, str(e)
+        if not ok:
+            print(f"[test-3d-site-images] {site} FAILED: {message}")
         return site, {"ok": ok, "message": message}
 
     results = {}

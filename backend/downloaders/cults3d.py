@@ -305,6 +305,75 @@ def load_cookies_from_browser() -> str:
     )
 
 
+def _extract_image_urls(html: str) -> list[str]:
+    """Pull the lightbox originals (div.slides__slide img data-src) from a model page."""
+    urls: list[str] = []
+    seen: set[str] = set()
+    for data_src in re.findall(
+        r'<div[^>]*class="[^"]*slides__slide[^"]*"[^>]*>.*?<img[^>]*data-src="([^"]+)"',
+        html,
+        re.DOTALL | re.IGNORECASE,
+    ):
+        if data_src not in seen:
+            seen.add(data_src)
+            urls.append(data_src)
+    return urls
+
+
+def _scrape_images_attempt(link: str, headless: bool) -> list[str]:
+    extract_slug(link)  # validate the URL before launching a browser
+    SB = _require_seleniumbase()
+
+    with SB(
+        uc=True,
+        headless=headless,
+        headless2=headless,
+        user_data_dir=_PROFILE_DIR,
+        locale_code="en",
+    ) as sb:
+        sb.uc_open_with_reconnect(link, 4)
+        if not _wait_for_cloudflare(sb, 20):
+            if headless:
+                raise _CloudflareBlocked(
+                    "Cloudflare challenge could not be cleared in headless mode."
+                )
+            import importlib.util
+            if importlib.util.find_spec("pyautogui") is not None:
+                try:
+                    sb.driver.uc_gui_handle_captcha()
+                except Exception:
+                    pass
+            if not _wait_for_cloudflare(sb, 60):
+                raise _CloudflareBlocked(
+                    "Cloudflare challenge could not be cleared. Try again."
+                )
+
+        _dismiss_overlays(sb)
+        return _extract_image_urls(sb.get_page_source())
+
+
+def scrape_images(link: str) -> list[str]:
+    """Return the main gallery image URLs (fbi.cults3d.com originals) for a Cults3D model."""
+    with _PROFILE_LOCK:
+        if not _HEADLESS:
+            return _scrape_images_attempt(link, headless=False)
+        try:
+            return _scrape_images_attempt(link, headless=True)
+        except _CloudflareBlocked:
+            return _scrape_images_attempt(link, headless=False)
+
+
+def probe_images() -> tuple[bool, str]:
+    """Probe the image scraper against a known public model."""
+    try:
+        urls = scrape_images(f"{CULTS3D_BASE}/en/3d-model/art/low-poly-fox")
+        if urls:
+            return True, f"{len(urls)} image(s) found"
+        return False, "Page returned no images"
+    except Exception as e:
+        return False, str(e)
+
+
 def probe() -> tuple[bool, str]:
     try:
         r = requests.get(

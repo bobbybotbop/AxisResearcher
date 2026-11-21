@@ -387,6 +387,67 @@ def download_3mf(link_or_design_id: str, instance_id: str | None = None) -> tupl
             return _download_attempt(link, instance_id, email, password, headless=False)
 
 
+def _strip_oss_params(url: str) -> str:
+    """Drop the ?x-oss-process=... resize suffix so the URL is the original image."""
+    return url.split("?")[0]
+
+
+def scrape_images(link: str) -> list[str]:
+    """Return the main gallery image URLs for a MakerWorld design.
+
+    Uses the public design-service API (no auth, no Cloudflare): the design's
+    coverUrl plus the selected instance's pictures. When the URL carries a
+    #profileId-NNNN fragment, that instance's pictures are used; otherwise the
+    design's default instance.
+    """
+    design_id, instance_id = extract_model_info(link)
+    resp = requests.get(
+        f"{MAKERWORLD_API}/v1/design-service/design/{design_id}",
+        headers=_META_HEADERS,
+        timeout=20,
+    )
+    resp.raise_for_status()
+    design = resp.json()
+
+    instances = design.get("instances") or []
+    default_id = str(design.get("defaultInstanceId") or "")
+    target_id = instance_id or default_id
+    instance = None
+    for inst in instances:
+        if str(inst.get("id")) == target_id:
+            instance = inst
+            break
+    if instance is None and instances:
+        instance = instances[0]
+
+    urls: list[str] = []
+    seen: set[str] = set()
+
+    def add(url) -> None:
+        if not url:
+            return
+        clean = _strip_oss_params(url)
+        if clean not in seen:
+            seen.add(clean)
+            urls.append(clean)
+
+    add(design.get("coverUrl"))
+    for pic in (instance or {}).get("pictures") or []:
+        add(pic)
+    return urls
+
+
+def probe_images() -> tuple[bool, str]:
+    """Probe the image scraper against a known public design."""
+    try:
+        urls = scrape_images(f"{MAKERWORLD_BASE}/en/models/2462393")
+        if urls:
+            return True, f"{len(urls)} image(s) found"
+        return False, "Design API returned no images"
+    except Exception as e:
+        return False, str(e)
+
+
 # A small free public model used to verify the full download pipeline.
 _PROBE_DESIGN_ID = "2462393"
 
