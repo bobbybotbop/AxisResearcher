@@ -16,6 +16,8 @@ interface LogEntry {
   failed_skus?: string[];
   failed_errors?: Record<string, string[]>;
   not_found_skus?: string[];
+  newly_inactive_skus?: string[];
+  updated_skus?: string[];
   removed_titles?: Record<string, string>;
   quantity?: number;
   count?: number;
@@ -67,6 +69,8 @@ function getEntryDetail(entry: LogEntry): string {
     }
     case "import":
       return `${entry.count} listing(s) imported`;
+    case "sync_active":
+      return `${entry.active ?? 0} active · ${entry.newly_inactive ?? 0} newly inactive · ${entry.updated ?? 0} updated`;
     default:
       return entry.error || "";
   }
@@ -214,6 +218,26 @@ function restockSections(
   ];
 }
 
+/** Build the expand-panel sections for a sync_active log entry. */
+function syncActiveSections(
+  entry: LogEntry,
+  titleFor: (sku: string) => string | undefined,
+): SkuSection[] {
+  return [
+    {
+      heading: "Newly inactive",
+      skus: entry.newly_inactive_skus || [],
+      titleFor,
+    },
+    {
+      heading: "Updated",
+      skus: entry.updated_skus || [],
+      showView: true,
+      titleFor,
+    },
+  ];
+}
+
 export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -329,13 +353,20 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
           const rowKey = `${entry.timestamp}:${entry.event}:${index}`;
           const isError = entry.status === "error";
           const isRestock = entry.event === "restock";
+          const isSyncActive = entry.event === "sync_active";
+          // Old sync_active entries (counts only, no SKU lists) stay one-liners.
+          const isSyncActiveExpandable =
+            isSyncActive &&
+            ((entry.newly_inactive_skus || []).length > 0 ||
+              (entry.updated_skus || []).length > 0);
+          const isExpandable = isRestock || isSyncActiveExpandable;
           const hasSku = !!entry.sku;
           const isExpanded = expandedRows.has(rowKey);
 
-          const isClickable = isRestock || (hasSku && !!onNavigateToSku);
+          const isClickable = isExpandable || (hasSku && !!onNavigateToSku);
 
           const handleRowClick = () => {
-            if (isRestock) {
+            if (isExpandable) {
               toggleRow(rowKey);
             } else if (hasSku && onNavigateToSku) {
               onNavigateToSku(entry.sku!);
@@ -382,7 +413,7 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
                 <span className="shrink-0 whitespace-nowrap text-xs text-text-muted">
                   {formatTimestamp(entry.timestamp)}
                 </span>
-                {isRestock && (
+                {isExpandable && (
                   <span className="shrink-0 text-text-muted">
                     {isExpanded ? (
                       <ChevronDown size={14} />
@@ -396,6 +427,13 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
               {isRestock && isExpanded && (
                 <SkuSectionPanel
                   sections={restockSections(entry, (sku) => titleFor(sku, entry))}
+                  onOpenListing={onOpenListing}
+                />
+              )}
+
+              {isSyncActiveExpandable && isExpanded && (
+                <SkuSectionPanel
+                  sections={syncActiveSections(entry, (sku) => titleFor(sku, entry))}
                   onOpenListing={onOpenListing}
                 />
               )}

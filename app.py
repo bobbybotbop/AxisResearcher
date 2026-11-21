@@ -2771,6 +2771,7 @@ def api_sync_active_listings():
     newly_inactive = 0
     updated_count = 0
     not_found_skus = []
+    updated_skus = []
 
     if not os.path.exists(output_dir):
         return jsonify({'active': 0, 'newly_inactive': 0, 'updated': 0, 'not_found': []}), 200
@@ -2816,6 +2817,7 @@ def api_sync_active_listings():
                 active_count += 1
                 if file_changed or was_not_found:
                     updated_count += 1
+                    updated_skus.append(sku)
             else:
                 # AXIS_ listing: merge only the fields GetSellerList provides
                 data_changed = _merge_seller_item_into_axis_listing(
@@ -2831,6 +2833,7 @@ def api_sync_active_listings():
                 active_count += 1
                 if data_changed:
                     updated_count += 1
+                    updated_skus.append(sku)
 
         else:
             # Has ebayListingId but not found in active maps: mark as inactive
@@ -2846,10 +2849,16 @@ def api_sync_active_listings():
             print(f"[sync-active] Marked newly inactive: {sku}")
 
     # Step 3: Log the sync event
-    log_event("sync_active", "success",
-              active=active_count,
-              newly_inactive=newly_inactive,
-              updated=updated_count)
+    log_fields = {
+        'active': active_count,
+        'newly_inactive': newly_inactive,
+        'updated': updated_count,
+    }
+    if not_found_skus:
+        log_fields['newly_inactive_skus'] = not_found_skus
+    if updated_skus:
+        log_fields['updated_skus'] = updated_skus
+    log_event("sync_active", "success", **log_fields)
 
     # Step 4: Return response
     return jsonify({
