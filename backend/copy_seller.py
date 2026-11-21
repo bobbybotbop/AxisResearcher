@@ -16,37 +16,19 @@ import requests
 
 from backend.copyScripts.combine_data import load_config, save_config
 from backend.ebay_cli import (
+    _extract_listing_id,
     browse_api_headers,
     getItemIds,
     single_get_detailed_item_data,
 )
 from backend.helper_functions import helper_get_valid_token
 from backend.logger import log_event
-
-DAILY_API_BUDGET = 5000
-# Seller setup = one getItemIds page (conservative: sellers can need several).
-SELLER_SETUP_CALLS = 5
-
-# Title-simplification defaults (ticket 07). Editable in the Testing tab via
-# /api/research/title-simplification; persisted in listingPreferences.json.
-DEFAULT_TITLE_MAX_WORDS = 6
-# Common eBay sales filler: quantity/pack terms, colors, condition, and brand
-# filler that make a search phrase too specific to return results.
-DEFAULT_TITLE_STOPWORDS = [
-    # quantity / pack / lot
-    "lot", "pack", "set", "pair", "bundle", "bulk", "wholesale", "case",
-    "qty", "quantity", "pcs", "pc", "piece", "pieces", "count", "ct",
-    # condition
-    "new", "used", "like", "mint", "condition", "brand", "sealed", "open",
-    "box", "oem", "genuine", "original", "authentic", "refurbished", "renewed",
-    # colors
-    "red", "orange", "yellow", "green", "blue", "purple", "pink", "black",
-    "white", "gray", "grey", "brown", "gold", "silver", "beige", "multicolor",
-    # sales filler
-    "free", "shipping", "sale", "hot", "best", "top", "deal", "cheap",
-    "premium", "quality", "gift", "men", "women", "kids", "adult",
-    "for", "with", "and", "the", "of", "a", "an",
-]
+from backend.constants.research import (
+    DAILY_API_BUDGET,
+    SELLER_SETUP_CALLS,
+    DEFAULT_TITLE_MAX_WORDS,
+    DEFAULT_TITLE_STOPWORDS,
+)
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _COLLECTED_DATA_DIR = os.path.join(_PROJECT_ROOT, "Collected-Data")
@@ -82,13 +64,27 @@ def compute_demand_coefficient(top_k_sold_sum, active_listing_total):
     return top_k_sold_sum / active_listing_total
 
 
+def _extract_sold_quantity(item):
+    """Estimated sold quantity from a getItem response.
+
+    The real getItem shape nests it under estimatedAvailabilities[0]; fall back
+    to a top-level estimatedSoldQuantity when present.
+    """
+    availabilities = item.get("estimatedAvailabilities") or []
+    if availabilities:
+        sold = availabilities[0].get("estimatedSoldQuantity")
+        if sold is not None:
+            return sold
+    return item.get("estimatedSoldQuantity")
+
+
 def select_top_listings(detailed_items, min_sold, top_n):
     """Drop listings below min_sold, sort by sold desc, cap at top_n."""
     eligible = [
         item for item in detailed_items
-        if (item.get("estimatedSoldQuantity") or 0) >= min_sold
+        if (_extract_sold_quantity(item) or 0) >= min_sold
     ]
-    eligible.sort(key=lambda item: item.get("estimatedSoldQuantity") or 0, reverse=True)
+    eligible.sort(key=lambda item: _extract_sold_quantity(item) or 0, reverse=True)
     return eligible[:top_n]
 
 
@@ -420,15 +416,23 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, weights=None, s
             search = single_search_by_query(phrase, limit=k) or {"total_items": 0, "items": []}
             calls_made += 1
             active_total = search["total_items"]
-            top_k_sold_sum = sum(
-                (r.get("estimatedSoldQuantity") or 0) for r in search["items"][:k]
-            )
+            # itemSummaries carry no sold data; fetch each top-K result's getItem
+            # detail and sum estimatedSoldQuantity (the N×(1+K) cost model).
+            top_k_sold_sum = 0
+            for result in search["items"][:k]:
+                legacy_id = _extract_listing_id(result.get("itemId"))
+                if not legacy_id:
+                    continue
+                detail = single_get_detailed_item_data(f"v1|{legacy_id}|0", verbose=False)
+                calls_made += 1
+                if detail:
+                    top_k_sold_sum += _extract_sold_quantity(detail) or 0
 
             candidates.append({
                 "listing_url": item.get("itemWebUrl", ""),
                 "title": title,
                 "search_phrase": phrase,
-                "estimated_sold_quantity": item.get("estimatedSoldQuantity") or 0,
+                "estimated_sold_quantity": _extract_sold_quantity(item) or 0,
                 "item_creation_date": item.get("itemCreationDate"),
                 "price": item.get("price", {}).get("value"),
                 "currency": item.get("price", {}).get("currency"),
@@ -436,7 +440,7 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, weights=None, s
                 "demand_coefficient": compute_demand_coefficient(top_k_sold_sum, active_total),
                 "competition_count": active_total,
                 "sold_velocity": compute_sold_velocity(
-                    item.get("estimatedSoldQuantity") or 0, item.get("itemCreationDate")
+                    _extract_sold_quantity(item) or 0, item.get("itemCreationDate")
                 ),
             })
             yield {

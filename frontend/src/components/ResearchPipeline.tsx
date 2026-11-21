@@ -5,20 +5,13 @@ import ProductCandidateRow from "./ProductCandidateRow";
 import NumberInput from "./NumberInput";
 import { btnPill } from "../styles/buttonPill";
 import { rankCandidates } from "../utils/ranking";
+import { estimateApiCallCost } from "../constants/research";
 import type {
   CopySellerResult,
   PipelineRun,
   PipelineRunSummary,
   ProductCandidate,
 } from "../types/research";
-
-/** Mirrors SELLER_SETUP_CALLS in backend/copy_seller.py. */
-const SELLER_SETUP_CALLS = 5;
-
-/** Mirrors estimate_api_call_cost in backend/copy_seller.py: N×(1+K) + setup. */
-function estimateApiCallCost(topN: number, k: number): number {
-  return topN * (1 + k) + SELLER_SETUP_CALLS;
-}
 
 const STEP_BUDGET = "Checking API budget";
 const STEP_COLLECT = "Collecting seller listings";

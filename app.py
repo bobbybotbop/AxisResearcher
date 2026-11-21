@@ -238,9 +238,9 @@ def create_prompt(prompt_type):
 
 
 # --- Streaming progress helpers (NDJSON) ---
-def progress_event(step, status):
-    """Send a progress event as an NDJSON line."""
-    return json.dumps({"type": "progress", "step": step, "status": status}) + "\n"
+def progress_event(step, status, **extra):
+    """Send a progress event as an NDJSON line. Extra fields are merged in."""
+    return json.dumps({"type": "progress", "step": step, "status": status, **extra}) + "\n"
 
 def result_event(data):
     """Send a final result event as an NDJSON line."""
@@ -292,7 +292,16 @@ def research_copy_seller():
 
         print(f"[API] /api/research/copy-seller: seller={seller} top_n={top_n} k={k} min_sold={min_sold}")
         for event in run_copy_seller(seller, top_n=top_n, k=k, min_sold=min_sold, weights=weights):
-            yield json.dumps(event) + "\n"
+            event_type = event.get("type")
+            if event_type == "progress":
+                extra = {k: v for k, v in event.items() if k not in ("type", "step", "status")}
+                yield progress_event(event.get("step", ""), event.get("status", ""), **extra)
+            elif event_type == "result":
+                yield result_event(event.get("data"))
+            elif event_type == "error":
+                yield error_event(event.get("error", "Unknown error"))
+            else:
+                yield json.dumps(event) + "\n"
 
     return streaming_response(generate())
 
