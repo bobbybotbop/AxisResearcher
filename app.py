@@ -2903,6 +2903,9 @@ def api_sync_startup_listings():
 
     removed = 0
     healed = 0
+    removed_skus = []
+    healed_skus = []
+    removed_titles = {}
 
     if os.path.exists(output_dir):
         for fname in os.listdir(output_dir):
@@ -2964,12 +2967,19 @@ def api_sync_startup_listings():
                             print(f"[sync-startup] Failed to write {fname}: {e}")
                 if was_not_found or was_hidden:
                     healed += 1
+                    healed_skus.append(sku)
                     print(f"[sync-startup] Healed: {sku}")
             else:
                 # Has ebayListingId but not found on eBay: ended outside the
                 # app -> soft-delete. Keep ebayListingId so a future relist can
                 # re-match and heal this file.
                 if not was_hidden:
+                    # Snapshot the title before hiding: once soft-deleted the
+                    # listing leaves /api/listings, so lazy title resolution
+                    # would fail for exactly these rows.
+                    title = (local_data.get('inventoryItem', {})
+                             .get('product', {})
+                             .get('title'))
                     local_data['hidden'] = True
                     try:
                         with open(fpath, 'w', encoding='utf-8') as f:
@@ -2978,9 +2988,19 @@ def api_sync_startup_listings():
                         print(f"[sync-startup] Failed to write {fname}: {e}")
                         continue
                     removed += 1
+                    removed_skus.append(sku)
+                    if title:
+                        removed_titles[sku] = title
                     print(f"[sync-startup] Soft-deleted externally ended listing: {sku}")
 
-    log_event("sync_startup", "success", removed=removed, healed=healed)
+    log_kwargs = {'removed': removed, 'healed': healed}
+    if removed_skus:
+        log_kwargs['removed_skus'] = removed_skus
+    if healed_skus:
+        log_kwargs['healed_skus'] = healed_skus
+    if removed_titles:
+        log_kwargs['removed_titles'] = removed_titles
+    log_event("sync_startup", "success", **log_kwargs)
 
     return jsonify({'removed': removed, 'healed': healed, 'aborted': False}), 200
 

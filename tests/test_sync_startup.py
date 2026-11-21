@@ -147,6 +147,58 @@ def test_seller_list_error_returns_clean_error_payload(client, monkeypatch):
     assert "hidden" not in _read_listing(tmp, "AXIS_GONE")
 
 
+def test_log_payload_includes_sku_lists_and_removed_titles(client, monkeypatch):
+    tmp = client.fixture_dir
+    captured = []
+    monkeypatch.setattr(app_module, "log_event", lambda *a, **k: captured.append((a, k)))
+    monkeypatch.setattr(app_module, "get_seller_list", lambda: [
+        _seller_item("333", seller_sku="AXIS_BACK", quantity=7),
+    ])
+
+    removed_listing = _axis_listing(ebay_listing_id="111", sku="AXIS_GONE")
+    removed_listing["inventoryItem"]["product"]["title"] = "Vintage Poster"
+    _write_listing(tmp, "AXIS_GONE", removed_listing)
+    _write_listing(tmp, "AXIS_BACK", _axis_listing(
+        ebay_listing_id="333", ebay_status="not_found", hidden=True, sku="AXIS_BACK"))
+
+    res = client.post("/api/listings/sync-startup")
+    assert res.status_code == 200
+
+    sync_logs = [k for (a, k) in captured if a and a[0] == "sync_startup"]
+    assert len(sync_logs) == 1
+    payload = sync_logs[0]
+
+    assert payload["removed"] == 1
+    assert payload["healed"] == 1
+    assert payload["removed_skus"] == ["AXIS_GONE"]
+    assert payload["healed_skus"] == ["AXIS_BACK"]
+    # Title snapshotted before soft-deletion, from inventoryItem.product.title
+    assert payload["removed_titles"] == {"AXIS_GONE": "Vintage Poster"}
+
+
+def test_log_payload_omits_empty_sku_lists(client, monkeypatch):
+    tmp = client.fixture_dir
+    captured = []
+    monkeypatch.setattr(app_module, "log_event", lambda *a, **k: captured.append((a, k)))
+    monkeypatch.setattr(app_module, "get_seller_list", lambda: [
+        _seller_item("333", seller_sku="AXIS_OK"),
+    ])
+    _write_listing(tmp, "AXIS_OK", _axis_listing(ebay_listing_id="333", sku="AXIS_OK"))
+
+    res = client.post("/api/listings/sync-startup")
+    assert res.status_code == 200
+
+    sync_logs = [k for (a, k) in captured if a and a[0] == "sync_startup"]
+    assert len(sync_logs) == 1
+    payload = sync_logs[0]
+
+    assert payload["removed"] == 0
+    assert payload["healed"] == 0
+    assert "removed_skus" not in payload
+    assert "healed_skus" not in payload
+    assert "removed_titles" not in payload
+
+
 def test_sku_match_heals_missing_ebay_listing_id(client, monkeypatch):
     tmp = client.fixture_dir
     monkeypatch.setattr(app_module, "get_seller_list", lambda: [_seller_item("999", seller_sku="AXIS_SKU")])
