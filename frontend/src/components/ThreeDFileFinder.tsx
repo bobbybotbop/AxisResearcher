@@ -1,20 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
 import MessageBarInput from "./MessageBarInput";
+import RenderProfileDropdown from "./RenderProfileDropdown";
+import RenderProfileEditor from "./RenderProfileEditor";
 import StudioRenderPreview, { type StudioRenderPreviewHandle } from "./StudioRenderPreview";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
 import { DOWNLOAD_MODE_FILES, DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, threeDSiteKeyFromLink, type DownloadMode, type ThreeDSiteStatus } from "../constants/files3d";
 import {
+  DEFAULT_RENDER_SHOT_MODE,
   modelExtensionOf,
   NATIVE_RENDER_EXTENSIONS,
   RENDER_CANDIDATE_EXTENSIONS,
   RENDER_FOV_MAX,
   RENDER_FOV_MIN,
+  RENDER_LAYER_HEIGHT_MM_MAX,
+  RENDER_LAYER_HEIGHT_MM_MIN,
   RENDER_RESOLUTION_OPTIONS,
   RENDER_SETTINGS_DEFAULTS,
   RENDER_SETTINGS_SAVE_DEBOUNCE_MS,
   RENDERABLE_FORMATS_HINT,
+  renderSettingsFromUnknown,
+  type RenderFinish,
+  type RenderProfileSettings,
+  type RenderRigCamera,
+  type RenderShotMode,
 } from "../constants/render";
 
 interface SearchResult {
@@ -60,6 +70,16 @@ interface RenderSettingsPatch {
   roughness?: number;
   resolution?: number;
   fov?: number;
+  finish?: RenderFinish;
+  layer_height_mm?: number;
+  layer_depth?: number;
+  key_energy?: number;
+  fill_energy?: number;
+  rim_energy?: number;
+  ambient?: number;
+  shadow?: boolean;
+  shadow_softness?: number;
+  exposure?: number;
 }
 
 // Unzip a blob into flat entries; non-zip blobs (e.g. MakerWorld .3mf) become a single entry
@@ -161,28 +181,68 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
   const [step4Loading, setStep4Loading] = useState(false);
   const [step4Image, setStep4Image] = useState<{ url: string; filename: string } | null>(null);
   const [step4Error, setStep4Error] = useState<string | null>(null);
-  const [renderProgress, setRenderProgress] = useState<{ current: number; total: number; remainingSeconds: number | null } | null>(null);
+  const [renderProgress, setRenderProgress] = useState<{ current: number; total: number; remainingSeconds: number | null; shot: number | null; shots: number | null } | null>(null);
 
   // Step 4 — Render Settings (persisted in listingPreferences.json via /api/render-settings)
   const [renderColor, setRenderColor] = useState(RENDER_SETTINGS_DEFAULTS.color);
   const [renderRoughness, setRenderRoughness] = useState(RENDER_SETTINGS_DEFAULTS.roughness);
   const [renderResolution, setRenderResolution] = useState(RENDER_SETTINGS_DEFAULTS.resolution);
+  const [renderFinish, setRenderFinish] = useState<RenderFinish>(RENDER_SETTINGS_DEFAULTS.finish);
+  const [renderLayerHeightMm, setRenderLayerHeightMm] = useState(RENDER_SETTINGS_DEFAULTS.layerHeightMm);
+  const [renderLayerDepth, setRenderLayerDepth] = useState(RENDER_SETTINGS_DEFAULTS.layerDepth);
+  const [renderKeyEnergy, setRenderKeyEnergy] = useState(RENDER_SETTINGS_DEFAULTS.keyEnergy);
+  const [renderFillEnergy, setRenderFillEnergy] = useState(RENDER_SETTINGS_DEFAULTS.fillEnergy);
+  const [renderRimEnergy, setRenderRimEnergy] = useState(RENDER_SETTINGS_DEFAULTS.rimEnergy);
+  const [renderAmbient, setRenderAmbient] = useState(RENDER_SETTINGS_DEFAULTS.ambient);
+  const [renderShadow, setRenderShadow] = useState(RENDER_SETTINGS_DEFAULTS.shadow);
+  const [renderShadowSoftness, setRenderShadowSoftness] = useState(RENDER_SETTINGS_DEFAULTS.shadowSoftness);
+  const [renderExposure, setRenderExposure] = useState(RENDER_SETTINGS_DEFAULTS.exposure);
+  // Shot Mode + Camera Rig (Multi: N cameras → N images per Render click)
+  const [renderShotMode, setRenderShotMode] = useState<RenderShotMode>(DEFAULT_RENDER_SHOT_MODE);
+  const [renderRig, setRenderRig] = useState<RenderRigCamera[]>([]);
+  // Multi-shot render results (N images); per-shot progress rides on renderProgress
+  const [step4Images, setStep4Images] = useState<{ url: string; filename: string }[]>([]);
   const renderSettingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load persisted Render Settings once on mount; fall back to spec defaults on failure
-  useEffect(() => {
-    let cancelled = false;
+  // Step 4 — view switching: the profile dropdown or the Profile Editor
+  // (placeholder until ticket 05). editingProfile carries which profile the
+  // editor opened for: a name, null for "Current Settings", or "create".
+  const [step4View, setStep4View] = useState<"dropdown" | "editor">("dropdown");
+  const [editingProfile, setEditingProfile] = useState<string | null | "create">(null);
+
+  // (Re)load the persisted flat Render Settings into local state; falls back to
+  // spec defaults on failure. Used on mount and after the Profile Editor saves
+  // "Current Settings" so Step 4 reflects the saved values.
+  const reloadRenderSettings = () => {
     fetch("/api/render-settings")
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (cancelled || !data) return;
-        if (typeof data.color === "string") setRenderColor(data.color);
-        if (typeof data.roughness === "number") setRenderRoughness(data.roughness);
-        if (typeof data.resolution === "number") setRenderResolution(data.resolution);
-        if (typeof data.fov === "number") setRenderFov(data.fov);
+        if (!data) return;
+        const parsed = renderSettingsFromUnknown(data);
+        setRenderColor(parsed.color);
+        setRenderRoughness(parsed.roughness);
+        setRenderResolution(parsed.resolution);
+        setRenderFov(parsed.fov);
+        setRenderFinish(parsed.finish);
+        setRenderLayerHeightMm(parsed.layer_height_mm);
+        setRenderLayerDepth(parsed.layer_depth);
+        setRenderKeyEnergy(parsed.key_energy);
+        setRenderFillEnergy(parsed.fill_energy);
+        setRenderRimEnergy(parsed.rim_energy);
+        setRenderAmbient(parsed.ambient);
+        setRenderShadow(parsed.shadow);
+        setRenderShadowSoftness(parsed.shadow_softness);
+        setRenderExposure(parsed.exposure);
+        setRenderShotMode(parsed.shot_mode);
+        setRenderRig(parsed.rig);
       })
       .catch(() => { /* keep spec defaults */ });
-    return () => { cancelled = true; };
+  };
+
+  // Load persisted Render Settings once on mount; fall back to spec defaults on failure
+  useEffect(() => {
+    reloadRenderSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Persist changes debounced (slider/color input fire many events while dragging)
@@ -195,6 +255,37 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
         body: JSON.stringify(patch),
       }).catch(() => { /* persistence is best-effort; the control still applies to renders */ });
     }, RENDER_SETTINGS_SAVE_DEBOUNCE_MS);
+  };
+
+  // Selecting a Render Profile copies its values into Current Settings: the
+  // whole settings object is POSTed verbatim to the flat settings (so fields
+  // added later need no UI changes), and known fields update local state so
+  // the preview/Render button reflect the selection immediately.
+  const handleProfileSelect = (name: string | null, settings: RenderProfileSettings | null) => {
+    if (name === null || !settings) return; // "Current Settings": flat settings are already the source of truth
+    if (renderSettingsSaveTimer.current) clearTimeout(renderSettingsSaveTimer.current);
+    fetch("/api/render-settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(settings),
+    }).catch(() => { /* the selection still applies locally for this session */ });
+    const parsed = renderSettingsFromUnknown(settings);
+    setRenderColor(parsed.color);
+    setRenderRoughness(parsed.roughness);
+    setRenderResolution(parsed.resolution);
+    setRenderFov(parsed.fov);
+    setRenderFinish(parsed.finish);
+    setRenderLayerHeightMm(parsed.layer_height_mm);
+    setRenderLayerDepth(parsed.layer_depth);
+    setRenderKeyEnergy(parsed.key_energy);
+    setRenderFillEnergy(parsed.fill_energy);
+    setRenderRimEnergy(parsed.rim_energy);
+    setRenderAmbient(parsed.ambient);
+    setRenderShadow(parsed.shadow);
+    setRenderShadowSoftness(parsed.shadow_softness);
+    setRenderExposure(parsed.exposure);
+    setRenderShotMode(parsed.shot_mode);
+    setRenderRig(parsed.rig);
   };
 
   const resetStep4 = () => {
@@ -415,34 +506,67 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
     setStep4Error(null);
     setStep4Image(null);
     setRenderProgress(null);
+    setStep4Images([]);
+    // Multi Shot Mode with a rig renders N cameras as one streaming job
+    // (sequential backend Render Jobs); an empty rig falls back to the single
+    // preview angle.
+    const multi = renderShotMode === "multi" && renderRig.length > 0;
     try {
       const form = new FormData();
       form.append("file", renderFile);
       form.append("color", renderColor);
       form.append("roughness", String(renderRoughness));
       form.append("resolution", String(renderResolution));
-      // Camera Intent: the angle the user framed in the preview
+      // Camera Intent: the angle the user framed in the preview (single mode;
+      // in multi the rig's azimuth/elevation cameras take over)
       const intent = previewRef.current?.getCameraIntent();
       if (intent) {
         form.append("camera_position", intent.position.join(","));
         form.append("camera_target", intent.target.join(","));
       }
       form.append("fov", String(renderFov));
+      form.append("finish", renderFinish);
+      form.append("layer_height_mm", String(renderLayerHeightMm));
+      form.append("layer_depth", String(renderLayerDepth));
+      form.append("key_energy", String(renderKeyEnergy));
+      form.append("fill_energy", String(renderFillEnergy));
+      form.append("rim_energy", String(renderRimEnergy));
+      form.append("ambient", String(renderAmbient));
+      form.append("shadow", String(renderShadow));
+      form.append("shadow_softness", String(renderShadowSoftness));
+      form.append("exposure", String(renderExposure));
+      if (multi) {
+        form.append("shot_mode", "multi");
+        form.append("rig", JSON.stringify(renderRig));
+      }
       const data = await fetchWithProgress(
         "/api/render",
         { method: "POST", body: form },
         (event) => {
+          const shot = typeof event.shot === "number" ? event.shot : null;
+          const shots = typeof event.shots === "number" ? event.shots : null;
           if (typeof event.current === "number" && typeof event.total === "number") {
+            // Cycles checkpoint: sample N/M (tagged with the shot on multi runs)
             setRenderProgress({
               current: event.current,
               total: event.total,
               remainingSeconds: typeof event.remaining_seconds === "number" ? event.remaining_seconds : null,
+              shot,
+              shots,
             });
+          } else if (shot !== null) {
+            // "shot i of N" marker: a new camera is starting (reset the sample bar)
+            setRenderProgress({ current: 0, total: 0, remainingSeconds: null, shot, shots });
           }
         },
-      ) as { image?: string; filename?: string };
-      if (!data.image || !data.filename) throw new Error("Render finished without an image");
-      setStep4Image({ url: data.image, filename: data.filename });
+      ) as { image?: string; filename?: string; images?: string[] };
+      const images = Array.isArray(data.images) && data.images.length > 0 ? data.images : (data.image ? [data.image] : []);
+      if (images.length === 0 || !data.filename) throw new Error("Render finished without an image");
+      if (multi) {
+        setStep4Images(images.map((url) => ({ url, filename: url.split("/").pop() ?? "render.png" })));
+      } else {
+        setStep4Image({ url: images[0], filename: data.filename });
+      }
     } catch (err) {
       setStep4Error((err as Error).message || "Render failed");
     } finally {
@@ -677,58 +801,27 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
       {/* Step 4 — Studio Render */}
       <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
         <p className="text-sm font-semibold text-text-primary">Step 4 — Studio Render</p>
-        {/* Render Settings — persisted; camera angle is captured from the preview below */}
-        <div className="flex flex-wrap items-end gap-x-6 gap-y-3 rounded-lg border border-border-default p-3">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">Color</span>
-            <input
-              type="color"
-              aria-label="Model color"
-              value={renderColor}
-              onChange={(e) => {
-                setRenderColor(e.target.value);
-                persistRenderSettings({ color: e.target.value });
+        {step4View === "editor" ? (
+          <RenderProfileEditor
+            editingProfile={editingProfile}
+            onBack={() => setStep4View("dropdown")}
+            onSavedCurrentSettings={reloadRenderSettings}
+            addToast={addToast}
+          />
+        ) : (
+          /* Render Profile — selecting one copies its values into Current
+             Settings (the flat settings); camera angle is captured from the preview below */
+          <div className="flex items-center gap-3 rounded-lg border border-border-default p-3">
+            <RenderProfileDropdown
+              onSelect={handleProfileSelect}
+              onEdit={(mode, name) => {
+                setEditingProfile(mode === "create" ? "create" : name);
+                setStep4View("editor");
               }}
-              className="h-8 w-14 cursor-pointer rounded border border-border-default bg-surface-panel"
+              addToast={addToast}
             />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">Glossiness ({(1 - renderRoughness).toFixed(2)})</span>
-            {/* Slider shows glossiness; the persisted/wire value is Principled
-                roughness (glossiness = 1 − roughness), so dragging up = glossier */}
-            <input
-              type="range"
-              aria-label="Glossiness"
-              min={0}
-              max={1}
-              step={0.05}
-              value={1 - renderRoughness}
-              onChange={(e) => {
-                const roughness = 1 - Number(e.target.value);
-                setRenderRoughness(roughness);
-                persistRenderSettings({ roughness });
-              }}
-              className="w-40 accent-primary"
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">Resolution</span>
-            <select
-              aria-label="Resolution"
-              value={renderResolution}
-              onChange={(e) => {
-                const value = Number(e.target.value);
-                setRenderResolution(value);
-                persistRenderSettings({ resolution: value });
-              }}
-              className="rounded border border-border-default bg-surface-panel px-2 py-1 text-sm text-text-primary"
-            >
-              {RENDER_RESOLUTION_OPTIONS.map((size) => (
-                <option key={size} value={size}>{size} × {size}</option>
-              ))}
-            </select>
-          </label>
-        </div>
+          </div>
+        )}
         <div className="flex items-center gap-3">
           <button
             type="button"
@@ -752,6 +845,14 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
                 : "Download a model in Step 3, or test with your own file"}
           </p>
         </div>
+        {/* Multi-shot summary: the active profile's Camera Rig (angle list) */}
+        {renderShotMode === "multi" && renderRig.length > 0 && (
+          <p className="text-xs text-text-muted">
+            <span className="font-semibold text-text-primary">Multi-shot: {renderRig.length} camera{renderRig.length !== 1 ? "s" : ""}</span>
+            {" — "}
+            {renderRig.map((c, i) => `#${i + 1} az ${c.azimuth}° el ${c.elevation}°`).join(", ")}
+          </p>
+        )}
         <label className="flex items-center gap-2 text-xs text-text-muted">
           Test your own file:
           <input
@@ -827,7 +928,7 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
             </div>
             <p className="text-xs text-text-muted">
               {renderProgress
-                ? `Rendering — sample ${renderProgress.current}/${renderProgress.total}${renderProgress.remainingSeconds != null ? `, ~${Math.ceil(renderProgress.remainingSeconds)}s remaining` : ""}`
+                ? `${renderProgress.shot != null && renderProgress.shots != null ? `Rendering shot ${renderProgress.shot} of ${renderProgress.shots} — ` : "Rendering — "}${renderProgress.total > 0 ? `sample ${renderProgress.current}/${renderProgress.total}${renderProgress.remainingSeconds != null ? `, ~${Math.ceil(renderProgress.remainingSeconds)}s remaining` : ""}` : "starting..."}`
                 : "Rendering in Blender — this usually takes 10–30 seconds..."}
             </p>
           </div>
@@ -842,6 +943,23 @@ function ThreeDFileFinder({ addToast, fileDownloadDelay = 0, siteStatus = null, 
             <a href={step4Image.url} download={step4Image.filename} className={btnPillSm}>
               Download {step4Image.filename}
             </a>
+          </div>
+        )}
+        {/* Multi-shot result: N-image grid with per-image download */}
+        {step4Images.length > 0 && (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {step4Images.map((image, index) => (
+              <div key={image.url} className="flex flex-col items-start gap-1">
+                <img
+                  src={image.url}
+                  alt={`Studio render shot ${index + 1}`}
+                  className="w-full rounded-lg border border-border-default"
+                />
+                <a href={image.url} download={image.filename} className={btnPillSm}>
+                  Download shot {index + 1}
+                </a>
+              </div>
+            ))}
           </div>
         )}
         {step4Error && (

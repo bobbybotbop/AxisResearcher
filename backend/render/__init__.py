@@ -14,12 +14,22 @@ from pathlib import Path
 from backend.constants.render import (
     BLENDER_PATH_ENV_VAR,
     DEFAULT_BLENDER_PATH,
+    DEFAULT_RENDER_AMBIENT,
     DEFAULT_RENDER_AZIMUTH,
     DEFAULT_RENDER_COLOR,
     DEFAULT_RENDER_ELEVATION,
+    DEFAULT_RENDER_EXPOSURE,
+    DEFAULT_RENDER_FILL_ENERGY,
+    DEFAULT_RENDER_FINISH,
     DEFAULT_RENDER_FOV,
+    DEFAULT_RENDER_KEY_ENERGY,
+    DEFAULT_RENDER_LAYER_DEPTH,
+    DEFAULT_RENDER_LAYER_HEIGHT_MM,
     DEFAULT_RENDER_RESOLUTION,
+    DEFAULT_RENDER_RIM_ENERGY,
     DEFAULT_RENDER_ROUGHNESS,
+    DEFAULT_RENDER_SHADOW,
+    DEFAULT_RENDER_SHADOW_SOFTNESS,
     NATIVE_RENDER_EXTENSIONS,
     RENDER_TIMEOUT_SECONDS,
 )
@@ -67,7 +77,9 @@ def _parse_remaining_seconds(match: re.Match) -> float:
 
 
 def _prepare_render(input_path, output_path, color, roughness, resolution,
-                    azimuth, elevation, fov, blender_path):
+                    azimuth, elevation, fov, finish, layer_height_mm, layer_depth,
+                    key_energy, fill_energy, rim_energy, ambient, shadow,
+                    shadow_softness, exposure, blender_path):
     """Validate inputs and build the Blender command line."""
     input_path = Path(input_path)
     output_path = Path(output_path)
@@ -102,6 +114,16 @@ def _prepare_render(input_path, output_path, color, roughness, resolution,
         "--azimuth", f"{float(azimuth):.4f}",
         "--elevation", f"{float(elevation):.4f}",
         "--fov", f"{float(fov):.4f}",
+        "--finish", str(finish),
+        "--layer-height-mm", f"{float(layer_height_mm):.4f}",
+        "--layer-depth", f"{float(layer_depth):.4f}",
+        "--key-energy", f"{float(key_energy):.4f}",
+        "--fill-energy", f"{float(fill_energy):.4f}",
+        "--rim-energy", f"{float(rim_energy):.4f}",
+        "--ambient", f"{float(ambient):.4f}",
+        "--shadow" if shadow else "--no-shadow",
+        "--shadow-softness", f"{float(shadow_softness):.4f}",
+        "--exposure", f"{float(exposure):.4f}",
     ]
     return command, output_path
 
@@ -116,6 +138,16 @@ def iter_render_progress(
     azimuth: float = DEFAULT_RENDER_AZIMUTH,
     elevation: float = DEFAULT_RENDER_ELEVATION,
     fov: float = DEFAULT_RENDER_FOV,
+    finish: str = DEFAULT_RENDER_FINISH,
+    layer_height_mm: float = DEFAULT_RENDER_LAYER_HEIGHT_MM,
+    layer_depth: float = DEFAULT_RENDER_LAYER_DEPTH,
+    key_energy: float = DEFAULT_RENDER_KEY_ENERGY,
+    fill_energy: float = DEFAULT_RENDER_FILL_ENERGY,
+    rim_energy: float = DEFAULT_RENDER_RIM_ENERGY,
+    ambient: float = DEFAULT_RENDER_AMBIENT,
+    shadow: bool = DEFAULT_RENDER_SHADOW,
+    shadow_softness: float = DEFAULT_RENDER_SHADOW_SOFTNESS,
+    exposure: float = DEFAULT_RENDER_EXPOSURE,
     blender_path: str | None = None,
     timeout: int = RENDER_TIMEOUT_SECONDS,
 ):
@@ -126,11 +158,17 @@ def iter_render_progress(
     remaining_seconds is None when the line carries no 'Remaining:MM:SS' ETA.
     Returns the output Path via StopIteration.value once the PNG exists.
 
+    The lighting (key/fill/rim energy, ambient), shadow, exposure, and Surface
+    Finish kwargs map to the Render Settings; their defaults reproduce the
+    original render.
+
     Raises RenderError (or a subclass) with a friendly message on any failure.
     """
     command, output_path = _prepare_render(
         input_path, output_path, color, roughness, resolution,
-        azimuth, elevation, fov, blender_path,
+        azimuth, elevation, fov, finish, layer_height_mm, layer_depth,
+        key_energy, fill_energy, rim_energy, ambient, shadow,
+        shadow_softness, exposure, blender_path,
     )
 
     try:
@@ -208,6 +246,16 @@ def render_model(
     azimuth: float = DEFAULT_RENDER_AZIMUTH,
     elevation: float = DEFAULT_RENDER_ELEVATION,
     fov: float = DEFAULT_RENDER_FOV,
+    finish: str = DEFAULT_RENDER_FINISH,
+    layer_height_mm: float = DEFAULT_RENDER_LAYER_HEIGHT_MM,
+    layer_depth: float = DEFAULT_RENDER_LAYER_DEPTH,
+    key_energy: float = DEFAULT_RENDER_KEY_ENERGY,
+    fill_energy: float = DEFAULT_RENDER_FILL_ENERGY,
+    rim_energy: float = DEFAULT_RENDER_RIM_ENERGY,
+    ambient: float = DEFAULT_RENDER_AMBIENT,
+    shadow: bool = DEFAULT_RENDER_SHADOW,
+    shadow_softness: float = DEFAULT_RENDER_SHADOW_SOFTNESS,
+    exposure: float = DEFAULT_RENDER_EXPOSURE,
     blender_path: str | None = None,
     timeout: int = RENDER_TIMEOUT_SECONDS,
     on_progress=None,
@@ -216,7 +264,9 @@ def render_model(
 
     azimuth/elevation/fov are Blender-space camera angles (see
     backend.render.camera for the three.js -> Blender conversion). Distance is
-    auto-computed by the Blender script to frame the whole model.
+    auto-computed by the Blender script to frame the whole model. The lighting
+    (key/fill/rim energy, ambient), shadow, exposure, and Surface Finish kwargs
+    map to the Render Settings; their defaults reproduce the original render.
 
     on_progress, when given, is called as on_progress(current, total,
     remaining_seconds) for each Cycles 'Sample N/M' checkpoint Blender prints;
@@ -228,6 +278,10 @@ def render_model(
         input_path, output_path,
         color=color, roughness=roughness, resolution=resolution,
         azimuth=azimuth, elevation=elevation, fov=fov,
+        finish=finish, layer_height_mm=layer_height_mm, layer_depth=layer_depth,
+        key_energy=key_energy, fill_energy=fill_energy, rim_energy=rim_energy,
+        ambient=ambient, shadow=shadow, shadow_softness=shadow_softness,
+        exposure=exposure,
         blender_path=blender_path, timeout=timeout,
     )
     try:

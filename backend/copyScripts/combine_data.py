@@ -12,10 +12,40 @@ from backend.constants.ebay import EBAY_INVENTORY_API_BASE
 from backend.constants.paths import CONFIG_FILE, GENERATED_LISTINGS_DIR
 from backend.constants.listing import SKU_PREFIX, MANUAL_SKU_PREFIX, DEFAULT_OPERATION_COOLDOWN_HOURS, EBAY_STATUS_NOT_FOUND
 from backend.constants.render import (
+    DEFAULT_RENDER_AMBIENT,
     DEFAULT_RENDER_COLOR,
+    DEFAULT_RENDER_EXPOSURE,
+    DEFAULT_RENDER_FILL_ENERGY,
+    DEFAULT_RENDER_FINISH,
     DEFAULT_RENDER_FOV,
+    DEFAULT_RENDER_KEY_ENERGY,
+    DEFAULT_RENDER_LAYER_DEPTH,
+    DEFAULT_RENDER_LAYER_HEIGHT_MM,
     DEFAULT_RENDER_RESOLUTION,
+    DEFAULT_RENDER_RIM_ENERGY,
     DEFAULT_RENDER_ROUGHNESS,
+    DEFAULT_RENDER_SHADOW,
+    DEFAULT_RENDER_SHADOW_SOFTNESS,
+    RENDER_AMBIENT_MAX,
+    RENDER_AZIMUTH_MAX,
+    RENDER_AZIMUTH_MIN,
+    RENDER_ELEVATION_MAX,
+    RENDER_ELEVATION_MIN,
+    RENDER_ENERGY_MAX,
+    RENDER_EXPOSURE_MAX,
+    RENDER_EXPOSURE_MIN,
+    RENDER_FINISHES,
+    RENDER_FOV_MAX,
+    RENDER_FOV_MIN,
+    RENDER_LAYER_DEPTH_MAX,
+    RENDER_LAYER_DEPTH_MIN,
+    RENDER_LAYER_HEIGHT_MM_MAX,
+    RENDER_LAYER_HEIGHT_MM_MIN,
+    RENDER_RESOLUTIONS,
+    RENDER_SHADOW_SOFTNESS_MAX,
+    RENDER_SHADOW_SOFTNESS_MIN,
+    DEFAULT_RENDER_SHOT_MODE,
+    RENDER_SHOT_MODES,
 )
 from backend.render.validate import (
     validate_fov,
@@ -1276,8 +1306,12 @@ def get_render_settings():
     Read Studio Render (Step 4) settings from listingPreferences.json.
 
     Returns:
-        dict: {"color": str, "roughness": float, "resolution": int, "fov": float}
-              Camera angle/target are ephemeral and deliberately not included.
+        dict: the full Render Settings surface — material (color, roughness,
+              finish, layer_height_mm, layer_depth), lighting (key/fill/rim
+              energy, ambient), shadows (shadow, shadow_softness), exposure,
+              resolution, fov, shot_mode, and rig (the Camera Rig: an ordered
+              list of {"azimuth", "elevation"} cameras). Camera angle/target
+              are ephemeral and deliberately not included.
     """
     config = load_config()
     return {
@@ -1285,22 +1319,72 @@ def get_render_settings():
         "roughness": float(config.get("render_roughness", DEFAULT_RENDER_ROUGHNESS)),
         "resolution": int(config.get("render_resolution", DEFAULT_RENDER_RESOLUTION)),
         "fov": float(config.get("render_fov", DEFAULT_RENDER_FOV)),
+        "finish": str(config.get("render_finish", DEFAULT_RENDER_FINISH)),
+        "layer_height_mm": float(config.get("render_layer_height_mm", DEFAULT_RENDER_LAYER_HEIGHT_MM)),
+        "layer_depth": float(config.get("render_layer_depth", DEFAULT_RENDER_LAYER_DEPTH)),
+        "key_energy": float(config.get("render_key_energy", DEFAULT_RENDER_KEY_ENERGY)),
+        "fill_energy": float(config.get("render_fill_energy", DEFAULT_RENDER_FILL_ENERGY)),
+        "rim_energy": float(config.get("render_rim_energy", DEFAULT_RENDER_RIM_ENERGY)),
+        "ambient": float(config.get("render_ambient", DEFAULT_RENDER_AMBIENT)),
+        "shadow": bool(config.get("render_shadow", DEFAULT_RENDER_SHADOW)),
+        "shadow_softness": float(config.get("render_shadow_softness", DEFAULT_RENDER_SHADOW_SOFTNESS)),
+        "exposure": float(config.get("render_exposure", DEFAULT_RENDER_EXPOSURE)),
+        "shot_mode": str(config.get("render_shot_mode", DEFAULT_RENDER_SHOT_MODE)),
+        "rig": [dict(camera) for camera in config.get("render_rig", [])],
     }
 
 
-def save_render_settings(color=None, roughness=None, resolution=None, fov=None):
+def validate_rig(rig):
+    """Normalize a Camera Rig to a list of {"azimuth": float, "elevation": float}.
+
+    Raises ValueError on any malformed camera (roll is fixed at 0 by design).
+    """
+    if not isinstance(rig, (list, tuple)):
+        raise ValueError("rig must be a list of cameras like [{\"azimuth\": 0, \"elevation\": 0}]")
+    cameras = []
+    for camera in rig:
+        if not isinstance(camera, dict) or set(camera) != {"azimuth", "elevation"}:
+            raise ValueError("each rig camera must have exactly azimuth and elevation")
+        try:
+            azimuth = float(camera["azimuth"])
+            elevation = float(camera["elevation"])
+        except (TypeError, ValueError):
+            raise ValueError("rig azimuth and elevation must be numbers")
+        if not RENDER_AZIMUTH_MIN <= azimuth <= RENDER_AZIMUTH_MAX:
+            raise ValueError(f"rig azimuth must be between {RENDER_AZIMUTH_MIN:g} and {RENDER_AZIMUTH_MAX:g} degrees")
+        if not RENDER_ELEVATION_MIN <= elevation <= RENDER_ELEVATION_MAX:
+            raise ValueError(f"rig elevation must be between {RENDER_ELEVATION_MIN:g} and {RENDER_ELEVATION_MAX:g} degrees")
+        cameras.append({"azimuth": azimuth, "elevation": elevation})
+    return cameras
+
+
+def save_render_settings(color=None, roughness=None, resolution=None, fov=None,
+                         finish=None, layer_height_mm=None, layer_depth=None,
+                         key_energy=None, fill_energy=None, rim_energy=None,
+                         ambient=None, shadow=None, shadow_softness=None, exposure=None,
+                         shot_mode=None, rig=None):
     """
     Persist Studio Render (Step 4) settings to listingPreferences.json.
 
-    Args:
-        color (str, optional): Hex color like "#1a1a1a". Unchanged if None.
-        roughness (float, optional): Principled roughness 0..1. Unchanged if None.
-        resolution (int, optional): Square size, one of RENDER_RESOLUTIONS. Unchanged if None.
-        fov (float, optional): Preview field of view in degrees. Unchanged if None.
+    Args (all optional; unchanged when None):
+        color (str): Hex color like "#1a1a1a".
+        roughness (float): Principled roughness 0..1.
+        resolution (int): Square size, one of RENDER_RESOLUTIONS.
+        fov (float): Preview field of view in degrees.
+        finish (str): Surface Finish, one of RENDER_FINISHES.
+        layer_height_mm (float): FDM layer height for Layer Lines.
+        layer_depth (float): Layer Lines bump strength.
+        key_energy / fill_energy / rim_energy (float): light intensities.
+        ambient (float): world background strength.
+        shadow (bool): whether the key light casts a shadow.
+        shadow_softness (float): key light disk size (shadow softness).
+        exposure (float): global multiplier on all energies + world strength.
+        shot_mode (str): Shot Mode, one of RENDER_SHOT_MODES.
+        rig (list): Camera Rig — ordered cameras, each {"azimuth", "elevation"}
+                    in degrees (roll fixed 0).
 
     Returns:
-        dict: {"color": str, "roughness": float, "resolution": int, "fov": float}
-              reflecting the saved state.
+        dict: the full Render Settings reflecting the saved state.
 
     Raises:
         ValueError: If any provided value is invalid.
@@ -1317,8 +1401,332 @@ def save_render_settings(color=None, roughness=None, resolution=None, fov=None):
         config["render_resolution"] = validate_resolution(resolution)
     if fov is not None:
         config["render_fov"] = validate_fov(fov)
+    if finish is not None:
+        finish = str(finish)
+        if finish not in RENDER_FINISHES:
+            raise ValueError(f"finish must be one of {list(RENDER_FINISHES)}")
+        config["render_finish"] = finish
+    if layer_height_mm is not None:
+        try:
+            layer_height_mm = float(layer_height_mm)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"layer_height_mm must be a number between {RENDER_LAYER_HEIGHT_MM_MIN} and {RENDER_LAYER_HEIGHT_MM_MAX}")
+        if not RENDER_LAYER_HEIGHT_MM_MIN <= layer_height_mm <= RENDER_LAYER_HEIGHT_MM_MAX:
+            raise ValueError(
+                f"layer_height_mm must be between {RENDER_LAYER_HEIGHT_MM_MIN} and {RENDER_LAYER_HEIGHT_MM_MAX}")
+        config["render_layer_height_mm"] = layer_height_mm
+    if layer_depth is not None:
+        try:
+            layer_depth = float(layer_depth)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"layer_depth must be a number between {RENDER_LAYER_DEPTH_MIN} and {RENDER_LAYER_DEPTH_MAX}")
+        if not RENDER_LAYER_DEPTH_MIN <= layer_depth <= RENDER_LAYER_DEPTH_MAX:
+            raise ValueError(f"layer_depth must be between {RENDER_LAYER_DEPTH_MIN} and {RENDER_LAYER_DEPTH_MAX}")
+        config["render_layer_depth"] = layer_depth
+    for name, value in (("key_energy", key_energy), ("fill_energy", fill_energy), ("rim_energy", rim_energy)):
+        if value is not None:
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                raise ValueError(f"{name} must be a number between 0 and {RENDER_ENERGY_MAX}")
+            if not 0.0 <= value <= RENDER_ENERGY_MAX:
+                raise ValueError(f"{name} must be between 0 and {RENDER_ENERGY_MAX}")
+            config[f"render_{name}"] = value
+    if ambient is not None:
+        try:
+            ambient = float(ambient)
+        except (TypeError, ValueError):
+            raise ValueError(f"ambient must be a number between 0 and {RENDER_AMBIENT_MAX}")
+        if not 0.0 <= ambient <= RENDER_AMBIENT_MAX:
+            raise ValueError(f"ambient must be between 0 and {RENDER_AMBIENT_MAX}")
+        config["render_ambient"] = ambient
+    if shadow is not None:
+        if not isinstance(shadow, bool):
+            raise ValueError("shadow must be a boolean")
+        config["render_shadow"] = shadow
+    if shadow_softness is not None:
+        try:
+            shadow_softness = float(shadow_softness)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"shadow_softness must be a number between {RENDER_SHADOW_SOFTNESS_MIN} and {RENDER_SHADOW_SOFTNESS_MAX}")
+        if not RENDER_SHADOW_SOFTNESS_MIN <= shadow_softness <= RENDER_SHADOW_SOFTNESS_MAX:
+            raise ValueError(
+                f"shadow_softness must be between {RENDER_SHADOW_SOFTNESS_MIN} and {RENDER_SHADOW_SOFTNESS_MAX}")
+        config["render_shadow_softness"] = shadow_softness
+    if exposure is not None:
+        try:
+            exposure = float(exposure)
+        except (TypeError, ValueError):
+            raise ValueError(f"exposure must be a number between {RENDER_EXPOSURE_MIN} and {RENDER_EXPOSURE_MAX}")
+        if not RENDER_EXPOSURE_MIN <= exposure <= RENDER_EXPOSURE_MAX:
+            raise ValueError(f"exposure must be between {RENDER_EXPOSURE_MIN} and {RENDER_EXPOSURE_MAX}")
+        config["render_exposure"] = exposure
+    if shot_mode is not None:
+        shot_mode = str(shot_mode)
+        if shot_mode not in RENDER_SHOT_MODES:
+            raise ValueError(f"shot_mode must be one of {list(RENDER_SHOT_MODES)}")
+        config["render_shot_mode"] = shot_mode
+    if rig is not None:
+        config["render_rig"] = validate_rig(rig)
     save_config(config)
     return get_render_settings()
+
+
+def get_render_profiles():
+    """
+    Read saved Render Profiles from listingPreferences.json.
+
+    Returns:
+        dict: {profile_name: settings_dict}. "Current Settings" is not a
+              stored profile and never appears here.
+    """
+    config = load_config()
+    profiles = config.get("render_profiles", {})
+    return {str(name): dict(settings) for name, settings in profiles.items()}
+
+
+def save_render_profile(name, settings):
+    """
+    Persist a Render Profile (name + full settings snapshot) to
+    listingPreferences.json. Overwrites any existing profile with the same name.
+
+    Args:
+        name (str): Profile name. Must be non-empty and not "Current Settings".
+        settings (dict): Flat settings dict mirroring get_render_settings()
+                         keys (color, roughness, resolution, fov). Extra keys
+                         are preserved so future fields need no migration.
+
+    Returns:
+        dict: {"name": name, "settings": settings} as saved.
+
+    Raises:
+        ValueError: If the name is empty, reserved, or the settings are invalid.
+    """
+    name = _validate_render_profile_name(name)
+    settings = _validate_render_profile_settings(settings)
+    config = load_config()
+    profiles = config.get("render_profiles", {})
+    profiles[name] = settings
+    config["render_profiles"] = profiles
+    save_config(config)
+    return {"name": name, "settings": dict(settings)}
+
+
+def delete_render_profile(name):
+    """
+    Delete a Render Profile by name. If it was the active profile, the active
+    profile resets to None ("Current Settings").
+
+    Returns:
+        bool: True if a profile was deleted, False if no such profile exists.
+    """
+    config = load_config()
+    profiles = config.get("render_profiles", {})
+    if name not in profiles:
+        return False
+    del profiles[name]
+    config["render_profiles"] = profiles
+    if config.get("active_render_profile") == name:
+        config["active_render_profile"] = None
+    save_config(config)
+    return True
+
+
+def get_active_render_profile():
+    """
+    Returns the active Render Profile name, or None meaning "Current Settings"
+    (the implicit default: the flat render settings themselves).
+    """
+    config = load_config()
+    return config.get("active_render_profile")
+
+
+def set_active_render_profile(name):
+    """
+    Set the active Render Profile by name, or None for "Current Settings".
+
+    Raises:
+        ValueError: If name is not None and no such profile exists.
+    """
+    config = load_config()
+    if name is not None:
+        name = str(name).strip()
+        if name not in config.get("render_profiles", {}):
+            raise ValueError(f"No render profile named '{name}'")
+    config["active_render_profile"] = name
+    save_config(config)
+    return name
+
+
+def _validate_render_profile_name(name):
+    if name is None:
+        raise ValueError("Profile name is required")
+    name = str(name).strip()
+    if not name:
+        raise ValueError("Profile name must not be empty")
+    if name.lower() == "current settings":
+        raise ValueError("'Current Settings' is reserved and cannot be used as a profile name")
+    if name.lower() == "active":
+        raise ValueError("'active' is reserved and cannot be used as a profile name")
+    return name
+
+
+def _validate_render_profile_settings(settings):
+    if not isinstance(settings, dict):
+        raise ValueError("Profile settings must be an object")
+    # Validate the full known settings surface with the same per-field rules as
+    # save_render_settings, without writing anything: unknown/extra fields pass
+    # through untouched so future fields need no schema migration.
+    validators = {
+        "color": _validate_render_color,
+        "roughness": _validate_render_roughness,
+        "resolution": _validate_render_resolution,
+        "fov": _validate_render_fov,
+        "finish": _validate_render_finish,
+        "layer_height_mm": _validate_render_layer_height_mm,
+        "layer_depth": _validate_render_layer_depth,
+        "key_energy": _validate_render_energy("key_energy"),
+        "fill_energy": _validate_render_energy("fill_energy"),
+        "rim_energy": _validate_render_energy("rim_energy"),
+        "ambient": _validate_render_ambient,
+        "shadow": _validate_render_shadow,
+        "shadow_softness": _validate_render_shadow_softness,
+        "exposure": _validate_render_exposure,
+        "shot_mode": _validate_render_shot_mode,
+        "rig": validate_rig,
+    }
+    validated = dict(settings)
+    for key, validator in validators.items():
+        if key in validated:
+            validated[key] = validator(validated[key])
+    return validated
+
+
+def _validate_render_color(value):
+    value = str(value).strip().lower()
+    if not re.match(r"^#[0-9a-f]{6}$", value):
+        raise ValueError(f"color must be a hex value like #1a1a1a, got '{value}'")
+    return value
+
+
+def _validate_render_roughness(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        raise ValueError("roughness must be a number between 0 and 1")
+    if not 0.0 <= value <= 1.0:
+        raise ValueError("roughness must be between 0 and 1")
+    return value
+
+
+def _validate_render_resolution(value):
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"resolution must be one of {list(RENDER_RESOLUTIONS)}")
+    if value not in RENDER_RESOLUTIONS:
+        raise ValueError(f"resolution must be one of {list(RENDER_RESOLUTIONS)}")
+    return value
+
+
+def _validate_render_fov(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"fov must be a number between {RENDER_FOV_MIN} and {RENDER_FOV_MAX}")
+    if not RENDER_FOV_MIN <= value <= RENDER_FOV_MAX:
+        raise ValueError(f"fov must be between {RENDER_FOV_MIN} and {RENDER_FOV_MAX}")
+    return value
+
+
+def _validate_render_finish(value):
+    value = str(value)
+    if value not in RENDER_FINISHES:
+        raise ValueError(f"finish must be one of {list(RENDER_FINISHES)}")
+    return value
+
+
+def _validate_render_layer_height_mm(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"layer_height_mm must be a number between {RENDER_LAYER_HEIGHT_MM_MIN} and {RENDER_LAYER_HEIGHT_MM_MAX}")
+    if not RENDER_LAYER_HEIGHT_MM_MIN <= value <= RENDER_LAYER_HEIGHT_MM_MAX:
+        raise ValueError(
+            f"layer_height_mm must be between {RENDER_LAYER_HEIGHT_MM_MIN} and {RENDER_LAYER_HEIGHT_MM_MAX}")
+    return value
+
+
+def _validate_render_layer_depth(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"layer_depth must be a number between {RENDER_LAYER_DEPTH_MIN} and {RENDER_LAYER_DEPTH_MAX}")
+    if not RENDER_LAYER_DEPTH_MIN <= value <= RENDER_LAYER_DEPTH_MAX:
+        raise ValueError(f"layer_depth must be between {RENDER_LAYER_DEPTH_MIN} and {RENDER_LAYER_DEPTH_MAX}")
+    return value
+
+
+def _validate_render_energy(name):
+    def validate(value):
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{name} must be a number between 0 and {RENDER_ENERGY_MAX}")
+        if not 0.0 <= value <= RENDER_ENERGY_MAX:
+            raise ValueError(f"{name} must be between 0 and {RENDER_ENERGY_MAX}")
+        return value
+    return validate
+
+
+def _validate_render_ambient(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"ambient must be a number between 0 and {RENDER_AMBIENT_MAX}")
+    if not 0.0 <= value <= RENDER_AMBIENT_MAX:
+        raise ValueError(f"ambient must be between 0 and {RENDER_AMBIENT_MAX}")
+    return value
+
+
+def _validate_render_shadow(value):
+    if not isinstance(value, bool):
+        raise ValueError("shadow must be a boolean")
+    return value
+
+
+def _validate_render_shadow_softness(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"shadow_softness must be a number between {RENDER_SHADOW_SOFTNESS_MIN} and {RENDER_SHADOW_SOFTNESS_MAX}")
+    if not RENDER_SHADOW_SOFTNESS_MIN <= value <= RENDER_SHADOW_SOFTNESS_MAX:
+        raise ValueError(
+            f"shadow_softness must be between {RENDER_SHADOW_SOFTNESS_MIN} and {RENDER_SHADOW_SOFTNESS_MAX}")
+    return value
+
+
+def _validate_render_exposure(value):
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"exposure must be a number between {RENDER_EXPOSURE_MIN} and {RENDER_EXPOSURE_MAX}")
+    if not RENDER_EXPOSURE_MIN <= value <= RENDER_EXPOSURE_MAX:
+        raise ValueError(f"exposure must be between {RENDER_EXPOSURE_MIN} and {RENDER_EXPOSURE_MAX}")
+    return value
+
+
+def _validate_render_shot_mode(value):
+    value = str(value)
+    if value not in RENDER_SHOT_MODES:
+        raise ValueError(f"shot_mode must be one of {list(RENDER_SHOT_MODES)}")
+    return value
 
 
 def get_manual_import_last_refreshed():

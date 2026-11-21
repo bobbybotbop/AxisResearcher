@@ -111,6 +111,61 @@ def test_render_result_event_carries_image_and_filename(client, fake_render):
     events = _stream_result(client)
     result = [e for e in events if e["type"] == "result"][0]["data"]
     assert result["image"] == f"/api/render-image/{result['filename']}"
+    # single-shot: images list carries exactly the one image
+    assert result["images"] == [result["image"]]
+
+
+def test_render_forwards_expanded_settings(client, fake_render):
+    """Lighting/shadow/exposure/finish form fields reach the renderer."""
+    events = _stream_result(client, extra={
+        "key_energy": "300", "fill_energy": "20", "rim_energy": "500",
+        "ambient": "0.8", "shadow": "false", "shadow_softness": "3.0",
+        "exposure": "1.5",
+        "finish": "layer-lines", "layer_height_mm": "0.12", "layer_depth": "0.7",
+    })
+    assert [e for e in events if e["type"] == "result"]
+
+    kwargs = fake_render["kwargs"]
+    assert kwargs["key_energy"] == pytest.approx(300)
+    assert kwargs["fill_energy"] == pytest.approx(20)
+    assert kwargs["rim_energy"] == pytest.approx(500)
+    assert kwargs["ambient"] == pytest.approx(0.8)
+    assert kwargs["shadow"] is False
+    assert kwargs["shadow_softness"] == pytest.approx(3.0)
+    assert kwargs["exposure"] == pytest.approx(1.5)
+    assert kwargs["finish"] == "layer-lines"
+    assert kwargs["layer_height_mm"] == pytest.approx(0.12)
+    assert kwargs["layer_depth"] == pytest.approx(0.7)
+
+
+def test_render_defaults_forward_spec_values(client, fake_render):
+    """A bare render request forwards defaults that reproduce today's render."""
+    events = _stream_result(client)
+    assert [e for e in events if e["type"] == "result"]
+
+    kwargs = fake_render["kwargs"]
+    assert kwargs["key_energy"] == pytest.approx(150)
+    assert kwargs["fill_energy"] == pytest.approx(60)
+    assert kwargs["rim_energy"] == pytest.approx(250)
+    assert kwargs["ambient"] == pytest.approx(0.35)
+    assert kwargs["shadow"] is True
+    assert kwargs["shadow_softness"] == pytest.approx(1.5)
+    assert kwargs["exposure"] == pytest.approx(1.0)
+    assert kwargs["finish"] == "smooth"
+    assert kwargs["layer_height_mm"] == pytest.approx(0.2)
+    assert kwargs["layer_depth"] == pytest.approx(0.4)
+
+
+def test_render_rejects_invalid_expanded_settings(client, fake_render):
+    res = _post_render(client, extra={"finish": "matte"})
+    assert res.status_code == 400
+    assert "finish" in res.get_json()["error"].lower()
+
+    res = _post_render(client, extra={"exposure": "10"})
+    assert res.status_code == 400
+
+    res = _post_render(client, extra={"shadow": "maybe"})
+    assert res.status_code == 400
 
 
 def test_render_failure_surfaces_friendly_error_event(client, tmp_path, monkeypatch):

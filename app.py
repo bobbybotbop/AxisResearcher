@@ -54,7 +54,7 @@ from backend.copyScripts.create_image import (
     _openrouter_response_dict_to_image_bytes_and_mime,
     upload_image_bytes_to_ebay,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, migrate_hide_not_found_listings, get_render_settings, save_render_settings
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, migrate_hide_not_found_listings, get_render_settings, save_render_settings, get_render_profiles, save_render_profile, delete_render_profile, get_active_render_profile, set_active_render_profile, validate_rig
 from backend.helper_functions import remove_html_tags
 import os
 import json
@@ -79,11 +79,22 @@ from backend.constants.listing import (
 from backend.constants.ebay import EBAY_MARKETPLACE_ID, EBAY_BROWSE_API_BASE, EBAY_INVENTORY_API_BASE
 from backend.constants.paths import GENERATED_LISTINGS_DIR, GENERATED_IMAGES_DIR
 from backend.constants.render import (
-    DEFAULT_RENDER_AZIMUTH, DEFAULT_RENDER_COLOR, DEFAULT_RENDER_ELEVATION,
-    DEFAULT_RENDER_FOV, DEFAULT_RENDER_ROUGHNESS, DEFAULT_RENDER_RESOLUTION,
-    RENDER_OUTPUT_PREFIX, SUPPORTED_RENDER_EXTENSIONS,
+    DEFAULT_RENDER_AMBIENT, DEFAULT_RENDER_AZIMUTH, DEFAULT_RENDER_COLOR,
+    DEFAULT_RENDER_ELEVATION, DEFAULT_RENDER_EXPOSURE, DEFAULT_RENDER_FILL_ENERGY,
+    DEFAULT_RENDER_FINISH, DEFAULT_RENDER_FOV, DEFAULT_RENDER_KEY_ENERGY,
+    DEFAULT_RENDER_LAYER_DEPTH, DEFAULT_RENDER_LAYER_HEIGHT_MM,
+    DEFAULT_RENDER_RESOLUTION, DEFAULT_RENDER_RIM_ENERGY, DEFAULT_RENDER_ROUGHNESS,
+    DEFAULT_RENDER_SHADOW, DEFAULT_RENDER_SHADOW_SOFTNESS,
+    RENDER_AMBIENT_MAX, RENDER_ENERGY_MAX, RENDER_EXPOSURE_MAX, RENDER_EXPOSURE_MIN,
+    RENDER_FINISHES, RENDER_FOV_RANGE,
+    RENDER_LAYER_DEPTH_MAX, RENDER_LAYER_DEPTH_MIN,
+    RENDER_LAYER_HEIGHT_MM_MAX, RENDER_LAYER_HEIGHT_MM_MIN,
+    RENDER_OUTPUT_PREFIX, RENDER_RESOLUTIONS,
+    RENDER_SHADOW_SOFTNESS_MAX, RENDER_SHADOW_SOFTNESS_MIN,
+    DEFAULT_RENDER_SHOT_MODE, RENDER_SHOT_MODES,
+    SUPPORTED_RENDER_EXTENSIONS,
 )
-from backend.render import render_model, iter_render_progress, RenderError
+from backend.render import iter_render_progress, RenderError
 from backend.render.normalize import normalize_to_render_mesh
 from backend.render.camera import compute_blender_camera
 from backend.render.validate import validate_fov, validate_resolution, validate_roughness
@@ -3647,15 +3658,33 @@ def start_render():
         roughness:  optional 0..1 (default 0.3)
         resolution: optional square size, one of RENDER_RESOLUTIONS (default 1024)
         fov:        optional vertical field of view in degrees (default 40, range 20-80)
+        finish:     optional Surface Finish ("smooth" or "layer-lines")
+        layer_height_mm / layer_depth:
+                    optional Layer Lines sub-settings (real FDM layer height,
+                    bump strength)
+        key_energy / fill_energy / rim_energy:
+                    optional light intensities (defaults 150/60/250)
+        ambient:    optional world background strength (default 0.35)
+        shadow:     optional "true"/"false" — key light casts a shadow (default true)
+        shadow_softness: optional key light disk size (default 1.5)
+        exposure:   optional global multiplier on all energies + world (default 1.0)
+        shot_mode:  optional "single" or "multi" (default single)
+        rig:        optional JSON list of cameras [{"azimuth": 0, "elevation": 0}]
+                    for multi Shot Mode; each camera renders one image, sequentially
         camera_position / camera_target:
                     optional "x,y,z" in three.js (Y-up) preview coordinates; both or
                     neither. Converted to Blender (Z-up) azimuth/elevation; distance
                     is auto-computed to frame the whole model (Camera Intent).
 
+    Multi Shot Mode renders the rig cameras SEQUENTIALLY (Cycles CPU saturates the
+    machine), streaming a per-shot progress event as each camera starts.
+
     Streams NDJSON events:
         { "type": "progress", "step": "render", "status": "sample N/M",
-          "current": N, "total": M, "remaining_seconds": float|null }
-        { "type": "result", "data": { "image": url, "filename": str } }
+          "current": N, "total": M, "remaining_seconds": float|null,
+          "shot": i, "shots": K }   (shot/shots present on multi-shot runs)
+        { "type": "result", "data": { "image": url, "filename": str,
+                                      "images": [url, ...] } }
         { "type": "error", "error": friendly message }
     """
     print("[API] /api/render endpoint called")
@@ -3686,6 +3715,49 @@ def start_render():
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
+    # Expanded Render Settings: lighting, shadows, exposure, Surface Finish
+    def parse_float(field, default, minimum, maximum):
+        raw = request.form.get(field)
+        if raw is None:
+            return default, None
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None, f"{field} must be a number between {minimum} and {maximum}"
+        if not minimum <= value <= maximum:
+            return None, f"{field} must be between {minimum} and {maximum}"
+        return value, None
+
+    expanded = {}
+    for field, default, minimum, maximum in (
+        ("key_energy", DEFAULT_RENDER_KEY_ENERGY, 0.0, RENDER_ENERGY_MAX),
+        ("fill_energy", DEFAULT_RENDER_FILL_ENERGY, 0.0, RENDER_ENERGY_MAX),
+        ("rim_energy", DEFAULT_RENDER_RIM_ENERGY, 0.0, RENDER_ENERGY_MAX),
+        ("ambient", DEFAULT_RENDER_AMBIENT, 0.0, RENDER_AMBIENT_MAX),
+        ("shadow_softness", DEFAULT_RENDER_SHADOW_SOFTNESS, RENDER_SHADOW_SOFTNESS_MIN, RENDER_SHADOW_SOFTNESS_MAX),
+        ("exposure", DEFAULT_RENDER_EXPOSURE, RENDER_EXPOSURE_MIN, RENDER_EXPOSURE_MAX),
+        ("layer_height_mm", DEFAULT_RENDER_LAYER_HEIGHT_MM, RENDER_LAYER_HEIGHT_MM_MIN, RENDER_LAYER_HEIGHT_MM_MAX),
+        ("layer_depth", DEFAULT_RENDER_LAYER_DEPTH, RENDER_LAYER_DEPTH_MIN, RENDER_LAYER_DEPTH_MAX),
+    ):
+        value, error = parse_float(field, default, minimum, maximum)
+        if error:
+            return jsonify({"error": error}), 400
+        expanded[field] = value
+
+    finish = request.form.get("finish", DEFAULT_RENDER_FINISH)
+    if finish not in RENDER_FINISHES:
+        return jsonify({"error": f"finish must be one of {list(RENDER_FINISHES)}"}), 400
+
+    raw_shadow = request.form.get("shadow")
+    if raw_shadow is None:
+        shadow = DEFAULT_RENDER_SHADOW
+    elif raw_shadow.lower() in ("true", "1", "on", "yes"):
+        shadow = True
+    elif raw_shadow.lower() in ("false", "0", "off", "no"):
+        shadow = False
+    else:
+        return jsonify({"error": "shadow must be true or false"}), 400
+
     def parse_vec3(field):
         raw = request.form.get(field)
         if raw is None:
@@ -3710,14 +3782,38 @@ def start_render():
     else:
         azimuth, elevation = DEFAULT_RENDER_AZIMUTH, DEFAULT_RENDER_ELEVATION
 
+    # Shot Mode + Camera Rig: multi runs one sequential Render Job per rig
+    # camera (Cycles CPU saturates the machine — never parallel). An empty
+    # rig in multi mode falls back to the single camera above.
+    shot_mode = request.form.get("shot_mode", DEFAULT_RENDER_SHOT_MODE)
+    if shot_mode not in RENDER_SHOT_MODES:
+        return jsonify({"error": f"shot_mode must be one of {list(RENDER_SHOT_MODES)}"}), 400
+    rig = []
+    raw_rig = request.form.get("rig")
+    if raw_rig is not None:
+        try:
+            rig = validate_rig(json.loads(raw_rig))
+        except (ValueError, TypeError):
+            return jsonify({"error": "rig must be a JSON list of cameras like [{\"azimuth\": 0, \"elevation\": 0}]"}), 400
+    cameras = rig if (shot_mode == "multi" and rig) else [{"azimuth": azimuth, "elevation": elevation}]
+
     os.makedirs(GENERATED_IMAGES_DIR, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{RENDER_OUTPUT_PREFIX}{timestamp}.png"
-    suffix = 1
-    while os.path.exists(os.path.join(GENERATED_IMAGES_DIR, filename)):
-        filename = f"{RENDER_OUTPUT_PREFIX}{timestamp}_{suffix}.png"
-        suffix += 1
-    output_path = os.path.join(GENERATED_IMAGES_DIR, filename)
+
+    def claim_filename(name):
+        suffix = 1
+        while os.path.exists(os.path.join(GENERATED_IMAGES_DIR, name)):
+            stem, dot, ext = name.rpartition(".")
+            base = stem.rsplit("_", 1)[0] if suffix > 1 else stem
+            name = f"{base}_{suffix}{dot}{ext}"
+            suffix += 1
+        return name
+
+    if shot_mode == "multi":
+        filenames = [claim_filename(f"{RENDER_OUTPUT_PREFIX}{timestamp}_shot{i + 1}.png")
+                     for i in range(len(cameras))]
+    else:
+        filenames = [claim_filename(f"{RENDER_OUTPUT_PREFIX}{timestamp}.png")]
 
     fd, input_path = tempfile.mkstemp(prefix="render_upload_", suffix=extension)
     os.close(fd)
@@ -3730,26 +3826,54 @@ def start_render():
             # The converted STL is cache-owned — only the uploaded temp is removed below.
             mesh_path = normalize_to_render_mesh(input_path)
 
-            # Drive Blender and stream each Cycles checkpoint as it arrives.
-            progress = iter_render_progress(
-                mesh_path, output_path,
-                color=color, roughness=roughness, resolution=resolution,
-                azimuth=azimuth, elevation=elevation, fov=fov,
-            )
-            while True:
-                try:
-                    current, total, remaining_seconds = next(progress)
-                except StopIteration:
-                    break
-                yield json.dumps({
-                    "type": "progress", "step": "render",
-                    "status": f"sample {current}/{total}",
-                    "current": current, "total": total,
-                    "remaining_seconds": remaining_seconds,
-                }) + "\n"
+            shots_total = len(cameras)
+            images = []
+            # Multi Shot Mode runs the rig cameras SEQUENTIALLY (Cycles CPU
+            # saturates the machine — never parallel), one Render Job per camera.
+            for shot_index, (camera, shot_filename) in enumerate(zip(cameras, filenames)):
+                output_path = os.path.join(GENERATED_IMAGES_DIR, shot_filename)
+                if shots_total > 1:
+                    yield json.dumps({
+                        "type": "progress", "step": "render",
+                        "status": f"shot {shot_index + 1} of {shots_total}",
+                        "shot": shot_index + 1, "shots": shots_total,
+                    }) + "\n"
+                # Drive Blender and stream each Cycles checkpoint as it arrives.
+                progress = iter_render_progress(
+                    mesh_path, output_path,
+                    color=color, roughness=roughness, resolution=resolution,
+                    azimuth=camera["azimuth"], elevation=camera["elevation"], fov=fov,
+                    finish=finish,
+                    layer_height_mm=expanded["layer_height_mm"],
+                    layer_depth=expanded["layer_depth"],
+                    key_energy=expanded["key_energy"],
+                    fill_energy=expanded["fill_energy"],
+                    rim_energy=expanded["rim_energy"],
+                    ambient=expanded["ambient"],
+                    shadow=shadow,
+                    shadow_softness=expanded["shadow_softness"],
+                    exposure=expanded["exposure"],
+                )
+                while True:
+                    try:
+                        current, total, remaining_seconds = next(progress)
+                    except StopIteration:
+                        break
+                    event = {
+                        "type": "progress", "step": "render",
+                        "status": f"sample {current}/{total}",
+                        "current": current, "total": total,
+                        "remaining_seconds": remaining_seconds,
+                    }
+                    if shots_total > 1:
+                        event["shot"] = shot_index + 1
+                        event["shots"] = shots_total
+                    yield json.dumps(event) + "\n"
+                images.append(f"/api/render-image/{shot_filename}")
             yield result_event({
-                "image": f"/api/render-image/{filename}",
-                "filename": filename,
+                "image": images[0],
+                "filename": filenames[0],
+                "images": images,
             })
         except RenderError as e:
             print(f"[API] /api/render failed: {e}")
@@ -3805,7 +3929,7 @@ def render_preview():
 @app.route('/api/render-image/<filename>', methods=['GET'])
 def serve_render_image(filename):
     """Serve a rendered PNG from the generated-images dir. Validates filename pattern."""
-    if not re.match(rf'^{RENDER_OUTPUT_PREFIX}\d{{8}}_\d{{6}}(_\d+)?\.png$', filename):
+    if not re.match(rf'^{RENDER_OUTPUT_PREFIX}\d{{8}}_\d{{6}}(_(shot)?\d+)?\.png$', filename):
         return jsonify({"error": "Invalid filename"}), 400
     filepath = os.path.join(GENERATED_IMAGES_DIR, filename)
     if not os.path.exists(filepath):
@@ -3819,7 +3943,8 @@ def api_render_settings():
     """
     Read or update persisted Render Settings (Step 4 Studio Render).
 
-    GET:        returns {"color", "roughness", "resolution", "fov"}
+    GET:        returns the full Render Settings surface (material, lighting,
+                shadows, exposure, resolution, fov, shot mode, camera rig)
     POST:       JSON body with any subset of those keys; persists and returns
                 the saved state. Camera angle/target are ephemeral by design.
     """
@@ -3835,8 +3960,97 @@ def api_render_settings():
             roughness=body.get('roughness'),
             resolution=body.get('resolution'),
             fov=body.get('fov'),
+            finish=body.get('finish'),
+            layer_height_mm=body.get('layer_height_mm'),
+            layer_depth=body.get('layer_depth'),
+            key_energy=body.get('key_energy'),
+            fill_energy=body.get('fill_energy'),
+            rim_energy=body.get('rim_energy'),
+            ambient=body.get('ambient'),
+            shadow=body.get('shadow'),
+            shadow_softness=body.get('shadow_softness'),
+            exposure=body.get('exposure'),
+            shot_mode=body.get('shot_mode'),
+            rig=body.get('rig'),
         )
         return jsonify(settings), 200
+    except (TypeError, ValueError) as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/render-profiles', methods=['GET', 'POST'])
+def api_render_profiles():
+    """
+    List or create Render Profiles (named snapshots of the full Render Settings).
+
+    GET:        returns {"profiles": {name: settings}, "active": name|null}.
+                active=null means "Current Settings" (the flat render settings),
+                which is the implicit default and never a stored profile.
+    POST:       JSON body {"name": str, "settings": {...}}; creates the profile
+                and returns it. Duplicate names are rejected with 400 — use
+                POST/PUT /api/render-profiles/<name> to overwrite.
+    """
+    if request.method == 'GET':
+        try:
+            return jsonify({
+                'profiles': get_render_profiles(),
+                'active': get_active_render_profile(),
+            }), 200
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    body = request.get_json(silent=True) or {}
+    name = body.get('name')
+    try:
+        if name is not None and str(name).strip() in get_render_profiles():
+            return jsonify({'error': f"A render profile named '{str(name).strip()}' already exists"}), 400
+        profile = save_render_profile(name, body.get('settings'))
+        return jsonify(profile), 201
+    except (TypeError, ValueError) as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/render-profiles/<name>', methods=['POST', 'PUT', 'DELETE'])
+def api_render_profile_by_name(name):
+    """
+    Update (overwrite) or delete one Render Profile by name.
+
+    POST/PUT:   JSON body {"settings": {...}}; overwrites the stored snapshot.
+    DELETE:     removes the profile; if it was active, active resets to null
+                ("Current Settings").
+    """
+    if request.method == 'DELETE':
+        try:
+            if delete_render_profile(name):
+                return jsonify({'deleted': name}), 200
+            return jsonify({'error': f"No render profile named '{name}'"}), 404
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    if name not in get_render_profiles():
+        return jsonify({'error': f"No render profile named '{name}'"}), 404
+    body = request.get_json(silent=True) or {}
+    try:
+        profile = save_render_profile(name, body.get('settings'))
+        return jsonify(profile), 200
+    except (TypeError, ValueError) as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/render-profiles/active', methods=['POST'])
+def api_render_profile_active():
+    """
+    Set the active Render Profile. JSON body {"name": str|null}; null selects
+    "Current Settings" (the flat render settings).
+    """
+    body = request.get_json(silent=True) or {}
+    try:
+        active = set_active_render_profile(body.get('name'))
+        return jsonify({'active': active}), 200
     except (TypeError, ValueError) as e:
         return jsonify({'error': str(e)}), 400
     except Exception as e:

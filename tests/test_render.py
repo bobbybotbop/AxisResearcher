@@ -25,7 +25,7 @@ def test_native_extensions_cover_stl_obj_ply():
 
 
 def test_defaults_match_spec():
-    assert DEFAULT_RENDER_COLOR == "#1a1a1a"
+    assert DEFAULT_RENDER_COLOR == "#0d0d0d"
     assert DEFAULT_RENDER_ROUGHNESS == pytest.approx(0.3)
     assert DEFAULT_RENDER_RESOLUTION == 1024
 

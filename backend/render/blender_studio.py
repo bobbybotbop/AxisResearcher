@@ -22,6 +22,13 @@ from mathutils import Vector
 STANDARD_SIZE = 2.0
 FRAME_MARGIN = 1.15  # breathing room around the model in frame
 
+# Layer Lines finish: --layer-height-mm is a real FDM layer height, so it only
+# translates to a wave scale against a known real-world part size. The model is
+# normalized to STANDARD_SIZE scene units; we treat that as a 60mm-tall part
+# (the 3DBenchy reference from .scratch/studio-render/layer-lines-research.md),
+# so 0.2mm layers give 60/0.2 = 300 bands across the Generated bbox.
+ASSUMED_MODEL_HEIGHT_MM = 60.0
+
 
 def parse_args():
     # All values are required: backend.render._prepare_render always passes them
@@ -39,6 +46,21 @@ def parse_args():
     parser.add_argument("--azimuth", type=float, required=True)
     parser.add_argument("--elevation", type=float, required=True)
     parser.add_argument("--fov", type=float, required=True)
+    # Surface Finish: smooth (plain Principled) or layer-lines (FDM bump)
+    parser.add_argument("--finish", choices=["smooth", "layer-lines"], default="smooth")
+    parser.add_argument("--layer-height-mm", type=float, default=0.2)
+    parser.add_argument("--layer-depth", type=float, default=0.4)
+    # Lighting rig energies (defaults reproduce the original hardcoded rig)
+    parser.add_argument("--key-energy", type=float, default=150.0)
+    parser.add_argument("--fill-energy", type=float, default=60.0)
+    parser.add_argument("--rim-energy", type=float, default=250.0)
+    # World (ambient) background strength
+    parser.add_argument("--ambient", type=float, default=0.35)
+    # Shadows: only the key casts one; softness is the key light's disk size
+    parser.add_argument("--shadow", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--shadow-softness", type=float, default=1.5)
+    # Exposure: global multiplier on all light energies + world strength
+    parser.add_argument("--exposure", type=float, default=1.0)
     return parser.parse_args(argv)
 
 
@@ -100,7 +122,7 @@ def normalize(model):
     return center, radius, model_top_z
 
 
-def apply_material(model, color, roughness):
+def apply_material(model, color, roughness, finish="smooth", layer_height_mm=0.2, layer_depth=0.4):
     def srgb_to_linear(c):
         return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
 
@@ -110,6 +132,34 @@ def apply_material(model, color, roughness):
     bsdf.inputs["Base Color"].default_value = (
         srgb_to_linear(color[0]), srgb_to_linear(color[1]), srgb_to_linear(color[2]), 1.0)
     bsdf.inputs["Roughness"].default_value = roughness
+
+    if finish == "layer-lines":
+        # Procedural FDM layer lines (research: technique 1): Wave Texture
+        # bands perpendicular to the Z print axis feed a Bump node into the
+        # Principled Normal. Generated coordinates need no UVs (STL imports
+        # have none) and span 0-1 over the normalized 2.0-unit bbox, so the
+        # wave Scale is the band count across the model.
+        nt = material.node_tree
+        tex_coord = nt.nodes.new("ShaderNodeTexCoord")
+        wave = nt.nodes.new("ShaderNodeTexWave")
+        wave.wave_type = 'BANDS'
+        wave.bands_direction = 'Z'
+        wave.wave_profile = 'SIN'
+        wave.inputs["Scale"].default_value = ASSUMED_MODEL_HEIGHT_MM / layer_height_mm
+        bump = nt.nodes.new("ShaderNodeBump")
+        bump.inputs["Strength"].default_value = layer_depth
+        # Groove depth in scene units, driven by the layer_depth knob. The
+        # research's "half the layer spacing" (0.5 * spacing = 0.0033 units at
+        # 0.2mm) is invisible on vertical walls: bump only perturbs the shading
+        # normal, and at a glancing angle a groove that small produces no
+        # luminance change — only the face-lit roof showed texture. A render
+        # sweep showed walls need Distance >= ~0.01 and read clearly at 0.02,
+        # so map the 0-1 depth knob to 0-0.05 units (default 0.4 -> 0.02).
+        bump.inputs["Distance"].default_value = layer_depth * 0.05
+        nt.links.new(tex_coord.outputs["Generated"], wave.inputs["Vector"])
+        nt.links.new(wave.outputs["Fac"], bump.inputs["Height"])
+        nt.links.new(bump.outputs["Normal"], bsdf.inputs["Normal"])
+
     if model.data.materials:
         model.data.materials[0] = material
     else:
@@ -221,7 +271,10 @@ def main():
 
     model = join_objects(import_mesh(args.input))
     center, radius, model_top_z = normalize(model)
-    apply_material(model, args.color, args.roughness)
+    apply_material(model, args.color, args.roughness,
+                   finish=args.finish,
+                   layer_height_mm=args.layer_height_mm,
+                   layer_depth=args.layer_depth)
 
     # When the camera is below the model (negative elevation), the ground plane
     # at z=0 would block the view of the model's underside. Flip it to the top
@@ -231,16 +284,20 @@ def main():
     target = (0.0, 0.0, center.z)
 
     # 3-point area-light rig (key / fill / rim); only the key casts a shadow so
-    # the floor gets one clean soft contact shadow. When the camera is below,
-    # mirror the rig to negative z so the underside is lit.
+    # the floor gets one clean soft contact shadow. Exposure scales every
+    # energy. When the camera is below, mirror the rig to negative z so the
+    # underside is lit.
+    key_energy = args.key_energy * args.exposure
+    fill_energy = args.fill_energy * args.exposure
+    rim_energy = args.rim_energy * args.exposure
     if args.elevation < 0:
-        add_area_light("Key", (4, -3, -6), energy=150, size=1.5)
-        add_area_light("Fill", (-4, -2, -3), energy=60, size=4.0, shadow=False)
-        add_area_light("Rim", (1, 5, -7), energy=250, size=3.0, shadow=False)
+        add_area_light("Key", (4, -3, -6), energy=key_energy, size=args.shadow_softness, shadow=args.shadow)
+        add_area_light("Fill", (-4, -2, -3), energy=fill_energy, size=4.0, shadow=False)
+        add_area_light("Rim", (1, 5, -7), energy=rim_energy, size=3.0, shadow=False)
     else:
-        add_area_light("Key", (4, -3, 6), energy=150, size=1.5)
-        add_area_light("Fill", (-4, -2, 3), energy=60, size=4.0, shadow=False)
-        add_area_light("Rim", (1, 5, 7), energy=250, size=3.0, shadow=False)
+        add_area_light("Key", (4, -3, 6), energy=key_energy, size=args.shadow_softness, shadow=args.shadow)
+        add_area_light("Fill", (-4, -2, 3), energy=fill_energy, size=4.0, shadow=False)
+        add_area_light("Rim", (1, 5, 7), energy=rim_energy, size=3.0, shadow=False)
 
     add_camera(target, radius, args.azimuth, args.elevation, args.fov)
 
@@ -248,7 +305,7 @@ def main():
     world = bpy.data.worlds.new("World")
     world.use_nodes = True
     world.node_tree.nodes["Background"].inputs[0].default_value = (1.0, 1.0, 1.0, 1.0)
-    world.node_tree.nodes["Background"].inputs[1].default_value = 0.35
+    world.node_tree.nodes["Background"].inputs[1].default_value = args.ambient * args.exposure
     scene.world = world
     scene.render.film_transparent = has_shadow_catcher
 
