@@ -10,6 +10,7 @@ export const LOG_EVENT_LABELS: Record<string, string> = {
   restock: "Restock",
   import: "Import",
   sync_startup: "Sync (Startup)",
+  sync_active: "Sync (Active)",
 };
 
 export const LOG_FILTER_CHIPS: FilterOption[] = [
@@ -20,4 +21,5 @@ export const LOG_FILTER_CHIPS: FilterOption[] = [
   { key: "draft_completed", label: "Drafts Completed" },
   { key: "import", label: "Imports" },
   { key: "sync_startup", label: "Syncs (Startup)" },
+  { key: "sync_active", label: "Syncs (Active)" },
 ];

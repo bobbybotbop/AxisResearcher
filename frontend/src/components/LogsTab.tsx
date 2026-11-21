@@ -18,6 +18,7 @@ interface LogEntry {
   not_found_skus?: string[];
   removed_skus?: string[];
   healed_skus?: string[];
+  newly_inactive_skus?: string[];
   removed_titles?: Record<string, string>;
   quantity?: number;
   count?: number;
@@ -79,6 +80,8 @@ function getEntryDetail(entry: LogEntry): string {
     }
     case "sync_startup":
       return `${entry.removed ?? 0} removed · ${entry.healed ?? 0} healed`;
+    case "sync_active":
+      return `${entry.active ?? 0} active · ${entry.newly_inactive ?? 0} newly inactive · ${entry.updated ?? 0} updated`;
     default:
       return entry.error || "";
   }
@@ -247,6 +250,26 @@ function importSections(
   ];
 }
 
+/** Build the expand-panel sections for a sync_active log entry. */
+function syncActiveSections(
+  entry: LogEntry,
+  titleFor: (sku: string) => string | undefined,
+): SkuSection[] {
+  return [
+    {
+      heading: "Newly inactive",
+      skus: entry.newly_inactive_skus || [],
+      titleFor,
+    },
+    {
+      heading: "Updated",
+      skus: entry.updated_skus || [],
+      showView: true,
+      titleFor,
+    },
+  ];
+}
+
 /** Build the expand-panel sections for a sync_startup log entry. */
 function syncStartupSections(
   entry: LogEntry,
@@ -391,7 +414,14 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
           const isExpandableImport =
             isImport && !!(entry.imported_skus || entry.updated_skus);
           const isSyncStartup = entry.event === "sync_startup";
-          const isExpandable = isRestock || isExpandableImport || isSyncStartup;
+          const isSyncActive = entry.event === "sync_active";
+          // Old sync_active entries (counts only, no SKU lists) stay one-liners.
+          const isSyncActiveExpandable =
+            isSyncActive &&
+            ((entry.newly_inactive_skus || []).length > 0 ||
+              (entry.updated_skus || []).length > 0);
+          const isExpandable =
+            isRestock || isExpandableImport || isSyncStartup || isSyncActiveExpandable;
           const hasSku = !!entry.sku;
           const isExpanded = expandedRows.has(rowKey);
 
@@ -473,6 +503,13 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
               {isSyncStartup && isExpanded && (
                 <SkuSectionPanel
                   sections={syncStartupSections(entry, (sku) => titleFor(sku, entry))}
+                  onOpenListing={onOpenListing}
+                />
+              )}
+
+              {isSyncActiveExpandable && isExpanded && (
+                <SkuSectionPanel
+                  sections={syncActiveSections(entry, (sku) => titleFor(sku, entry))}
                   onOpenListing={onOpenListing}
                 />
               )}
