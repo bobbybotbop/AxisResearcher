@@ -4,7 +4,11 @@ Public seam: render_model(). See .scratch/studio-render/spec.md.
 """
 
 import os
+import queue
+import re
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 from backend.constants.render import (
@@ -50,27 +54,21 @@ def _hex_to_rgb(color: str) -> tuple[float, float, float]:
         raise RenderError(f"Invalid color '{color}': expected a hex value like #1a1a1a")
 
 
-def render_model(
-    input_path,
-    output_path,
-    *,
-    color: str = DEFAULT_RENDER_COLOR,
-    roughness: float = DEFAULT_RENDER_ROUGHNESS,
-    resolution: int = DEFAULT_RENDER_RESOLUTION,
-    azimuth: float = DEFAULT_RENDER_AZIMUTH,
-    elevation: float = DEFAULT_RENDER_ELEVATION,
-    fov: float = DEFAULT_RENDER_FOV,
-    blender_path: str | None = None,
-    timeout: int = RENDER_TIMEOUT_SECONDS,
-) -> Path:
-    """Render a native-format mesh (.stl/.obj/.ply) to a studio product shot PNG.
+# Cycles progress checkpoints, e.g.:
+#   Fra:1 ... | Scene, ViewLayer | Sample 34/48
+#   Fra:1 ... | Remaining:00:08.00 | ... | Scene, ViewLayer | Sample 1/48
+_SAMPLE_RE = re.compile(r"\bSample\s+(\d+)/(\d+)")
+_REMAINING_RE = re.compile(r"\bRemaining:(\d+):(\d+(?:\.\d+)?)")
 
-    azimuth/elevation/fov are Blender-space camera angles (see
-    backend.render.camera for the three.js -> Blender conversion). Distance is
-    auto-computed by the Blender script to frame the whole model.
 
-    Raises RenderError (or a subclass) with a friendly message on any failure.
-    """
+def _parse_remaining_seconds(match: re.Match) -> float:
+    minutes, seconds = int(match.group(1)), float(match.group(2))
+    return minutes * 60 + seconds
+
+
+def _prepare_render(input_path, output_path, color, roughness, resolution,
+                    azimuth, elevation, fov, blender_path):
+    """Validate inputs and build the Blender command line."""
     input_path = Path(input_path)
     output_path = Path(output_path)
 
@@ -91,9 +89,6 @@ def render_model(
         )
 
     red, green, blue = _hex_to_rgb(color)
-    resolution = int(resolution)
-    roughness = float(roughness)
-
     command = [
         blender,
         "--background",
@@ -102,34 +97,143 @@ def render_model(
         "--input", str(input_path.resolve()),
         "--output", str(output_path.resolve()),
         "--color", f"{red:.6f}", f"{green:.6f}", f"{blue:.6f}",
-        "--roughness", f"{roughness:.4f}",
-        "--resolution", str(resolution),
+        "--roughness", f"{float(roughness):.4f}",
+        "--resolution", str(int(resolution)),
         "--azimuth", f"{float(azimuth):.4f}",
         "--elevation", f"{float(elevation):.4f}",
         "--fov", f"{float(fov):.4f}",
     ]
+    return command, output_path
+
+
+def iter_render_progress(
+    input_path,
+    output_path,
+    *,
+    color: str = DEFAULT_RENDER_COLOR,
+    roughness: float = DEFAULT_RENDER_ROUGHNESS,
+    resolution: int = DEFAULT_RENDER_RESOLUTION,
+    azimuth: float = DEFAULT_RENDER_AZIMUTH,
+    elevation: float = DEFAULT_RENDER_ELEVATION,
+    fov: float = DEFAULT_RENDER_FOV,
+    blender_path: str | None = None,
+    timeout: int = RENDER_TIMEOUT_SECONDS,
+):
+    """Drive Blender, yielding (current, total, remaining_seconds) per checkpoint.
+
+    A generator: it runs Blender with Popen and yields each Cycles 'Sample N/M'
+    checkpoint as the stdout line arrives, so a caller can stream live progress.
+    remaining_seconds is None when the line carries no 'Remaining:MM:SS' ETA.
+    Returns the output Path via StopIteration.value once the PNG exists.
+
+    Raises RenderError (or a subclass) with a friendly message on any failure.
+    """
+    command, output_path = _prepare_render(
+        input_path, output_path, color, roughness, resolution,
+        azimuth, elevation, fov, blender_path,
+    )
 
     try:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             command,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
-        raise RenderError(
-            f"Rendering took too long (over {timeout}s) and was stopped. "
-            "Try a lower resolution."
         )
     except OSError as e:
         raise RenderError(f"Could not start Blender: {e}")
 
-    if completed.returncode != 0 or not output_path.exists():
-        tail = (completed.stdout or "")[-500:] + (completed.stderr or "")[-500:]
-        print(f"[render] Blender failed (exit {completed.returncode}): {tail}")
+    stdout_lines = []
+    timed_out = False
+    deadline = time.monotonic() + timeout
+
+    # Read stdout on a helper thread that pushes lines onto a queue, so the
+    # deadline below is enforced with queue.get(timeout=...) instead of only
+    # when a line arrives: a Blender that hangs while printing nothing would
+    # otherwise block the read forever and the hard kill would never fire.
+    lines: queue.Queue = queue.Queue()
+
+    def _pump_stdout():
+        for line in process.stdout:
+            lines.put(line)
+        lines.put(None)  # EOF sentinel
+
+    reader = threading.Thread(target=_pump_stdout, daemon=True)
+    reader.start()
+
+    try:
+        while True:
+            try:
+                line = lines.get(timeout=max(deadline - time.monotonic(), 0))
+            except queue.Empty:
+                raise subprocess.TimeoutExpired(cmd=command, timeout=timeout)
+            if line is None:  # Blender closed stdout: it is exiting
+                break
+            stdout_lines.append(line)
+            sample = _SAMPLE_RE.search(line)
+            if sample:
+                remaining_match = _REMAINING_RE.search(line)
+                remaining = _parse_remaining_seconds(remaining_match) if remaining_match else None
+                yield (int(sample.group(1)), int(sample.group(2)), remaining)
+        process.wait(timeout=max(deadline - time.monotonic(), 0))
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        process.kill()
+        process.wait()
+
+    if timed_out:
+        raise RenderError(
+            f"Rendering took too long (over {timeout}s) and was stopped. "
+            "Try a lower resolution."
+        )
+
+    if process.returncode != 0 or not output_path.exists():
+        tail = "".join(stdout_lines)[-1000:]
+        print(f"[render] Blender failed (exit {process.returncode}): {tail}")
         raise RenderError(
             "Blender could not render this model. "
             "The file may be corrupt or not a valid 3D mesh."
         )
 
     return output_path
+
+
+def render_model(
+    input_path,
+    output_path,
+    *,
+    color: str = DEFAULT_RENDER_COLOR,
+    roughness: float = DEFAULT_RENDER_ROUGHNESS,
+    resolution: int = DEFAULT_RENDER_RESOLUTION,
+    azimuth: float = DEFAULT_RENDER_AZIMUTH,
+    elevation: float = DEFAULT_RENDER_ELEVATION,
+    fov: float = DEFAULT_RENDER_FOV,
+    blender_path: str | None = None,
+    timeout: int = RENDER_TIMEOUT_SECONDS,
+    on_progress=None,
+) -> Path:
+    """Render a native-format mesh (.stl/.obj/.ply) to a studio product shot PNG.
+
+    azimuth/elevation/fov are Blender-space camera angles (see
+    backend.render.camera for the three.js -> Blender conversion). Distance is
+    auto-computed by the Blender script to frame the whole model.
+
+    on_progress, when given, is called as on_progress(current, total,
+    remaining_seconds) for each Cycles 'Sample N/M' checkpoint Blender prints;
+    remaining_seconds is None when the line carries no 'Remaining:MM:SS' ETA.
+
+    Raises RenderError (or a subclass) with a friendly message on any failure.
+    """
+    events = iter_render_progress(
+        input_path, output_path,
+        color=color, roughness=roughness, resolution=resolution,
+        azimuth=azimuth, elevation=elevation, fov=fov,
+        blender_path=blender_path, timeout=timeout,
+    )
+    try:
+        while True:
+            current, total, remaining = next(events)
+            if on_progress is not None:
+                on_progress(current, total, remaining)
+    except StopIteration as done:
+        return done.value
