@@ -8,6 +8,7 @@ import { filterOperationalThreeDResults, toastSkippedSites } from "../utils/filt
 import {
   dismissPipeline,
   startPipelineWithId,
+  toast,
   type PipelineHandle,
 } from "../utils/statusStore";
 
@@ -48,7 +49,6 @@ interface ForwardedLinkMeta {
 }
 
 interface TitleSearchPipelineProps {
-  addToast?: (type: string, message: string) => void;
   enabledSites?: string[];
   sitePriority?: string[];
   siteStatus?: ThreeDSiteStatus | null;
@@ -57,7 +57,6 @@ interface TitleSearchPipelineProps {
 }
 
 function TitleSearchPipeline({
-  addToast,
   enabledSites,
   sitePriority,
   siteStatus = null,
@@ -101,7 +100,7 @@ function TitleSearchPipeline({
     e.preventDefault();
     const trimmed = step1Link.trim();
     if (!trimmed) {
-      addToast?.("error", "Please enter an eBay listing ID or URL");
+      toast.error("Please enter an eBay listing ID or URL");
       return;
     }
     setStep1Loading(true);
@@ -137,10 +136,10 @@ function TitleSearchPipeline({
       const title = data?.listing?.title || "";
       setOriginalTitle(title);
       pipeline.advance(); // → Optimize title & search
-      if (!title) addToast?.("info", "Listing fetched but no title found");
+      if (!title) toast.info("Listing fetched but no title found");
     } catch (err) {
       pipeline.fail((err as Error).message || "Failed to fetch listing");
-      addToast?.("error", (err as Error).message || "Failed to fetch listing");
+      toast.error((err as Error).message || "Failed to fetch listing");
     } finally {
       setStep1Loading(false);
     }
@@ -177,7 +176,7 @@ function TitleSearchPipeline({
       if (!res.ok || data.error) throw new Error(data.error || "Title optimization failed");
       setOptimizedTitle(data.optimized_title || "");
     } catch (err) {
-      addToast?.("error", (err as Error).message || "Title optimization failed");
+      toast.error((err as Error).message || "Title optimization failed");
     } finally {
       setOptimizing(false);
     }
@@ -218,14 +217,14 @@ function TitleSearchPipeline({
     } catch (err) {
       setMatchLabel(null);
       pipelineRef.current?.fail((err as Error).message || "Failed to scrape site images");
-      addToast?.("error", (err as Error).message || "Failed to scrape site images");
+      toast.error((err as Error).message || "Failed to scrape site images");
     }
   };
 
   const handleSearch = async () => {
     const query = searchQuery();
     if (!query) {
-      addToast?.("error", "Optimized title is empty — optimize or type a title first");
+      toast.error("Optimized title is empty — optimize or type a title first");
       return;
     }
     setSearching(true);
@@ -249,9 +248,9 @@ function TitleSearchPipeline({
       // Whitelisted results only, already ordered by site priority by the backend
       const { filtered, skippedSites } = filterOperationalThreeDResults(data.results, siteStatus);
       setResults(filtered);
-      toastSkippedSites(addToast, skippedSites);
+      toastSkippedSites(skippedSites);
       if (filtered.length === 0) {
-        if (skippedSites.length === 0) addToast?.("info", "No 3D file results found for this title");
+        if (skippedSites.length === 0) toast.info("No 3D file results found for this title");
         pipelineRef.current?.fail("No 3D file results found for this title");
         return;
       }
@@ -261,7 +260,7 @@ function TitleSearchPipeline({
       void confirmTopLink(top, photos);
     } catch (err) {
       pipelineRef.current?.fail((err as Error).message || "Search failed");
-      addToast?.("error", (err as Error).message || "Search failed");
+      toast.error((err as Error).message || "Search failed");
     } finally {
       setSearching(false);
     }

@@ -1,4 +1,5 @@
 import { threeDSiteKeyFromLink, type ThreeDSiteStatus } from "../constants/files3d";
+import { toast } from "./statusStore";
 
 interface SiteTypedResult {
   link: string;
@@ -35,11 +36,8 @@ export function filterOperationalThreeDResults<T extends SiteTypedResult>(
 }
 
 /** Toast describing the sites skipped by filterOperationalThreeDResults, if any. */
-export function toastSkippedSites(
-  addToast: ((type: string, message: string) => void) | undefined,
-  skippedSites: string[],
-): void {
+export function toastSkippedSites(skippedSites: string[]): void {
   if (skippedSites.length > 0) {
-    addToast?.("info", `Skipped results from ${skippedSites.join(", ")} — site failed its operational test (see Settings > 3D File Sites)`);
+    toast.info(`Skipped results from ${skippedSites.join(", ")} — site failed its operational test (see Settings > 3D File Sites)`);
   }
 }

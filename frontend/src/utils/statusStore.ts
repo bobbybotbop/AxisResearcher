@@ -221,6 +221,47 @@ export function startTask(name: string, options?: { total?: number }): TaskHandl
 }
 
 /**
+ * Fire-and-forget one-shot toasts (ADR 0002 decision 4). For the common case
+ * where a feature just wants to tell the user something happened — no
+ * pending phase, no progress — without managing a TaskHandle.
+ *
+ * - success/info: render as a settled success toast, auto-dismiss after ~5s.
+ * - error: persists until manually dismissed.
+ *
+ * `info` maps to success semantics deliberately: the legacy ToastContainer
+ * rendered "info" (passed via a string-cast prop) as a red, never-dismissing
+ * toast, which was a latent bug. Informational one-shots behave like success.
+ *
+ * Never throws.
+ */
+function fireToast(kind: "success" | "error", message: string, detail?: string): void {
+  try {
+    const { id, handle } = startTaskWithId(message);
+    if (kind === "success") {
+      handle.succeed(undefined, detail);
+    } else {
+      // fail() would copy the error into `message`, duplicating the title in
+      // the toast body — settle directly so the message stays the title only.
+      patchTask(id, { status: "error", error: message, detail });
+    }
+  } catch (err) {
+    console.warn("[status-store] failed to fire toast:", err);
+  }
+}
+
+export const toast = {
+  success(message: string, detail?: string): void {
+    fireToast("success", message, detail);
+  },
+  info(message: string, detail?: string): void {
+    fireToast("success", message, detail);
+  },
+  error(message: string, detail?: string): void {
+    fireToast("error", message, detail);
+  },
+};
+
+/**
  * Start a pipeline, returning its id alongside the handle. Used by renderers
  * (e.g. PipelineTracker) that read the Pipeline from the store by id.
  */
