@@ -13,6 +13,13 @@ npm run dev:backend      # python app.py only (Flask, port 5000)
 npm run dev:frontend     # cd frontend && npm run dev only (Vite, port 4000, proxies /api -> :5000)
 ```
 
+```
+npm run force-close     # kill stale backend/frontend dev processes and free ports 4000-4010 + 5000.
+                         # Catches orphaned Vite servers and npm/concurrently wrappers that a
+                         # port-only scan misses. TIME_WAIT sockets (PID 0) cannot be killed —
+                         # if it warns, wait ~1-2 minutes and retry.
+```
+
 Frontend build/preview (run inside `frontend/`):
 ```
 npm run build
