@@ -2,6 +2,8 @@
 import {
   FilePlus,
   History,
+  Box,
+  Database,
   Route,
   FlaskConical,
   ScrollText,
@@ -20,7 +22,11 @@ import UploadListingsToolbar from "./components/UploadListingsToolbar";
 import ApiKeyManagementSection from "./components/ApiKeyManagementSection";
 import TestAiModelSection from "./components/TestAiModelSection";
 import LogsTab from "./components/LogsTab";
-import ThreeDFileFinder from "./components/ThreeDFileFinder";
+import DataBrowser from "./components/DataBrowser";
+import Saved3DFiles from "./components/Saved3DFiles";
+import ImageSearchSteps from "./components/ImageSearchSteps";
+import SharedDownloadRender from "./components/SharedDownloadRender";
+import TitleSearchPipeline from "./components/TitleSearchPipeline";
 import NumberInput from "./components/NumberInput";
 import { MOCK_DATA, MOCK_GENERATED_TITLE, MOCK_GENERATED_DESCRIPTION } from "./mockData";
 import { createTestWorkflowState } from "./testWorkflowState";
@@ -33,10 +39,11 @@ import type { ImageModelOption } from "./constants/models";
 import { TAB_PATHS } from "./constants/routes";
 import { createPlaceholderImageDataUrl, renderPlaceholderImagePngBlob } from "./constants/placeholder";
 import type { TabName } from "./constants/routes";
-import { THREE_D_SITES, THREE_D_SITE_STATUS_STORAGE_KEY, THREE_D_SITE_TESTED_AT_STORAGE_KEY, THREE_D_SITES_ENABLED_STORAGE_KEY } from "./constants/files3d";
+import { THREE_D_SITES, THREE_D_SITE_STATUS_STORAGE_KEY, THREE_D_SITE_TESTED_AT_STORAGE_KEY, THREE_D_SITE_IMAGE_STATUS_STORAGE_KEY, THREE_D_SITES_ENABLED_STORAGE_KEY, THREE_D_SITE_PRIORITY_STORAGE_KEY, normalizeThreeDSitePriority, PIPELINE_IMAGE_SEARCH, PIPELINE_TITLE_SEARCH, MATCH_LABEL_CONFIRMED_IMAGE_MATCH, MATCH_LABEL_UNCONFIRMED_TITLE_MATCH } from "./constants/files3d";
 import { DEFAULT_OPERATION_COOLDOWN_HOURS, EBAY_STARTUP_SYNCED_AT_STORAGE_KEY, EBAY_STARTUP_SYNC_EVENT, IMPORT_SYNC_COOLDOWN_MS, MS_PER_HOUR, STOCK_QUANTITIES_STORAGE_KEY, STOCK_REFRESHED_AT_STORAGE_KEY } from "./constants/cooldown";
 import type { EbayStartupSyncSummary } from "./constants/cooldown";
-import type { ThreeDSiteStatus } from "./constants/files3d";
+import type { ThreeDSiteStatus, Pipeline, MatchLabel } from "./constants/files3d";
+import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import type { DropResult } from "@hello-pangea/dnd";
 import type { Listing, ModelOption, ProgressState, ImageGenProgress } from "./types/listing";
 import type { TestWorkflowState } from "./types/workflow";
@@ -164,6 +171,8 @@ function App() {
     const p = normalizePathname(location.pathname);
     if (p === "/" || p === TAB_PATHS.create) return "create";
     if (p === TAB_PATHS.upload) return "upload";
+    if (p === TAB_PATHS["saved-3d-files"]) return "saved-3d-files";
+    if (p === TAB_PATHS["data-browser"]) return "data-browser";
     if (p === TAB_PATHS.logs) return "logs";
     if (p === TAB_PATHS["test-workflow"]) return "test-workflow";
     if (p === TAB_PATHS.testing) return "testing";
@@ -302,6 +311,16 @@ function App() {
       return null;
     }
   });
+  // Image-scraper probe results (separate endpoint from the download probe —
+  // the Cults3D image probe launches a browser and can take a minute)
+  const [threeDSiteImageStatus, setThreeDSiteImageStatus] = useState<ThreeDSiteStatus | null>(() => {
+    try {
+      const stored = localStorage.getItem(THREE_D_SITE_IMAGE_STATUS_STORAGE_KEY);
+      return stored ? (JSON.parse(stored) as ThreeDSiteStatus) : null;
+    } catch {
+      return null;
+    }
+  });
   const [threeDSitesEnabled, setThreeDSitesEnabled] = useState<Record<string, boolean>>(() => {
     try {
       const stored = localStorage.getItem(THREE_D_SITES_ENABLED_STORAGE_KEY);
@@ -309,7 +328,27 @@ function App() {
     } catch { /* ignore */ }
     return Object.fromEntries(THREE_D_SITES.map(({ site }) => [site, true]));
   });
+  // User-defined site priority (most-preferred first), draggable in Settings.
+  const [threeDSitePriority, setThreeDSitePriority] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem(THREE_D_SITE_PRIORITY_STORAGE_KEY);
+      if (stored) return normalizeThreeDSitePriority(JSON.parse(stored));
+    } catch { /* ignore */ }
+    return THREE_D_SITES.map(({ site }) => site);
+  });
   const [threeDSiteTesting, setThreeDSiteTesting] = useState(false);
+  // Link + metadata forwarded from either pipeline (Image Search or Title
+  // Search) to the shared Steps 3-4 download step. Consumed by
+  // SharedDownloadRender via the externalUrl/externalMeta props; cleared after
+  // consumption. The metadata auto-saves a Saved 3D File record on download.
+  const [sharedDownloadLink, setSharedDownloadLink] = useState("");
+  const [sharedDownloadMeta, setSharedDownloadMeta] = useState<{
+    ebayUrl: string;
+    ebayTitle: string;
+    pipeline: Pipeline;
+    matchLabel: MatchLabel;
+  } | null>(null);
+  const [imageSearchOpen, setImageSearchOpen] = useState(false);
   const threeDSiteAutoTestRan = useRef(false);
   // Shared cooldown (hours) for automatic background operations: History-tab
   // stock refresh and the 3D site auto-test. Fetched from the backend on
@@ -2613,17 +2652,41 @@ function App() {
     });
   };
 
+  const handleThreeDSiteDragEnd = (result: DropResult): void => {
+    if (!result.destination) return;
+    const srcIdx = result.source.index;
+    const destIdx = result.destination.index;
+    if (srcIdx === destIdx) return;
+    setThreeDSitePriority(prev => {
+      const next = [...prev];
+      const [moved] = next.splice(srcIdx, 1);
+      next.splice(destIdx, 0, moved);
+      try { localStorage.setItem(THREE_D_SITE_PRIORITY_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
+
   const handleTest3dSites = async (): Promise<void> => {
     setThreeDSiteTesting(true);
     try {
-      const res = await fetch("/api/test-3d-sites");
-      const data = await res.json() as { results: ThreeDSiteStatus };
+      const [downloadRes, imageRes] = await Promise.all([
+        fetch("/api/test-3d-sites"),
+        fetch("/api/test-3d-site-images"),
+      ]);
+      const data = await downloadRes.json() as { results: ThreeDSiteStatus };
       setThreeDSiteStatus(data.results);
       const now = Date.now();
       setThreeDSiteTestedAt(now);
       try {
         localStorage.setItem(THREE_D_SITE_STATUS_STORAGE_KEY, JSON.stringify(data.results));
         localStorage.setItem(THREE_D_SITE_TESTED_AT_STORAGE_KEY, String(now));
+      } catch {
+        // ignore
+      }
+      const imageData = await imageRes.json() as { results: ThreeDSiteStatus };
+      setThreeDSiteImageStatus(imageData.results);
+      try {
+        localStorage.setItem(THREE_D_SITE_IMAGE_STATUS_STORAGE_KEY, JSON.stringify(imageData.results));
       } catch {
         // ignore
       }
@@ -3905,6 +3968,24 @@ function App() {
             </button>
             <button
               type="button"
+              className={navItemClass("saved-3d-files", sidebarCollapsed)}
+              onClick={() => handleTabChange("saved-3d-files")}
+              title={sidebarCollapsed ? "Saved 3D Files" : undefined}
+            >
+              <Box size={20} strokeWidth={1.75} className="shrink-0" />
+              {!sidebarCollapsed && <span>Saved 3D Files</span>}
+            </button>
+            <button
+              type="button"
+              className={navItemClass("data-browser", sidebarCollapsed)}
+              onClick={() => handleTabChange("data-browser")}
+              title={sidebarCollapsed ? "Data Browser" : undefined}
+            >
+              <Database size={20} strokeWidth={1.75} className="shrink-0" />
+              {!sidebarCollapsed && <span>Data Browser</span>}
+            </button>
+            <button
+              type="button"
               className={navItemClass("logs", sidebarCollapsed)}
               onClick={() => handleTabChange("logs")}
               title={sidebarCollapsed ? "Logs" : undefined}
@@ -3964,7 +4045,7 @@ function App() {
       <main className="min-h-screen flex-1 overflow-auto bg-surface-app">
         <div
           className={`mx-auto flex w-full h-full flex-col px-6 md:px-8 ${
-            activeTab === "upload" ? "max-w-7xl" : "max-w-[1200px]"
+            activeTab === "upload" || activeTab === "saved-3d-files" ? "max-w-7xl" : "max-w-[1200px]"
           } ${
             (activeTab === "create" && listingLinkSubmitted) ||
             (activeTab === "test-workflow" && testListingLinkSubmitted)
@@ -4145,6 +4226,10 @@ function App() {
               onError={(msg) => addToast("error", msg)}
             />
           )}
+          {activeTab === "saved-3d-files" && <Saved3DFiles />}
+
+          {activeTab === "data-browser" && <DataBrowser />}
+
           {activeTab === "logs" && (
             <LogsTab
               onNavigateToSku={(sku) => {
@@ -4407,11 +4492,54 @@ function App() {
                   </div>
                 )}
                 <hr className="border-border-default" />
-                <ThreeDFileFinder
+
+                {/* Image Search pipeline — expandable, collapsed by default */}
+                <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
+                  <button
+                    type="button"
+                    aria-expanded={imageSearchOpen}
+                    onClick={() => setImageSearchOpen(!imageSearchOpen)}
+                    className="flex items-center gap-2 text-left"
+                  >
+                    <span className={`inline-block transition-transform ${imageSearchOpen ? "rotate-90" : ""}`}>▸</span>
+                    <span className="text-lg font-semibold text-text-primary">Image Search</span>
+                  </button>
+                  {imageSearchOpen && (
+                    <ImageSearchSteps
+                      addToast={addToast as (type: string, message: string) => void}
+                      siteStatus={threeDSiteStatus}
+                      enabledSites={THREE_D_SITES.map(({ site }) => site).filter(site => threeDSitesEnabled[site] ?? true)}
+                      sitePriority={threeDSitePriority}
+                      onUseLink={(link, meta) => {
+                        setSharedDownloadLink(link);
+                        setSharedDownloadMeta(meta);
+                        addToast("success", `Link ready for the download step: ${link}`);
+                      }}
+                    />
+                  )}
+                </div>
+
+                {/* Title Search pipeline — expandable, open by default */}
+                <TitleSearchPipeline
                   addToast={addToast as (type: string, message: string) => void}
-                  fileDownloadDelay={threeDDownloadDelay}
                   siteStatus={threeDSiteStatus}
                   enabledSites={THREE_D_SITES.map(({ site }) => site).filter(site => threeDSitesEnabled[site] ?? true)}
+                  sitePriority={threeDSitePriority}
+                  textModel={textModel}
+                  onUseLink={(link, meta) => {
+                    setSharedDownloadLink(link);
+                    setSharedDownloadMeta(meta);
+                    addToast("success", `Link ready for the download step: ${link}`);
+                  }}
+                />
+
+                {/* Shared Steps 3-4 — always visible below both pipelines */}
+                <SharedDownloadRender
+                  addToast={addToast as (type: string, message: string) => void}
+                  fileDownloadDelay={threeDDownloadDelay}
+                  externalUrl={sharedDownloadLink}
+                  externalMeta={sharedDownloadMeta}
+                  onExternalUrlConsumed={() => { setSharedDownloadLink(""); setSharedDownloadMeta(null); }}
                 />
               </div>
             </div>
@@ -4820,43 +4948,84 @@ function App() {
                       3D File Sites
                     </h3>
                     <p className="mt-1 text-sm text-text-muted">
-                      Sites available for 3D model search and download. Download-capable sites are tested automatically on page load (at most once per the operation cooldown above); sites that fail are skipped in the 3D File Finder.
+                      Sites available for 3D model search and download. Drag to set priority — when several sites appear in search results, the highest-priority one is chosen. Download-capable sites are tested automatically on page load (at most once per the operation cooldown above); sites that fail are skipped in the 3D File Finder.
                     </p>
                   </div>
-                  <div className="flex flex-col gap-2">
-                    {THREE_D_SITES.map(({ site, supported, requiresAuth }) => {
-                      const testResult = threeDSiteStatus?.[site];
-                      const isCults3d = site === "cults3d.com";
-                      const isMakerworld = site === "makerworld.com";
-                      const credStatus = isCults3d ? cults3dCredStatus : isMakerworld ? makerworldCredStatus : null;
-                      return (
-                        <div key={site} className={`flex flex-col gap-2 rounded-lg border border-border-default bg-surface-panel px-3 py-2 transition-opacity ${(threeDSitesEnabled[site] ?? true) ? "" : "opacity-50"}`}>
-                          <div className="flex items-center justify-between gap-3">
-                            <label className="flex cursor-pointer items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={threeDSitesEnabled[site] ?? true}
-                                onChange={() => handleToggleThreeDSite(site)}
-                                className="h-4 w-4 cursor-pointer accent-primary"
-                              />
-                              <span className="font-mono text-sm text-text-primary">{site}</span>
-                            </label>
-                            <div className="flex items-center gap-2">
-                              {supported ? (
-                                threeDSiteTesting && !testResult ? (
-                                  <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">Checking...</span>
-                                ) : testResult ? (
-                                  testResult.ok ? (
-                                    <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-900">Operational</span>
-                                  ) : (
-                                    <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-900">Down: {testResult.message}</span>
-                                  )
-                                ) : (
-                                  <span className="rounded bg-surface-hover px-2 py-0.5 text-xs font-semibold text-text-muted">Not tested</span>
-                                )
-                              ) : (
-                                <span className="rounded bg-surface-hover px-2 py-0.5 text-xs font-semibold text-text-muted">Search only</span>
-                              )}
+                  <DragDropContext onDragEnd={handleThreeDSiteDragEnd}>
+                    <Droppable droppableId="3d-sites">
+                      {(droppableProvided) => (
+                        <div
+                          className="flex flex-col gap-2"
+                          ref={droppableProvided.innerRef}
+                          {...droppableProvided.droppableProps}
+                        >
+                          {threeDSitePriority.map((site, index) => {
+                            const info = THREE_D_SITES.find((s) => s.site === site);
+                            if (!info) return null;
+                            const { supported, requiresAuth } = info;
+                            const testResult = threeDSiteStatus?.[site];
+                            const imageTestResult = threeDSiteImageStatus?.[site];
+                            const isCults3d = site === "cults3d.com";
+                            const isMakerworld = site === "makerworld.com";
+                            const credStatus = isCults3d ? cults3dCredStatus : isMakerworld ? makerworldCredStatus : null;
+                            return (
+                              <Draggable key={site} draggableId={site} index={index}>
+                                {(draggableProvided, snapshot) => (
+                                  <div
+                                    ref={draggableProvided.innerRef}
+                                    {...draggableProvided.draggableProps}
+                                    className={`flex flex-col gap-2 rounded-lg border border-border-default bg-surface-panel px-3 py-2 transition-opacity ${(threeDSitesEnabled[site] ?? true) ? "" : "opacity-50"} ${snapshot.isDragging ? "shadow-lg" : ""}`}
+                                  >
+                                    <div className="flex items-center justify-between gap-3">
+                                      <div className="flex items-center gap-2">
+                                        <span
+                                          {...draggableProvided.dragHandleProps}
+                                          className="cursor-grab text-text-muted hover:text-text-primary active:cursor-grabbing"
+                                          title="Drag to set priority"
+                                          aria-label={`Drag to reorder ${site}`}
+                                        >
+                                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4">
+                                            <path d="M7 4a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm6 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3zM7 11.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm6 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3zM7 19a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm6 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3z" />
+                                          </svg>
+                                        </span>
+                                        <span className="w-5 text-center text-xs font-semibold text-text-muted">{index + 1}</span>
+                                        <label className="flex cursor-pointer items-center gap-2">
+                                          <input
+                                            type="checkbox"
+                                            checked={threeDSitesEnabled[site] ?? true}
+                                            onChange={() => handleToggleThreeDSite(site)}
+                                            className="h-4 w-4 cursor-pointer accent-primary"
+                                          />
+                                          <span className="font-mono text-sm text-text-primary">{site}</span>
+                                        </label>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        {supported ? (
+                                          threeDSiteTesting && !testResult ? (
+                                            <span className="rounded bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning">Download: Checking...</span>
+                                          ) : testResult ? (
+                                            testResult.ok ? (
+                                              <span className="rounded bg-success/10 px-2 py-0.5 text-xs font-semibold text-success">Download: Operational</span>
+                                            ) : (
+                                              <span className="rounded bg-danger/10 px-2 py-0.5 text-xs font-semibold text-danger">Download: Down — {testResult.message}</span>
+                                            )
+                                          ) : (
+                                            <span className="rounded bg-surface-hover px-2 py-0.5 text-xs font-semibold text-text-muted">Download: Not tested</span>
+                                          )
+                                        ) : (
+                                          <span className="rounded bg-surface-hover px-2 py-0.5 text-xs font-semibold text-text-muted">Download: Search only</span>
+                                        )}
+                                        {threeDSiteTesting && !imageTestResult ? (
+                                          <span className="rounded bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning">Images: Checking...</span>
+                                        ) : imageTestResult ? (
+                                          imageTestResult.ok ? (
+                                            <span className="rounded bg-success/10 px-2 py-0.5 text-xs font-semibold text-success">Images: Operational</span>
+                                          ) : (
+                                            <span className="rounded bg-danger/10 px-2 py-0.5 text-xs font-semibold text-danger">Images: Down — {imageTestResult.message}</span>
+                                          )
+                                        ) : (
+                                          <span className="rounded bg-surface-hover px-2 py-0.5 text-xs font-semibold text-text-muted">Images: Not tested</span>
+                                        )}
                               {requiresAuth && credStatus !== null && (
                                 <span className={`rounded px-2 py-0.5 text-xs font-semibold ${credStatus.has_credentials ? "bg-emerald-100 text-emerald-900" : "bg-amber-100 text-amber-900"}`}>
                                   {credStatus.has_credentials
@@ -5023,10 +5192,16 @@ function App() {
                               {makerworldSessionMessage.text}
                             </span>
                           )}
+                                  </div>
+                                )}
+                              </Draggable>
+                            );
+                          })}
+                          {droppableProvided.placeholder}
                         </div>
-                      );
-                    })}
-                  </div>
+                      )}
+                    </Droppable>
+                  </DragDropContext>
                   <div className="flex items-center gap-3">
                     <button
                       type="button"

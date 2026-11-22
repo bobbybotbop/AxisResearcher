@@ -2,9 +2,9 @@
 Fixture-based tests for the sync_active log payload (POST /api/listings/sync-active).
 
 get_seller_list is monkeypatched — no network or eBay credentials are needed.
-GENERATED_LISTINGS_DIR is pointed at a tmp dir so the real Generated_Listings/
-tree is never touched. log_event is replaced with a capture stub so we assert
-exactly what gets written to the activity log.
+The listings store is pointed at a tmp axis.db so the real database is never
+touched. log_event is replaced with a capture stub so we assert exactly what
+gets written to the activity log.
 """
 import json
 import os
@@ -14,6 +14,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import backend.db as db
 import app as app_module
 
 
@@ -56,7 +57,8 @@ def _axis_listing(ebay_listing_id="", ebay_status="active", sku="AXIS_1",
 def client(tmp_path, monkeypatch):
     captured = []
 
-    monkeypatch.setattr(app_module, "GENERATED_LISTINGS_DIR", str(tmp_path))
+    monkeypatch.setattr(db, "DB_FILE", str(tmp_path / "axis.db"))
+    db.init_db()
     monkeypatch.setattr(app_module, "log_event", lambda *a, **k: captured.append((a, k)))
     monkeypatch.setattr(app_module, "write_manual_listing_json", lambda item: False)
     monkeypatch.setattr(app_module, "set_listing_ebay_status", lambda sku, status: True)
@@ -68,8 +70,7 @@ def client(tmp_path, monkeypatch):
 
 
 def _write_listing(tmp_path, sku, data):
-    with open(tmp_path / f"{sku}.json", "w", encoding="utf-8") as f:
-        json.dump(data, f)
+    db.save_listing(data)
 
 
 def _sync_active_payload(client):

@@ -39,14 +39,15 @@ from flask import Flask, jsonify, request, Response, stream_with_context
 from flask_cors import CORS
 from werkzeug.serving import WSGIRequestHandler
 from backend.copyScripts.CopyListingMain import copy_listing_main, testing_function
-from backend.serp import search_by_image, extract_top_links, filter_links_by_enabled_sites
-from backend.downloaders.thingiverse import extract_thing_id, stream_zip as tv_stream_zip, probe as probe_thingiverse
-from backend.downloaders.printables import extract_model_id as printables_model_id, build_zip as printables_build_zip, probe as probe_printables
-from backend.downloaders.makerworld import extract_model_info as mw_extract_model_info, download_3mf as mw_download_3mf, probe as probe_makerworld, open_session as mw_open_session, session_status as mw_session_status, close_session as mw_close_session
-from backend.downloaders.cults3d import extract_slug as cults3d_extract_slug, stream_zip as cults3d_stream_zip, probe as probe_cults3d, PaidModelError as Cults3DPaidModelError, load_cookies_from_browser as cults3d_load_cookies_from_browser
-from backend.downloaders.thangs import extract_model_id as thangs_extract_model_id, build_zip as thangs_build_zip, probe as probe_thangs, PaidModelError as ThangsPaidModelError
+from backend.serp import search_by_image, extract_top_links, filter_links_by_enabled_sites, search_by_text, order_by_site_priority
+from backend.downloaders.thingiverse import extract_thing_id, stream_zip as tv_stream_zip, probe as probe_thingiverse, scrape_images as tv_scrape_images, probe_images as probe_images_thingiverse
+from backend.downloaders.printables import extract_model_id as printables_model_id, build_zip as printables_build_zip, probe as probe_printables, scrape_images as printables_scrape_images, probe_images as probe_images_printables
+from backend.downloaders.makerworld import extract_model_info as mw_extract_model_info, download_3mf as mw_download_3mf, probe as probe_makerworld, open_session as mw_open_session, session_status as mw_session_status, close_session as mw_close_session, scrape_images as mw_scrape_images, probe_images as probe_images_makerworld
+from backend.downloaders.cults3d import extract_slug as cults3d_extract_slug, stream_zip as cults3d_stream_zip, probe as probe_cults3d, PaidModelError as Cults3DPaidModelError, load_cookies_from_browser as cults3d_load_cookies_from_browser, scrape_images as cults3d_scrape_images, probe_images as probe_images_cults3d
+from backend.downloaders.thangs import extract_model_id as thangs_extract_model_id, build_zip as thangs_build_zip, probe as probe_thangs, PaidModelError as ThangsPaidModelError, scrape_images as thangs_scrape_images, probe_images as probe_images_thangs
 from backend.constants.files_3d import DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, DOWNLOAD_MODES
 from backend.downloaders.zip_utils import extract_best_3d_file
+from backend.image_compare import find_matching_pairs, DEFAULT_THRESHOLD as COMPARE_IMAGES_THRESHOLD
 from backend.copyScripts.create_image import (
     generate_image_from_urls,
     ImageType,
@@ -54,11 +55,11 @@ from backend.copyScripts.create_image import (
     _openrouter_response_dict_to_image_bytes_and_mime,
     upload_image_bytes_to_ebay,
 )
-from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, resolve_listing_json_path, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, migrate_hide_not_found_listings, get_render_settings, save_render_settings, get_render_profiles, save_render_profile, delete_render_profile, get_active_render_profile, set_active_render_profile, validate_rig
+from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, migrate_hide_not_found_listings, get_render_settings, save_render_settings, get_render_profiles, save_render_profile, delete_render_profile, get_active_render_profile, set_active_render_profile, validate_rig
 from backend.helper_functions import remove_html_tags
 import os
 import json
-import glob
+import sqlite3
 import time
 from datetime import datetime, timezone
 import uuid
@@ -70,14 +71,16 @@ from backend.copyScripts.imageEditing import remove_background, compile_images, 
 from backend.copyScripts.upload_to_ebay import upload_complete_listing
 from backend.promoted_listings import promote_listing, PromotionError
 from backend.logger import log_event
-from backend.constants.models import DEFAULT_TEXT_MODEL, DEFAULT_IMAGE_MODEL, DEFAULT_CLASSIFIER_MODEL
+from backend import db as _db
+from backend.constants.models import DEFAULT_TEXT_MODEL, DEFAULT_IMAGE_MODEL, DEFAULT_CLASSIFIER_MODEL, DEFAULT_TITLE_SEARCH_MODEL
+from backend.constants.data_browser import DATA_BROWSER_TABLES, DATA_BROWSER_MAX_PAGE_SIZE
 from backend.constants.listing import (
     ANGLE_VARIANTS, PROMPT_TYPES, TITLE_MIN_LEN, TITLE_MAX_LEN,
     TITLE_TARGET_LEN, TITLE_MAX_ATTEMPTS, SKIP_CATEGORIES,
     CATEGORY_TO_IMAGE_TYPE, EBAY_STATUS_NOT_FOUND,
 )
 from backend.constants.ebay import EBAY_MARKETPLACE_ID, EBAY_BROWSE_API_BASE, EBAY_INVENTORY_API_BASE
-from backend.constants.paths import GENERATED_LISTINGS_DIR, GENERATED_IMAGES_DIR
+from backend.constants.paths import GENERATED_IMAGES_DIR, PROMPTS_DIR, SAVED_3D_FILES_DIR as _SAVED_3D_FILES_DIR_NAME
 from backend.constants.render import (
     DEFAULT_RENDER_AMBIENT, DEFAULT_RENDER_AZIMUTH, DEFAULT_RENDER_COLOR,
     DEFAULT_RENDER_ELEVATION, DEFAULT_RENDER_EXPOSURE, DEFAULT_RENDER_FILL_ENERGY,
@@ -99,7 +102,9 @@ from backend.render.normalize import normalize_to_render_mesh
 from backend.render.camera import compute_blender_camera
 from backend.render.validate import validate_fov, validate_resolution, validate_roughness
 import re
+import shutil
 import tempfile
+import mimetypes
 import requests
 from dotenv import load_dotenv
 
@@ -114,11 +119,10 @@ image_generation_lock = threading.Lock()
 
 
 def _load_listing_file(sku):
-    """Read a Generated_Listings/<sku>.json file; None if missing/unreadable."""
-    fpath = resolve_listing_json_path(sku=sku)
+    """Read a listing row from axis.db; None if missing/unreadable."""
+    _db.ensure_db()
     try:
-        with open(fpath, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        return _db.load_listing(sku)
     except Exception:
         return None
 
@@ -192,15 +196,8 @@ def _verify_failed_skus(
 def list_prompts(prompt_type):
     if prompt_type not in PROMPT_TYPES:
         return jsonify({"error": f"Invalid prompt type: {prompt_type}"}), 400
-    folder = os.path.join("prompts", prompt_type)
-    try:
-        files = sorted(
-            f for f in os.listdir(folder)
-            if os.path.isfile(os.path.join(folder, f)) and f.endswith(".txt")
-        )
-        return jsonify({"prompts": files}), 200
-    except FileNotFoundError:
-        return jsonify({"prompts": []}), 200
+    _db.ensure_db()
+    return jsonify({"prompts": _db.list_prompts(prompt_type)}), 200
 
 
 @app.route('/api/prompts/<prompt_type>', methods=['POST'])
@@ -220,13 +217,11 @@ def create_prompt(prompt_type):
         name = name + ".txt"
     if any(c in name for c in ("/", "\\", "..")):
         return jsonify({"error": "Invalid filename"}), 400
-    folder = os.path.join("prompts", prompt_type)
-    os.makedirs(folder, exist_ok=True)
-    file_path = os.path.join(folder, name)
-    if os.path.exists(file_path):
+    _db.ensure_db()
+    prompt_name = f"{prompt_type}/{name}"
+    if _db.prompt_exists(prompt_name):
         return jsonify({"error": f"Prompt '{name}' already exists"}), 400
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(content)
+    _db.save_prompt(prompt_name, content)
     return jsonify({"name": name}), 201
 
 
@@ -1090,8 +1085,22 @@ def _sanitize_title(text):
 
 
 def _load_prompt(filename):
-    with open(f"prompts/{filename}", "r", encoding="utf-8") as f:
-        return f.read()
+    _db.ensure_db()
+    content = _db.get_prompt(filename)
+    if content is None:
+        # Seed-on-missing fallback: installs that migrated before this prompt
+        # was added won't have it in the DB — load it from prompts/ on disk
+        # and seed the DB so later reads hit the database.
+        disk_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), PROMPTS_DIR, filename)
+        if not os.path.isfile(disk_path):
+            raise FileNotFoundError(f"prompt not found: {filename}")
+        with open(disk_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        try:
+            _db.save_prompt(filename, content)
+        except Exception as e:
+            print(f"[API] could not seed prompt {filename} into DB: {e}")
+    return content
 
 
 def _nudge_title_length(current_title, text_model):
@@ -1597,9 +1606,8 @@ def regenerate_metadata():
         listing_data["inventoryItem"] = inventory
         listing_data["offer"] = offer
 
-        filepath = resolve_listing_json_path(sku=sku)
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(listing_data, f, indent=2, ensure_ascii=False)
+        _db.ensure_db()
+        _db.save_listing(listing_data)
 
         print(f"[API] Regenerated metadata for {sku}")
         return jsonify({"metadata": updated_metadata, "listing_data": listing_data}), 200
@@ -1672,80 +1680,65 @@ def update_description():
 @app.route('/api/listings', methods=['GET'])
 def list_all_listings():
     """
-    Get all generated listings from the Generated_Listings folder.
+    Get all generated listings from the listings table in axis.db.
     
     Returns:
         JSON response with list of all listings (summary data), or error message
     """
     try:
         print("[API] /api/listings endpoint called")
-        # Use absolute path to ensure we're looking in the right directory
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
-        
-        if not os.path.exists(output_dir):
-            print(f"[API] Generated_Listings directory does not exist at: {output_dir}")
-            return jsonify({
-                "listings": [],
-                "error": None
-            }), 200
-        
+        _db.ensure_db()
+
         listings = []
-        
-        # Get all JSON files in the directory
-        for filename in os.listdir(output_dir):
-            if filename.endswith('.json'):
-                filepath = os.path.join(output_dir, filename)
-                try:
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        listing_data = json.load(f)
 
-                    # Soft-deleted listings never appear in the API response
-                    if listing_data.get('hidden'):
-                        continue
-
-                    # Extract summary information
-                    sku = listing_data.get('sku', filename.replace('.json', ''))
-                    title = listing_data.get('inventoryItem', {}).get('product', {}).get('title', 'No title')
-                    description = listing_data.get('inventoryItem', {}).get('product', {}).get('description', '')
-                    price = listing_data.get('offer', {}).get('pricingSummary', {}).get('price', {}).get('value', 'N/A')
-                    currency = listing_data.get('offer', {}).get('pricingSummary', {}).get('price', {}).get('currency', 'USD')
-                    category_id = listing_data.get('offer', {}).get('categoryId', 'N/A')
-                    created_date = listing_data.get('createdDateTime', '')
-                    image_urls = listing_data.get('inventoryItem', {}).get('product', {}).get('imageUrls', [])
-                    image_count = len(image_urls)
-                    quantity = listing_data.get('offer', {}).get('quantity', 0)
-                    
-                    listings.append({
-                        'sku': sku,
-                        'title': title,
-                        'description': description,
-                        'price': price,
-                        'currency': currency,
-                        'categoryId': category_id,
-                        'createdDateTime': created_date,
-                        'imageCount': image_count,
-                        'imageUrls': image_urls,
-                        'quantity': quantity,
-                        'filename': filename,
-                        'fileSku': filename.replace('.json', ''),  # SKU derived from filename
-                        'ebayListingId': str(listing_data.get('ebayListingId') or '').strip(),
-                        'models': listing_data.get('models') or None,
-                        'isManualListing': bool(listing_data.get('isManualListing', False)),
-                        'sellerSku': str(listing_data.get('sellerSku') or '').strip() or None,
-                        'isVariationListing': bool(listing_data.get('isVariationListing', False)),
-                        'ebay_status': listing_data.get('ebay_status', 'active'),
-                    })
-                except Exception as e:
-                    print(f"[API] Error reading {filename}: {e}")
-                    import traceback
-                    traceback.print_exc()
+        for listing_data in _db.list_listings():
+            try:
+                # Soft-deleted listings never appear in the API response
+                if listing_data.get('hidden'):
                     continue
-        
+
+                # Extract summary information
+                sku = listing_data.get('sku', '')
+                title = listing_data.get('inventoryItem', {}).get('product', {}).get('title', 'No title')
+                description = listing_data.get('inventoryItem', {}).get('product', {}).get('description', '')
+                price = listing_data.get('offer', {}).get('pricingSummary', {}).get('price', {}).get('value', 'N/A')
+                currency = listing_data.get('offer', {}).get('pricingSummary', {}).get('price', {}).get('currency', 'USD')
+                category_id = listing_data.get('offer', {}).get('categoryId', 'N/A')
+                created_date = listing_data.get('createdDateTime', '')
+                image_urls = listing_data.get('inventoryItem', {}).get('product', {}).get('imageUrls', [])
+                image_count = len(image_urls)
+                quantity = listing_data.get('offer', {}).get('quantity', 0)
+
+                listings.append({
+                    'sku': sku,
+                    'title': title,
+                    'description': description,
+                    'price': price,
+                    'currency': currency,
+                    'categoryId': category_id,
+                    'createdDateTime': created_date,
+                    'imageCount': image_count,
+                    'imageUrls': image_urls,
+                    'quantity': quantity,
+                    'filename': f"{sku}.json",
+                    'fileSku': sku,
+                    'ebayListingId': str(listing_data.get('ebayListingId') or '').strip(),
+                    'models': listing_data.get('models') or None,
+                    'isManualListing': bool(listing_data.get('isManualListing', False)),
+                    'sellerSku': str(listing_data.get('sellerSku') or '').strip() or None,
+                    'isVariationListing': bool(listing_data.get('isVariationListing', False)),
+                    'ebay_status': listing_data.get('ebay_status', 'active'),
+                })
+            except Exception as e:
+                print(f"[API] Error reading listing {listing_data.get('sku')}: {e}")
+                import traceback
+                traceback.print_exc()
+                continue
+
         # Sort by created date (newest first)
         listings.sort(key=lambda x: x.get('createdDateTime', ''), reverse=True)
-        
-        print(f"[API] Found {len(listings)} listing(s) in {output_dir}")
+
+        print(f"[API] Found {len(listings)} listing(s)")
         
         return jsonify({
             "listings": listings,
@@ -1769,25 +1762,22 @@ def list_all_listings():
 @app.route('/api/import-listings', methods=['POST'])
 def api_import_listings():
     """
-    Sync active eBay listings created outside this tool into Generated_Listings/<sellerSku>.json.
-    Uses ModTimeFrom from listingPreferences.json for incremental fetches after the first run.
+    Sync active eBay listings created outside this tool into the listings table of axis.db.
+    Uses ModTimeFrom from the preferences table for incremental fetches after the first run.
     """
     last_refreshed = get_manual_import_last_refreshed()
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    generated_listings_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
     try:
         items = get_seller_list(mod_time_from=last_refreshed)
     except Exception as e:
         log_event("import", "error", error=str(e))
         return jsonify({'error': str(e)}), 500
 
-    # Index local files by eBay item ID, split by listing kind
+    # Index local listings by eBay item ID, split by listing kind
+    _db.ensure_db()
     axis_item_ids = set()
     manual_item_ids = set()
-    for fpath in glob.glob(os.path.join(generated_listings_dir, '*.json')):
+    for d in _db.list_listings():
         try:
-            with open(fpath, 'r', encoding='utf-8') as f:
-                d = json.load(f)
             eid = str(d.get('ebayListingId') or '').strip()
             if not eid:
                 continue
@@ -2429,7 +2419,7 @@ def api_save_promoted_listing_settings():
 @app.route('/api/listings/bulk-delete', methods=['POST'])
 def api_bulk_delete_listings():
     """
-    Delete one or more local listing JSON files from Generated_Listings/.
+    Delete one or more local listing rows from the listings table in axis.db.
 
     Request body: { "skus": ["axis_84", "axis_85"] }
     Response: { "deleted": [...], "not_found": [...] }
@@ -2439,9 +2429,7 @@ def api_bulk_delete_listings():
     if not isinstance(skus, list):
         return jsonify({'error': 'skus must be a list'}), 400
 
-    # Derive the safe root once via the shared helper so path resolution stays
-    # consistent if the directory ever moves.
-    safe_root = os.path.realpath(os.path.dirname(resolve_listing_json_path(sku='__probe__')))
+    _db.ensure_db()
 
     deleted = []
     not_found = []
@@ -2450,14 +2438,8 @@ def api_bulk_delete_listings():
         if not isinstance(sku, str) or not sku:
             not_found.append(sku)
             continue
-        filepath = resolve_listing_json_path(sku=sku)
-        resolved = os.path.realpath(filepath)
-        if not resolved.startswith(safe_root + os.sep):
-            not_found.append(sku)
-            continue
         try:
-            if os.path.isfile(resolved):
-                os.remove(resolved)
+            if _db.delete_listing(sku):
                 deleted.append(sku)
             else:
                 not_found.append(sku)
@@ -2765,8 +2747,7 @@ def api_sync_active_listings():
 
     Returns { "active": N, "newly_inactive": M, "updated": K, "not_found": [...] }
     """
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
+    _db.ensure_db()
 
     # Step 1: Fetch all active eBay listings via GetSellerList (single call)
     try:
@@ -2782,28 +2763,15 @@ def api_sync_active_listings():
 
     active_by_item_id, active_by_seller_sku = _index_seller_list_items(ebay_items, 'sync-active')
 
-    # Step 2: Scan all local listing JSON files
+    # Step 2: Scan all local listing rows
     active_count = 0
     newly_inactive = 0
     updated_count = 0
     not_found_skus = []
     updated_skus = []
 
-    if not os.path.exists(output_dir):
-        return jsonify({'active': 0, 'newly_inactive': 0, 'updated': 0, 'not_found': []}), 200
-
-    for fname in os.listdir(output_dir):
-        if not fname.endswith('.json'):
-            continue
-        sku = fname[:-5]
-        fpath = os.path.join(output_dir, fname)
-        try:
-            with open(fpath, 'r', encoding='utf-8') as f:
-                local_data = json.load(f)
-        except Exception as e:
-            print(f"[sync-active] Failed to read {fname}: {e}")
-            continue
-
+    for local_data in _db.list_listings():
+        sku = local_data.get('sku', '')
         ebay_listing_id = str(local_data.get('ebayListingId') or '').strip()
         ebay_status = local_data.get('ebay_status', '')
 
@@ -2841,10 +2809,9 @@ def api_sync_active_listings():
 
                 if data_changed:
                     try:
-                        with open(fpath, 'w', encoding='utf-8') as f:
-                            json.dump(local_data, f, indent=2, ensure_ascii=False)
+                        _db.save_listing(local_data)
                     except Exception as e:
-                        print(f"[sync-active] Failed to write {fname}: {e}")
+                        print(f"[sync-active] Failed to write {sku}: {e}")
 
                 active_count += 1
                 if data_changed:
@@ -2856,10 +2823,9 @@ def api_sync_active_listings():
             local_data['ebayListingId'] = ''
             local_data['ebay_status'] = EBAY_STATUS_NOT_FOUND
             try:
-                with open(fpath, 'w', encoding='utf-8') as f:
-                    json.dump(local_data, f, ensure_ascii=False, indent=2)
+                _db.save_listing(local_data)
             except Exception as e:
-                print(f"[sync-active] Failed to write {fname}: {e}")
+                print(f"[sync-active] Failed to write {sku}: {e}")
             not_found_skus.append(sku)
             newly_inactive += 1
             print(f"[sync-active] Marked newly inactive: {sku}")
@@ -2902,8 +2868,7 @@ def api_sync_startup_listings():
     Returns { "removed": N, "healed": M, "aborted": bool, "reason"?: str }.
     Designed to never break app startup: failures return an error payload.
     """
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
+    _db.ensure_db()
 
     try:
         ebay_items = get_seller_list()
@@ -2932,91 +2897,76 @@ def api_sync_startup_listings():
     healed_skus = []
     removed_titles = {}
 
-    if os.path.exists(output_dir):
-        for fname in os.listdir(output_dir):
-            if not fname.endswith('.json'):
-                continue
-            sku = fname[:-5]
-            fpath = os.path.join(output_dir, fname)
-            try:
-                with open(fpath, 'r', encoding='utf-8') as f:
-                    local_data = json.load(f)
-            except Exception as e:
-                print(f"[sync-startup] Failed to read {fname}: {e}")
-                continue
+    for local_data in _db.list_listings():
+        sku = local_data.get('sku', '')
+        ebay_listing_id = str(local_data.get('ebayListingId') or '').strip()
+        was_hidden = bool(local_data.get('hidden'))
+        was_not_found = local_data.get('ebay_status') == EBAY_STATUS_NOT_FOUND
 
-            ebay_listing_id = str(local_data.get('ebayListingId') or '').strip()
-            was_hidden = bool(local_data.get('hidden'))
-            was_not_found = local_data.get('ebay_status') == EBAY_STATUS_NOT_FOUND
+        matched_item = None
+        matched_via = None
+        if ebay_listing_id and ebay_listing_id in active_by_item_id:
+            matched_item = active_by_item_id[ebay_listing_id]
+            matched_via = 'item_id'
+        elif sku in active_by_seller_sku:
+            matched_item = active_by_seller_sku[sku]
+            matched_via = 'seller_sku'
 
-            matched_item = None
-            matched_via = None
-            if ebay_listing_id and ebay_listing_id in active_by_item_id:
-                matched_item = active_by_item_id[ebay_listing_id]
-                matched_via = 'item_id'
-            elif sku in active_by_seller_sku:
-                matched_item = active_by_seller_sku[sku]
-                matched_via = 'seller_sku'
+        # No ebayListingId and no SKU match: draft, skip
+        if not ebay_listing_id and matched_item is None:
+            continue
 
-            # No ebayListingId and no SKU match: draft, skip
-            if not ebay_listing_id and matched_item is None:
-                continue
-
-            if matched_item is not None:
-                if local_data.get('isManualListing'):
-                    write_manual_listing_json(matched_item)
-                    if was_not_found:
-                        set_listing_ebay_status(sku, 'active')
-                    if was_hidden:
-                        # write_manual_listing_json preserves the hidden flag,
-                        # so explicitly clear it.
-                        try:
-                            with open(fpath, 'r', encoding='utf-8') as f:
-                                file_data = json.load(f)
-                            if file_data.pop('hidden', None) is not None:
-                                with open(fpath, 'w', encoding='utf-8') as f:
-                                    json.dump(file_data, f, indent=2, ensure_ascii=False)
-                        except Exception as e:
-                            print(f"[sync-startup] Failed to unhide {fname}: {e}")
-                else:
-                    data_changed = _merge_seller_item_into_axis_listing(
-                        local_data, matched_item, matched_via, ebay_listing_id)
-                    if was_hidden:
-                        local_data.pop('hidden', None)
-                        data_changed = True
-                    if data_changed:
-                        try:
-                            with open(fpath, 'w', encoding='utf-8') as f:
-                                json.dump(local_data, f, indent=2, ensure_ascii=False)
-                        except Exception as e:
-                            print(f"[sync-startup] Failed to write {fname}: {e}")
-                if was_not_found or was_hidden:
-                    healed += 1
-                    healed_skus.append(sku)
-                    print(f"[sync-startup] Healed: {sku}")
-            else:
-                # Has ebayListingId but not found on eBay: ended outside the
-                # app -> soft-delete. Keep ebayListingId so a future relist can
-                # re-match and heal this file.
-                if not was_hidden:
-                    # Snapshot the title before hiding: once soft-deleted the
-                    # listing leaves /api/listings, so lazy title resolution
-                    # would fail for exactly these rows.
-                    title = (local_data.get('inventoryItem', {})
-                             .get('product', {})
-                             .get('title'))
-                    local_data['hidden'] = True
+        if matched_item is not None:
+            if local_data.get('isManualListing'):
+                write_manual_listing_json(matched_item)
+                if was_not_found:
+                    set_listing_ebay_status(sku, 'active')
+                if was_hidden:
+                    # write_manual_listing_json preserves the hidden flag,
+                    # so explicitly clear it.
                     try:
-                        with open(fpath, 'w', encoding='utf-8') as f:
-                            json.dump(local_data, f, ensure_ascii=False, indent=2)
+                        file_data = _db.load_listing(sku)
+                        if file_data and file_data.pop('hidden', None) is not None:
+                            _db.save_listing(file_data)
                     except Exception as e:
-                        print(f"[sync-startup] Failed to write {fname}: {e}")
-                        continue
-                    removed += 1
-                    removed_skus.append(sku)
-                    if title:
-                        removed_titles[sku] = title
-                    print(f"[sync-startup] Soft-deleted externally ended listing: {sku}")
+                        print(f"[sync-startup] Failed to unhide {sku}: {e}")
+            else:
+                data_changed = _merge_seller_item_into_axis_listing(
+                    local_data, matched_item, matched_via, ebay_listing_id)
+                if was_hidden:
+                    local_data.pop('hidden', None)
+                    data_changed = True
+                if data_changed:
+                    try:
+                        _db.save_listing(local_data)
+                    except Exception as e:
+                        print(f"[sync-startup] Failed to write {sku}: {e}")
+            if was_not_found or was_hidden:
+                healed += 1
+                healed_skus.append(sku)
+                print(f"[sync-startup] Healed: {sku}")
+        else:
+            # Has ebayListingId but not found on eBay: ended outside the
+            # app -> soft-delete. Keep ebayListingId so a future relist can
+            # re-match and heal this row.
+            if not was_hidden:
+                # Snapshot the title before hiding: once soft-deleted the
+                # listing leaves /api/listings, so lazy title resolution
+                # would fail for exactly these rows.
+                title = (local_data.get('inventoryItem', {})
+                         .get('product', {})
+                         .get('title'))
+                local_data['hidden'] = True
+                try:
+                    _db.save_listing(local_data)
+                except Exception as e:
+                    print(f"[sync-startup] Failed to write {sku}: {e}")
+                    continue
+                removed += 1
+                removed_skus.append(sku)
+                if title:
+                    removed_titles[sku] = title
+                print(f"[sync-startup] Soft-deleted externally ended listing: {sku}")
 
     log_kwargs = {'removed': removed, 'healed': healed}
     if removed_skus:
@@ -3032,20 +2982,88 @@ def api_sync_startup_listings():
 
 @app.route('/api/logs', methods=['GET'])
 def api_get_logs():
-    log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs.ndjson')
-    if not os.path.exists(log_file):
-        return jsonify({'logs': []})
-    with open(log_file, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-    logs = []
-    for line in reversed(lines):
-        line = line.strip()
-        if line:
-            try:
-                logs.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return jsonify({'logs': logs})
+    _db.ensure_db()
+    return jsonify({'logs': _db.get_logs()})
+
+
+@app.route('/api/data-browser/<table>', methods=['GET'])
+def api_data_browser(table):
+    if table not in DATA_BROWSER_TABLES:
+        return jsonify({"error": f"Unknown table: {table}"}), 400
+    _db.ensure_db()
+    page = request.args.get("page", 1, type=int)
+    page_size = request.args.get("page_size", 25, type=int)
+    page = max(1, page)
+    page_size = max(1, min(page_size, DATA_BROWSER_MAX_PAGE_SIZE))
+    offset = (page - 1) * page_size
+
+    conn = sqlite3.connect(_db.DB_FILE, timeout=30)
+    conn.row_factory = sqlite3.Row
+    try:
+        total_rows = conn.execute(f"SELECT COUNT(*) FROM [{table}]").fetchone()[0]
+        columns = [row[1] for row in conn.execute(f"PRAGMA table_info([{table}])").fetchall()]
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                f"SELECT * FROM [{table}] LIMIT ? OFFSET ?", (page_size, offset)
+            ).fetchall()
+        ]
+    finally:
+        conn.close()
+
+    total_pages = max(1, -(-total_rows // page_size))  # ceiling division
+    return jsonify({
+        "table": table,
+        "columns": columns,
+        "rows": rows,
+        "page": page,
+        "page_size": page_size,
+        "total_rows": total_rows,
+        "total_pages": total_pages,
+    })
+
+
+# Primary key column for each browsable table, used to target row updates.
+DATA_BROWSER_PK = {
+    "listings": "sku",
+    "preferences": "key",
+    "logs": "id",
+    "prompts": "name",
+}
+
+
+@app.route('/api/data-browser/<table>/update', methods=['PUT'])
+def api_data_browser_update(table):
+    if table not in DATA_BROWSER_TABLES:
+        return jsonify({"error": f"Unknown table: {table}"}), 400
+    body = request.get_json(silent=True) or {}
+    pk_value = body.get("pk")
+    column = body.get("column")
+    value = body.get("value")
+    if pk_value is None or not column:
+        return jsonify({"error": "Missing 'pk' or 'column'"}), 400
+
+    _db.ensure_db()
+    conn = sqlite3.connect(_db.DB_FILE, timeout=30)
+    try:
+        pk_col = DATA_BROWSER_PK[table]
+        valid_cols = {row[1] for row in conn.execute(f"PRAGMA table_info([{table}])").fetchall()}
+        if column not in valid_cols:
+            return jsonify({"error": f"Unknown column: {column}"}), 400
+        if column == pk_col:
+            return jsonify({"error": "Cannot edit primary key"}), 400
+
+        cur = conn.execute(
+            f"UPDATE [{table}] SET [{column}] = ? WHERE [{pk_col}] = ?",
+            (value, pk_value),
+        )
+        conn.commit()
+        if cur.rowcount == 0:
+            return jsonify({"error": "Row not found"}), 404
+    finally:
+        conn.close()
+
+    return jsonify({"ok": True, "table": table, "column": column, "pk": pk_value})
 
 
 @app.route('/api/testing', methods=['POST'])
@@ -3098,8 +3116,9 @@ def serp_lens_search():
     Reverse-image-search an eBay listing photo via SerpAPI Google reverse image,
     filtered to 3D-print file hosting sites.
 
-    Expects JSON: {"image_url": "https://...", "enabled_sites": ["printables.com", ...] (optional)}
-    Returns JSON: {"results": [{"title", "link", "source", "thumbnail"}, ...]}
+    Expects JSON: {"image_url": "https://...", "enabled_sites": ["printables.com", ...] (optional),
+                   "site_priorities": ["printables.com", ...] (optional; domains in priority order)}
+    Returns JSON: {"results": [{"title", "link", "source", "thumbnail", "priority_rank"}, ...]}
     """
     try:
         data = request.get_json()
@@ -3110,11 +3129,15 @@ def serp_lens_search():
         enabled_sites = data.get("enabled_sites")  # list[str] | None; None means all sites
         if enabled_sites is not None and not isinstance(enabled_sites, list):
             return jsonify({"error": "enabled_sites must be a list of strings"}), 400
+        site_priorities = data.get("site_priorities")  # list[str] | None; domains in priority order
+        if site_priorities is not None and not isinstance(site_priorities, list):
+            return jsonify({"error": "site_priorities must be a list of strings"}), 400
         print(f"[API] SerpAPI reverse image search for: {image_url}")
 
         raw = search_by_image(image_url)
         links = extract_top_links(raw, limit=10)
         links = filter_links_by_enabled_sites(links, enabled_sites)
+        links = order_by_site_priority(links, site_priorities)
 
         print(f"[API] SerpAPI returned {len(links)} results")
         return jsonify({"results": links}), 200
@@ -3126,6 +3149,106 @@ def serp_lens_search():
         return jsonify({"error": "SerpAPI request failed"}), 502
     except Exception as e:
         print(f"[API] SerpAPI lens error: {e}")
+        return jsonify({"error": f"SerpAPI search failed: {str(e)}"}), 500
+
+
+@app.route('/api/optimize-title/prompt', methods=['GET'])
+def get_optimize_title_prompt():
+    """Return the default title-optimization prompt template (with {title} placeholder)."""
+    try:
+        return jsonify({"prompt": _load_prompt("title/optimizeTitleForSearch.txt")}), 200
+    except FileNotFoundError:
+        return jsonify({"error": "Default title optimization prompt not found"}), 500
+
+
+@app.route('/api/optimize-title', methods=['POST'])
+def optimize_title():
+    """
+    Optimize an eBay listing title into a search query for 3D file sites
+    (strip sales terms: quantity, color, condition, shipping, marketing filler).
+
+    Expects JSON: {
+        "title": "original eBay listing title",
+        "prompt": "custom prompt template with {title} placeholder" (optional;
+            defaults to prompts/title/optimizeTitleForSearch.txt),
+        "text_model": "model id" (optional; defaults to Claude Haiku)
+    }
+    Returns JSON: {"optimized_title": "..."}
+    """
+    try:
+        data = request.get_json()
+        if not data or not data.get("title", "").strip():
+            return jsonify({"error": "title is required"}), 400
+
+        title = data["title"].strip()
+        template = data.get("prompt")
+        if not template or not template.strip():
+            template = _load_prompt("title/optimizeTitleForSearch.txt")
+        prompt = template.replace("{title}", title)
+
+        text_model = data.get("text_model") or DEFAULT_TITLE_SEARCH_MODEL
+        print(f"[API] /api/optimize-title model={text_model} title='{title}'")
+
+        raw = call_text_llm(prompt, model=text_model)
+        optimized = _sanitize_title(raw)
+        if not optimized:
+            return jsonify({"error": "Failed to get response from AI"}), 502
+
+        print(f"[API] /api/optimize-title result: '{optimized}'")
+        return jsonify({"optimized_title": optimized}), 200
+
+    except FileNotFoundError:
+        return jsonify({"error": "Default title optimization prompt not found"}), 500
+    except Exception as e:
+        print(f"[API] /api/optimize-title error: {e}")
+        return jsonify({"error": f"Title optimization failed: {str(e)}"}), 500
+
+
+@app.route('/api/serp-text-search', methods=['POST'])
+def serp_text_search():
+    """
+    Google text search via SerpAPI, classified against whitelisted/blacklisted
+    3D-print file hosting sites, filtered by enabled sites, ordered by site priority.
+
+    Expects JSON: {
+        "query": "benchy 3d file",
+        "enabled_sites": ["printables.com", ...] (optional; omitted means all sites),
+        "max_results": 35 (optional),
+        "site_priorities": ["thingiverse.com", ...] (optional; domains in priority order)
+    }
+    Returns JSON: {"results": [{"title", "link", "snippet", "site_type", "priority_rank"}, ...]}
+    """
+    try:
+        data = request.get_json()
+        if not data or not data.get("query"):
+            return jsonify({"error": "query is required"}), 400
+
+        query = data["query"]
+        enabled_sites = data.get("enabled_sites")  # list[str] | None; None means all sites
+        if enabled_sites is not None and not isinstance(enabled_sites, list):
+            return jsonify({"error": "enabled_sites must be a list of strings"}), 400
+        site_priorities = data.get("site_priorities")  # list[str] | None; domains in priority order
+        if site_priorities is not None and not isinstance(site_priorities, list):
+            return jsonify({"error": "site_priorities must be a list of strings"}), 400
+        max_results = data.get("max_results", 35)
+        if not isinstance(max_results, int) or max_results < 1:
+            return jsonify({"error": "max_results must be a positive integer"}), 400
+        print(f"[API] SerpAPI text search for: {query}")
+
+        results = search_by_text(query, max_results=max_results)
+        results = filter_links_by_enabled_sites(results, enabled_sites)
+        results = order_by_site_priority(results, site_priorities)
+
+        print(f"[API] SerpAPI text search returned {len(results)} results")
+        return jsonify({"results": results}), 200
+
+    except ValueError as ve:
+        return jsonify({"error": str(ve)}), 400
+    except requests.exceptions.RequestException as e:
+        print(f"[API] SerpAPI HTTP error: {e}")
+        return jsonify({"error": "SerpAPI request failed"}), 502
+    except Exception as e:
+        print(f"[API] SerpAPI text search error: {e}")
         return jsonify({"error": f"SerpAPI search failed: {str(e)}"}), 500
 
 
@@ -3143,6 +3266,152 @@ def test_3d_sites():
             ok, message = False, str(e)
         if not ok:
             print(f"[test-3d-sites] {site} FAILED: {message}")
+        return site, {"ok": ok, "message": message}
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=len(probes)) as executor:
+        futures = [executor.submit(run_probe, site, fn) for site, fn in probes]
+        for future in as_completed(futures):
+            site, result = future.result()
+            results[site] = result
+    return jsonify({"results": results})
+
+
+@app.route('/api/scrape-site-images', methods=['POST'])
+def scrape_site_images():
+    """
+    Return the main model gallery image URLs for a 3D file site page.
+
+    Expects JSON: {"link": "https://..."}
+    Returns JSON: {"images": ["https://...", ...]}
+    Supported: thingiverse.com, printables.com, makerworld.com, cults3d.com, thangs.com
+    Yeggi has no scraper and always returns an empty list.
+    """
+    try:
+        data = request.get_json()
+        if not data or not data.get("link"):
+            return jsonify({"error": "link is required"}), 400
+
+        link = data["link"].strip()
+        images = _scrape_site_image_urls(link)
+        return jsonify({"images": images}), 200
+
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except RuntimeError as e:
+        print(f"[API] scrape-site-images upstream error: {e}")
+        return jsonify({"error": str(e)}), 502
+    except requests.exceptions.RequestException as e:
+        print(f"[API] scrape-site-images request error: {e}")
+        return jsonify({"error": "Image scrape request failed"}), 502
+    except Exception as e:
+        print(f"[API] scrape-site-images error: {e}")
+        return jsonify({"error": f"Image scrape failed: {str(e)}"}), 500
+
+
+def _download_image(url, timeout=10):
+    """Download one image and return its raw bytes. Raises on failure."""
+    r = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
+    r.raise_for_status()
+    return r.content
+
+
+def _scrape_site_image_urls(link):
+    """Dispatch to the per-site image scraper. Shared by /api/scrape-site-images
+    and /api/compare-images. Raises ValueError for unsupported sites."""
+    if "thingiverse.com" in link:
+        return tv_scrape_images(link)
+    if "printables.com" in link:
+        return printables_scrape_images(link)
+    if "makerworld.com" in link:
+        return mw_scrape_images(link)
+    if "cults3d.com" in link:
+        return cults3d_scrape_images(link)
+    if "thangs.com" in link:
+        return thangs_scrape_images(link)
+    if "yeggi.com" in link:
+        return []
+    raise ValueError("Unsupported site — supported: thingiverse.com, printables.com, makerworld.com, cults3d.com, thangs.com, yeggi.com")
+
+
+def _download_images_as_pil(urls):
+    """Download image URLs, skipping any that fail, and return PIL images."""
+    from PIL import Image
+    images = []
+    for url in urls:
+        try:
+            images.append(Image.open(io.BytesIO(_download_image(url))).convert("RGB"))
+        except Exception as e:
+            print(f"[API] compare-images: skipping undownloadable image {url}: {e}")
+    return images
+
+
+@app.route('/api/compare-images', methods=['POST'])
+def compare_images():
+    """
+    Confirm a candidate 3D file page against an eBay listing's photos.
+
+    Expects JSON: {"ebay_photos": ["https://...", ...], "site_url": "https://..."}
+    Returns JSON: {"match": bool, "matched_pairs": [{"ebay_index", "site_index", "distance"}, ...],
+                   "ebay_image_count": int, "site_image_count": int}
+    On failure returns {"match": false, "error": "..."} — the comparison is
+    non-blocking, so errors never prevent the downstream download.
+    """
+    try:
+        data = request.get_json()
+        if not data or "ebay_photos" not in data:
+            return jsonify({"error": "ebay_photos is required"}), 400
+        if not data.get("site_url"):
+            return jsonify({"error": "site_url is required"}), 400
+
+        ebay_photos = data["ebay_photos"]
+        if not isinstance(ebay_photos, list) or not all(isinstance(u, str) for u in ebay_photos):
+            return jsonify({"error": "ebay_photos must be a list of strings"}), 400
+
+        site_url = data["site_url"].strip()
+
+        try:
+            site_image_urls = _scrape_site_image_urls(site_url)
+        except Exception as e:
+            print(f"[API] compare-images scrape error: {e}")
+            return jsonify({"match": False, "error": f"Image scrape failed: {str(e)}"}), 200
+
+        ebay_images = _download_images_as_pil(ebay_photos)
+        site_images = _download_images_as_pil(site_image_urls)
+
+        matched_pairs = find_matching_pairs(ebay_images, site_images, threshold=COMPARE_IMAGES_THRESHOLD)
+
+        return jsonify({
+            "match": len(matched_pairs) > 0,
+            "matched_pairs": matched_pairs,
+            "ebay_image_count": len(ebay_images),
+            "site_image_count": len(site_images),
+        }), 200
+
+    except Exception as e:
+        print(f"[API] compare-images error: {e}")
+        return jsonify({"match": False, "error": f"Image comparison failed: {str(e)}"}), 200
+
+
+@app.route('/api/test-3d-site-images', methods=['GET'])
+def test_3d_site_images():
+    """Probe each site's image scraper against a known public model. Probes run
+    concurrently — the Cults3D probe launches a browser and can take a minute."""
+    probes = [
+        ("printables.com", probe_images_printables),
+        ("thingiverse.com", probe_images_thingiverse),
+        ("makerworld.com", probe_images_makerworld),
+        ("cults3d.com", probe_images_cults3d),
+        ("thangs.com", probe_images_thangs),
+    ]
+
+    def run_probe(site, probe_fn):
+        try:
+            ok, message = probe_fn()
+        except Exception as e:
+            ok, message = False, str(e)
+        if not ok:
+            print(f"[test-3d-site-images] {site} FAILED: {message}")
         return site, {"ok": ok, "message": message}
 
     results = {}
@@ -3435,6 +3704,100 @@ def update_makerworld_email_credentials():
         return jsonify({"error": f"Failed to save credentials: {str(e)}"}), 500
 
 
+# Root directory for persisted Saved 3D Files (GLOSSARY: "Saved 3D File") —
+# the downloaded 3D file and its site-image directory live under here; the
+# database stores the paths. Module-level so tests can monkeypatch it.
+SAVED_3D_FILES_DIR = _SAVED_3D_FILES_DIR_NAME
+
+# Source-site label for a 3D file page URL (the first whitelisted host that appears)
+_SOURCE_SITE_HOSTS = ("thingiverse.com", "printables.com", "makerworld.com", "cults3d.com", "thangs.com", "yeggi.com")
+
+
+def _source_site_from_link(link):
+    for host in _SOURCE_SITE_HOSTS:
+        if host in link:
+            return host
+    return ""
+
+
+def _list_saved_3d_file_images(images_dir):
+    """Sorted image filenames inside a Saved 3D File's images_dir, or []."""
+    if not images_dir or not os.path.isdir(images_dir):
+        return []
+    try:
+        return sorted(
+            name for name in os.listdir(images_dir)
+            if os.path.isfile(os.path.join(images_dir, name))
+        )
+    except OSError:
+        return []
+
+
+def _autosave_saved_3d_file(data, link, out_filename, out_bytes):
+    """Persist a Saved 3D File (GLOSSARY) after a successful download, when the
+    pipeline sent the metadata. Best-effort: any failure is logged, never raised,
+    so it can never break the download response.
+
+    - The 3D file is written to Saved_3D_Files/<id>.<ext>
+    - Site images are scraped and downloaded into Saved_3D_Files/<id>_images/
+      (eBay photos are NOT stored — only the listing URL)
+    - The record is inserted into the saved_3d_files table
+    """
+    ebay_listing_url = str(data.get("ebay_listing_url") or "").strip()
+    pipeline = str(data.get("pipeline") or "").strip()
+    if not ebay_listing_url or not pipeline:
+        return  # no pipeline metadata — a manual Step 3 download, nothing to save
+    try:
+        _db.ensure_db()
+        ext = os.path.splitext(out_filename)[1] or ".zip"
+        os.makedirs(SAVED_3D_FILES_DIR, exist_ok=True)
+
+        # Reserve the id first so the on-disk names can use it
+        record_id = _db.save_saved_3d_file({
+            "ebay_listing_url": ebay_listing_url,
+            "ebay_listing_title": str(data.get("ebay_listing_title") or "").strip(),
+            "source_site": _source_site_from_link(link),
+            "source_url": link,
+            "match_label": str(data.get("match_label") or "").strip(),
+            "pipeline": pipeline,
+            "file_path": "",
+            "images_dir": "",
+        })
+
+        file_path = os.path.join(SAVED_3D_FILES_DIR, f"{record_id}{ext}")
+        with open(file_path, "wb") as f:
+            f.write(out_bytes)
+
+        # Site images are best-effort: scrape + download, skip any that fail
+        images_dir = ""
+        try:
+            image_urls = _scrape_site_image_urls(link)
+            if image_urls:
+                images_dir = os.path.join(SAVED_3D_FILES_DIR, f"{record_id}_images")
+                os.makedirs(images_dir, exist_ok=True)
+                for index, url in enumerate(image_urls):
+                    try:
+                        content = _download_image(url)
+                        img_ext = os.path.splitext(url.split("?")[0])[1].lower()
+                        if img_ext not in (".jpg", ".jpeg", ".png", ".gif", ".webp"):
+                            img_ext = ".jpg"
+                        name = os.path.basename(url.split("?")[0]) or f"image_{index}{img_ext}"
+                        if not os.path.splitext(name)[1]:
+                            name += img_ext
+                        with open(os.path.join(images_dir, name), "wb") as f:
+                            f.write(content)
+                    except Exception as e:
+                        print(f"[API] saved-3d-files: skipping undownloadable site image {url}: {e}")
+        except Exception as e:
+            print(f"[API] saved-3d-files: site image scrape failed for {link}: {e}")
+            images_dir = ""
+
+        _db.update_saved_3d_file_paths(record_id, file_path=file_path, images_dir=images_dir)
+        print(f"[API] Saved 3D file #{record_id}: {out_filename} ({pipeline})")
+    except Exception as e:
+        print(f"[API] saved-3d-files autosave failed: {e}")
+
+
 @app.route('/api/download-3d-file', methods=['POST'])
 def download_3d_file():
     """
@@ -3507,24 +3870,24 @@ def download_3d_file():
             return jsonify({"error": "Unsupported site — supported: thingiverse.com, printables.com, makerworld.com, cults3d.com, thangs.com"}), 400
 
         # --- Apply mode ---
+        out_filename = filename
+        out_bytes = raw_bytes
+        mime = "application/zip" if is_zip else "application/octet-stream"
         if mode == DOWNLOAD_MODE_SINGLE_FILE and is_zip:
             try:
-                single_filename, single_bytes = extract_best_3d_file(raw_bytes)
+                out_filename, out_bytes = extract_best_3d_file(raw_bytes)
             except ValueError as e:
                 return jsonify({"error": str(e)}), 500
-            return Response(
-                single_bytes,
-                status=200,
-                mimetype="application/octet-stream",
-                headers={"Content-Disposition": f'attachment; filename="{single_filename}"'},
-            )
+            mime = "application/octet-stream"
 
-        mime = "application/zip" if is_zip else "application/octet-stream"
+        # --- Auto-save a Saved 3D File record when the pipeline sent metadata ---
+        _autosave_saved_3d_file(data, link, out_filename, out_bytes)
+
         return Response(
-            raw_bytes,
+            out_bytes,
             status=200,
             mimetype=mime,
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={"Content-Disposition": f'attachment; filename="{out_filename}"'},
         )
 
     except (Cults3DPaidModelError, ThangsPaidModelError) as e:
@@ -3543,6 +3906,103 @@ def download_3d_file():
     except Exception as e:
         print(f"[API] download-3d-file error: {e}")
         return jsonify({"error": f"Download failed: {str(e)}"}), 500
+
+
+@app.route('/api/saved-3d-files', methods=['GET'])
+def list_saved_3d_files():
+    """Paginated list of Saved 3D Files, newest first.
+
+    Query params: page (default 1), page_size (default 25).
+    Returns JSON: {"items": [...], "total": int, "page": int, "page_size": int}
+    """
+    try:
+        page = int(request.args.get("page", 1))
+        page_size = int(request.args.get("page_size", 25))
+    except (TypeError, ValueError):
+        return jsonify({"error": "page and page_size must be integers"}), 400
+    _db.ensure_db()
+    result = _db.list_saved_3d_files(page=page, page_size=page_size)
+    for item in result["items"]:
+        item["images"] = _list_saved_3d_file_images(item.get("images_dir"))
+    return jsonify(result), 200
+
+
+@app.route('/api/saved-3d-files/<int:entry_id>', methods=['GET'])
+def get_saved_3d_file(entry_id):
+    """Full detail for one Saved 3D File."""
+    _db.ensure_db()
+    row = _db.get_saved_3d_file(entry_id)
+    if row is None:
+        return jsonify({"error": "Saved 3D file not found"}), 404
+    row["images"] = _list_saved_3d_file_images(row.get("images_dir"))
+    return jsonify(row), 200
+
+
+@app.route('/api/saved-3d-files/<int:entry_id>', methods=['DELETE'])
+def delete_saved_3d_file(entry_id):
+    """Delete a Saved 3D File: removes the database record and its on-disk
+    3D file + site-image directory."""
+    _db.ensure_db()
+    row = _db.get_saved_3d_file(entry_id)
+    if row is None:
+        return jsonify({"error": "Saved 3D file not found"}), 404
+    for path, is_dir in ((row.get("file_path"), False), (row.get("images_dir"), True)):
+        if not path:
+            continue
+        try:
+            if is_dir:
+                shutil.rmtree(path, ignore_errors=True)
+            elif os.path.exists(path):
+                os.remove(path)
+        except OSError as e:
+            print(f"[API] saved-3d-files delete: could not remove {path}: {e}")
+    _db.delete_saved_3d_file(entry_id)
+    return jsonify({"success": True}), 200
+
+
+@app.route('/api/saved-3d-files/<int:entry_id>/images/<path:filename>', methods=['GET'])
+def serve_saved_3d_file_image(entry_id, filename):
+    """Serve one locally stored site image of a Saved 3D File.
+
+    The filename must be a plain basename (no path separators) that exists in
+    the record's images_dir — this rejects path traversal by construction.
+    """
+    _db.ensure_db()
+    row = _db.get_saved_3d_file(entry_id)
+    if row is None:
+        return jsonify({"error": "Saved 3D file not found"}), 404
+    if not filename or os.path.basename(filename) != filename:
+        return jsonify({"error": "Invalid filename"}), 400
+    images_dir = row.get("images_dir") or ""
+    if not images_dir:
+        return jsonify({"error": "Image not found"}), 404
+    filepath = os.path.join(images_dir, filename)
+    if not os.path.isfile(filepath):
+        return jsonify({"error": "Image not found"}), 404
+    mimetype = mimetypes.guess_type(filepath)[0] or "application/octet-stream"
+    with open(filepath, 'rb') as f:
+        return Response(f.read(), mimetype=mimetype)
+
+
+@app.route('/api/saved-3d-files/<int:entry_id>/download', methods=['GET'])
+def download_saved_3d_file(entry_id):
+    """Re-download the stored 3D file of a Saved 3D File as an attachment."""
+    _db.ensure_db()
+    row = _db.get_saved_3d_file(entry_id)
+    if row is None:
+        return jsonify({"error": "Saved 3D file not found"}), 404
+    file_path = row.get("file_path") or ""
+    if not file_path or not os.path.isfile(file_path):
+        return jsonify({"error": "3D file not found on disk"}), 404
+    filename = os.path.basename(file_path)
+    with open(file_path, 'rb') as f:
+        data = f.read()
+    return Response(
+        data,
+        status=200,
+        mimetype="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.route('/api/remove-background', methods=['POST'])
@@ -4711,6 +5171,11 @@ def _free_port_from_stale_backend(port: int) -> None:
 
 if __name__ == '__main__':
     _free_port_from_stale_backend(5000)
+    try:
+        # Create axis.db and, on first run, migrate all existing JSON data into it.
+        _db.ensure_db()
+    except Exception as e:
+        print(f"[startup] database initialization failed: {e}")
     try:
         migrate_hide_not_found_listings()
     except Exception as e:

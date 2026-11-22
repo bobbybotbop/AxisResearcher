@@ -9,7 +9,7 @@ import requests
 from dotenv import load_dotenv
 from datetime import datetime
 from backend.constants.ebay import EBAY_INVENTORY_API_BASE
-from backend.constants.paths import CONFIG_FILE, GENERATED_LISTINGS_DIR
+from backend import db as _db
 from backend.constants.listing import SKU_PREFIX, MANUAL_SKU_PREFIX, DEFAULT_OPERATION_COOLDOWN_HOURS, EBAY_STATUS_NOT_FOUND
 from backend.constants.render import (
     DEFAULT_RENDER_AMBIENT,
@@ -63,29 +63,18 @@ RETURN_POLICY_ID = os.getenv('return_policy_id')
 
 def load_config():
     """
-    Load configuration from listingPreferences.json file.
-    
+    Load configuration from the preferences table in axis.db.
+
     Returns:
         dict: Configuration dictionary
-        
+
     Raises:
-        FileNotFoundError: If listingPreferences.json does not exist
-        ValueError: If listingPreferences.json is missing required keys, has invalid structure, or contains invalid JSON
+        ValueError: If the stored configuration is missing required keys or has
+                    invalid structure.
     """
-    if not os.path.exists(CONFIG_FILE):
-        raise FileNotFoundError(
-            f"Config file '{CONFIG_FILE}' not found. "
-            f"Please create {CONFIG_FILE} with required configuration."
-        )
-    
-    try:
-        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-    except json.JSONDecodeError as e:
-        raise ValueError(
-            f"Invalid JSON in config file '{CONFIG_FILE}': {e.msg}"
-        ) from e
-    
+    _db.ensure_db()
+    config = _db.get_all_preferences()
+
     # Validate required keys
     required_keys = [
         "counter",
@@ -97,9 +86,9 @@ def load_config():
     missing_keys = [key for key in required_keys if key not in config]
     if missing_keys:
         raise ValueError(
-            f"Config file '{CONFIG_FILE}' is missing required keys: {', '.join(missing_keys)}"
+            f"Configuration is missing required keys: {', '.join(missing_keys)}"
         )
-    
+
     # Validate default_dimensions structure
     if not isinstance(config["default_dimensions"], dict):
         raise ValueError("'default_dimensions' must be a dictionary")
@@ -109,7 +98,7 @@ def load_config():
         raise ValueError(
             f"'default_dimensions' is missing required keys: {', '.join(missing_dim_keys)}"
         )
-    
+
     # Validate default_weight structure
     if not isinstance(config["default_weight"], dict):
         raise ValueError("'default_weight' must be a dictionary")
@@ -119,19 +108,20 @@ def load_config():
         raise ValueError(
             f"'default_weight' is missing required keys: {', '.join(missing_weight_keys)}"
         )
-    
+
     return config
 
 def save_config(config):
     """
-    Save configuration to listingPreferences.json file.
-    
+    Save configuration to the preferences table in axis.db.
+
     Args:
         config (dict): Configuration dictionary to save
     """
     try:
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
+        _db.ensure_db()
+        for key, value in config.items():
+            _db.set_preference(key, value)
     except Exception as e:
         print(f"❌ Error saving config: {e}")
 
@@ -280,7 +270,7 @@ def create_listing_with_preferences(
     models=None,
 ):
     """
-    Create an inventory and offer object and save it to a JSON file in Generated_Listings folder.
+    Create an inventory and offer object and save it as a row in the listings table of axis.db.
 
     Args:
         sku (str, optional): SKU for the listing. If None, generates a new SKU using get_next_sku().
@@ -326,31 +316,13 @@ def create_listing_with_preferences(
     listing_object["ebayListingId"] = ""
     listing_object["inventoryItem"] = inventory_item_data
     listing_object["offer"] = offer_data
-    
-    # Create Generated_Listings directory if it doesn't exist
-    # Use absolute path to ensure we're saving in the right directory (project root)
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Generate filename if not provided (simply use SKU)
-    if output_filename is None:
-        output_filename = f"{sku}.json"
-    
-    # Ensure filename ends with .json
-    if not output_filename.endswith(".json"):
-        output_filename += ".json"
-    
-    # Full path to output file
-    output_path = os.path.join(output_dir, output_filename)
-    
-    # Write to JSON file
-    with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(listing_object, f, indent=2, ensure_ascii=False)
-    
-    print(f"Created listing file: {output_path}")
+
+    _db.ensure_db()
+    _db.save_listing(listing_object, filename=output_filename)
+
+    print(f"Created listing: {sku}")
     print(f"   SKU: {sku}")
-    
+
     return sku
 
 
@@ -358,44 +330,26 @@ def create_listing_with_preferences(
 
 def load_listing_data(sku=None, filename=None):
     """
-    Load inventory and offer data from a JSON file in Generated_Listings folder.
-    
+    Load inventory and offer data from the listings table in axis.db.
+
     Args:
         sku (str, optional): SKU for the listing to load. If None, uses current SKU.
                              If filename is provided, sku is ignored.
-        filename (str, optional): Specific filename to load. If None, finds most recent file for SKU.
-    
+        filename (str, optional): Specific filename ({sku}.json) to load; the SKU
+                                  is derived from its stem.
+
     Returns:
-        dict: Dictionary with "sku", "inventoryItem", and "offer" keys, or None if file doesn't exist
+        dict: Dictionary with "sku", "inventoryItem", and "offer" keys, or None if not found
     """
-    # Use absolute path to ensure we're looking in the right directory (project root)
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
-
-    # If specific filename provided, use it
+    _db.ensure_db()
     if filename:
-        filepath = os.path.join(output_dir, filename)
-        if not filepath.endswith(".json"):
-            filepath += ".json"
-    else:
-        # Use SKU to find the file (simply {sku}.json)
-        if sku is None:
-            # If no SKU provided, use current SKU (for reading existing files)
-            sku = get_current_sku()
-        
-        # File is simply {sku}.json
-        filepath = os.path.join(output_dir, f"{sku}.json")
-    
+        sku = filename[:-5] if filename.endswith(".json") else filename
+    elif sku is None:
+        sku = get_current_sku()
     try:
-        if not os.path.exists(filepath):
-            return None
-
-        with open(filepath, 'r', encoding='utf-8') as f:
-            listing_data = json.load(f)
-
-        return listing_data
+        return _db.load_listing(sku)
     except Exception as e:
-        print(f"Error loading listing data file: {e}")
+        print(f"Error loading listing data: {e}")
         return None
 
 
@@ -416,35 +370,13 @@ def extract_metadata_for_llm(listing_data):
     }
 
 
-def _get_generated_listings_dir():
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    return os.path.join(base_dir, GENERATED_LISTINGS_DIR)
-
-
-def resolve_listing_json_path(sku=None, filename=None):
-    """
-    Absolute path to a listing JSON file; same resolution rules as load_listing_data.
-    The file may or may not exist yet.
-    """
-    output_dir = _get_generated_listings_dir()
-    if filename:
-        filepath = os.path.join(output_dir, filename)
-        if not filepath.endswith(".json"):
-            filepath += ".json"
-    else:
-        if sku is None:
-            sku = get_current_sku()
-        filepath = os.path.join(output_dir, f"{sku}.json")
-    return filepath
-
-
 def save_ebay_listing_id(sku=None, filename=None, ebay_listing_id=None):
     """
-    Persist the live eBay listing id to the listing JSON file.
+    Persist the live eBay listing id to the listing row in axis.db.
 
     Args:
         sku: Used with load_listing_data rules when filename is None.
-        filename: Optional explicit file under Generated_Listings (same as load_listing_data).
+        filename: Optional explicit filename ({sku}.json); the SKU is derived from its stem.
         ebay_listing_id: Value from publish response listingId (stringified).
 
     Returns:
@@ -458,18 +390,15 @@ def save_ebay_listing_id(sku=None, filename=None, ebay_listing_id=None):
         print("❌ save_ebay_listing_id: ebay_listing_id is empty")
         return False
 
-    filepath = resolve_listing_json_path(sku=sku, filename=filename)
-    if not os.path.exists(filepath):
-        print(f"⚠️  save_ebay_listing_id: file not found: {filepath}")
+    listing_data = load_listing_data(sku=sku, filename=filename)
+    if listing_data is None:
+        print(f"⚠️  save_ebay_listing_id: listing not found for SKU {sku or filename}")
         return False
 
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            listing_data = json.load(f)
         listing_data["ebayListingId"] = lid
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(listing_data, f, indent=2, ensure_ascii=False)
-        print(f"✅ Saved ebayListingId to {os.path.basename(filepath)}")
+        _db.save_listing(listing_data)
+        print(f"✅ Saved ebayListingId for {listing_data.get('sku', sku)}")
         return True
     except Exception as e:
         print(f"❌ save_ebay_listing_id error: {e}")
@@ -478,7 +407,7 @@ def save_ebay_listing_id(sku=None, filename=None, ebay_listing_id=None):
 
 def get_auto_restock_settings():
     """
-    Read auto-restock settings from listingPreferences.json.
+    Read auto-restock settings from the preferences table in axis.db.
 
     Returns:
         dict: {"enabled": bool, "quantity": int}
@@ -492,7 +421,7 @@ def get_auto_restock_settings():
 
 def save_auto_restock_settings(enabled=None, quantity=None):
     """
-    Persist auto-restock settings to listingPreferences.json.
+    Persist auto-restock settings to the preferences table in axis.db.
 
     Args:
         enabled (bool, optional): New enabled state. Unchanged if None.
@@ -515,7 +444,7 @@ def save_auto_restock_settings(enabled=None, quantity=None):
 
 def get_minimum_images_setting():
     """
-    Read minimum_images_per_listing from listingPreferences.json.
+    Read minimum_images_per_listing from the preferences table in axis.db.
 
     Returns:
         dict: {"minimum_images_per_listing": int}
@@ -528,7 +457,7 @@ def get_minimum_images_setting():
 
 def save_minimum_images_setting(minimum):
     """
-    Persist minimum_images_per_listing to listingPreferences.json.
+    Persist minimum_images_per_listing to the preferences table in axis.db.
 
     Args:
         minimum (int): New minimum. Must be a positive integer.
@@ -544,7 +473,7 @@ def save_minimum_images_setting(minimum):
 
 def get_operation_cooldown_setting():
     """
-    Read operation_cooldown_hours from listingPreferences.json.
+    Read operation_cooldown_hours from the preferences table in axis.db.
 
     Returns:
         dict: {"operation_cooldown_hours": int}
@@ -557,7 +486,7 @@ def get_operation_cooldown_setting():
 
 def save_operation_cooldown_setting(hours):
     """
-    Persist operation_cooldown_hours to listingPreferences.json.
+    Persist operation_cooldown_hours to the preferences table in axis.db.
 
     Args:
         hours (int): New cooldown in hours. Must be a positive integer.
@@ -573,7 +502,7 @@ def save_operation_cooldown_setting(hours):
 
 def get_promoted_listing_settings():
     """
-    Read promoted listing settings from listingPreferences.json.
+    Read promoted listing settings from the preferences table in axis.db.
 
     Returns:
         dict: {"auto_promote_enabled": bool, "promoted_listing_ad_rate": float}
@@ -587,7 +516,7 @@ def get_promoted_listing_settings():
 
 def save_promoted_listing_settings(enabled=None, ad_rate=None):
     """
-    Persist promoted listing settings to listingPreferences.json.
+    Persist promoted listing settings to the preferences table in axis.db.
 
     Args:
         enabled (bool, optional): New enabled state. Unchanged if None.
@@ -610,7 +539,7 @@ def save_promoted_listing_settings(enabled=None, ad_rate=None):
 
 def get_promoted_listing_campaign_ids():
     """
-    Read promoted listing campaign/ad-group IDs from listingPreferences.json.
+    Read promoted listing campaign/ad-group IDs from the preferences table in axis.db.
 
     Returns:
         dict: {"campaign_id": str, "ad_group_id": str}
@@ -624,7 +553,7 @@ def get_promoted_listing_campaign_ids():
 
 def save_promoted_listing_campaign_ids(campaign_id, ad_group_id):
     """
-    Persist promoted listing campaign and ad-group IDs to listingPreferences.json.
+    Persist promoted listing campaign and ad-group IDs to the preferences table in axis.db.
 
     Args:
         campaign_id (str): eBay campaign ID.
@@ -639,7 +568,7 @@ def save_promoted_listing_campaign_ids(campaign_id, ad_group_id):
 def update_local_listing_quantity(sku=None, quantity=None):
     """
     Update the locally cached offer quantity for a listing after a successful
-    eBay quantity write, so Generated_Listings/<sku>.json stays in sync.
+    eBay quantity write, so the listing row in axis.db stays in sync.
 
     Args:
         sku: Used with load_listing_data rules when filename is None.
@@ -652,17 +581,14 @@ def update_local_listing_quantity(sku=None, quantity=None):
         print("❌ update_local_listing_quantity: quantity is required")
         return False
 
-    filepath = resolve_listing_json_path(sku=sku)
-    if not os.path.exists(filepath):
-        print(f"⚠️  update_local_listing_quantity: file not found: {filepath}")
+    listing_data = load_listing_data(sku=sku)
+    if listing_data is None:
+        print(f"⚠️  update_local_listing_quantity: listing not found for SKU {sku}")
         return False
 
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            listing_data = json.load(f)
         listing_data.setdefault("offer", {})["quantity"] = int(quantity)
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(listing_data, f, indent=2, ensure_ascii=False)
+        _db.save_listing(listing_data)
         return True
     except Exception as e:
         print(f"❌ update_local_listing_quantity error: {e}")
@@ -671,19 +597,16 @@ def update_local_listing_quantity(sku=None, quantity=None):
 
 def set_listing_ebay_status(sku: str, status: str) -> bool:
     """
-    Write ebay_status to a listing's local JSON file.
-    Returns True if the file was updated, False if not found.
+    Write ebay_status to a listing's row in axis.db.
+    Returns True if the row was updated, False if not found.
     """
-    filepath = resolve_listing_json_path(sku=sku)
-    if not filepath or not os.path.exists(filepath):
-        print(f"⚠️ set_listing_ebay_status: file not found for SKU {sku}")
+    data = load_listing_data(sku=sku)
+    if data is None:
+        print(f"⚠️ set_listing_ebay_status: listing not found for SKU {sku}")
         return False
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            data = json.load(f)
         data['ebay_status'] = status
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        _db.save_listing(data)
         return True
     except Exception as e:
         print(f"❌ set_listing_ebay_status error for {sku}: {e}")
@@ -692,35 +615,26 @@ def set_listing_ebay_status(sku: str, status: str) -> bool:
 
 def backfill_ebay_listing_id_on_all_files():
     """
-    Add ebayListingId: \"\" to each Generated_Listings/*.json that lacks the key.
-    Skips files that already define ebayListingId (preserves published ids).
+    Add ebayListingId: \"\" to each listing row that lacks the key.
+    Skips rows that already define ebayListingId (preserves published ids).
 
     Returns:
         dict: counts updated, skipped, errors
     """
-    output_dir = _get_generated_listings_dir()
-    if not os.path.isdir(output_dir):
-        return {"updated": 0, "skipped": 0, "errors": 0}
-
+    _db.ensure_db()
     updated = 0
     skipped = 0
     errors = 0
-    for name in os.listdir(output_dir):
-        if not name.endswith(".json"):
-            continue
-        filepath = os.path.join(output_dir, name)
+    for listing_data in _db.list_listings():
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                listing_data = json.load(f)
             if "ebayListingId" in listing_data:
                 skipped += 1
                 continue
             listing_data["ebayListingId"] = ""
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(listing_data, f, indent=2, ensure_ascii=False)
+            _db.save_listing(listing_data)
             updated += 1
         except Exception as e:
-            print(f"❌ backfill error {name}: {e}")
+            print(f"❌ backfill error {listing_data.get('sku')}: {e}")
             errors += 1
 
     print(f"Backfill ebayListingId: updated={updated}, skipped={skipped}, errors={errors}")
@@ -730,28 +644,20 @@ def backfill_ebay_listing_id_on_all_files():
 def migrate_hide_not_found_listings():
     """
     Soft-delete listings whose eBay offer is gone: set "hidden": true on each
-    Generated_Listings/*.json where ebay_status == "not_found" AND ebayListingId
-    is non-empty (after trimming). Listings marked not_found without a recorded
-    ebayListingId are left untouched, as are files already hidden. Safe to run
-    on every startup (idempotent by construction).
+    listing row where ebay_status == "not_found" AND ebayListingId is non-empty
+    (after trimming). Listings marked not_found without a recorded ebayListingId
+    are left untouched, as are rows already hidden. Safe to run on every startup
+    (idempotent by construction).
 
     Returns:
         dict: counts hidden, skipped, errors
     """
-    output_dir = _get_generated_listings_dir()
-    if not os.path.isdir(output_dir):
-        return {"hidden": 0, "skipped": 0, "errors": 0}
-
+    _db.ensure_db()
     hidden = 0
     skipped = 0
     errors = 0
-    for name in os.listdir(output_dir):
-        if not name.endswith(".json"):
-            continue
-        filepath = os.path.join(output_dir, name)
+    for listing_data in _db.list_listings():
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                listing_data = json.load(f)
             if listing_data.get("hidden"):
                 skipped += 1
                 continue
@@ -763,11 +669,10 @@ def migrate_hide_not_found_listings():
                 skipped += 1
                 continue
             listing_data["hidden"] = True
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(listing_data, f, indent=2, ensure_ascii=False)
+            _db.save_listing(listing_data)
             hidden += 1
         except Exception as e:
-            print(f"❌ migrate_hide_not_found_listings error {name}: {e}")
+            print(f"❌ migrate_hide_not_found_listings error {listing_data.get('sku')}: {e}")
             errors += 1
 
     print(f"Migrate hide not_found listings: hidden={hidden}, skipped={skipped}, errors={errors}")
@@ -776,24 +681,21 @@ def migrate_hide_not_found_listings():
 
 def listing_file_exists(sku):
     """
-    Check if a JSON file named {sku}.json exists in the Generated_Listings folder.
-    
+    Check if a listing row exists for the SKU in axis.db.
+
     Args:
         sku (str): The SKU to check
-    
+
     Returns:
-        bool: True if the file exists, False otherwise
+        bool: True if the listing exists, False otherwise
     """
-    # Use absolute path to ensure we're looking in the right directory
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
-    filepath = os.path.join(output_dir, f"{sku}.json")
-    return os.path.exists(filepath)
+    _db.ensure_db()
+    return _db.listing_exists(sku)
 
 
 def update_listing_models(sku, models):
     """
-    Write or overwrite the "models" key in an existing listing JSON file.
+    Write or overwrite the "models" key in an existing listing row.
 
     Args:
         sku (str): The SKU of the listing to update
@@ -802,16 +704,13 @@ def update_listing_models(sku, models):
     Returns:
         bool: True if successful
     """
-    if not listing_file_exists(sku):
-        print(f"⚠️  update_listing_models: file not found for SKU: {sku}")
+    listing_data = load_listing_data(sku=sku)
+    if listing_data is None:
+        print(f"⚠️  update_listing_models: listing not found for SKU: {sku}")
         return False
-    filepath = resolve_listing_json_path(sku=sku)
     try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            listing_data = json.load(f)
         listing_data["models"] = models
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(listing_data, f, indent=2, ensure_ascii=False)
+        _db.save_listing(listing_data)
         return True
     except Exception as e:
         print(f"❌ update_listing_models error: {e}")
@@ -829,38 +728,31 @@ def update_listing_title_description(sku, new_text):
     Returns:
         bool: True if update was successful, False otherwise
     """
-    # Check if file exists using helper function
+    # Check if listing exists using helper function
     if not listing_file_exists(sku):
-        print(f"⚠️  Listing file not found for SKU: {sku}")
+        print(f"⚠️  Listing not found for SKU: {sku}")
         return False
-    
+
     # Extract edited_title and edited_description from new_text dict
     new_title = new_text.get('edited_title', '')
     new_description = new_text.get('edited_description', '')
-    
+
     if not new_title:
         print(f"❌ Error: new_text dict must contain a non-empty 'edited_title' key")
         return False
-    
-    # Use absolute path to ensure we're looking in the right directory
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
-    filepath = os.path.join(output_dir, f"{sku}.json")
 
     try:
         # Load the existing listing data
-        with open(filepath, 'r', encoding='utf-8') as f:
-            listing_data = json.load(f)
+        listing_data = load_listing_data(sku=sku)
 
         # Update title and description
         listing_data["inventoryItem"]["product"]["title"] = new_title
         listing_data["inventoryItem"]["product"]["description"] = new_description
-        
-        # Save the updated data back to the file
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(listing_data, f, indent=2, ensure_ascii=False)
-        
-        print(f"✅ Updated listing file: {os.path.basename(filepath)}")
+
+        # Save the updated data back
+        _db.save_listing(listing_data)
+
+        print(f"✅ Updated listing: {sku}")
         print(f"   SKU: {sku}")
         print(f"   Title: {new_title}")
         print(f"   Description: {new_description[:50]}..." if len(new_description) > 50 else f"   Description: {new_description}")
@@ -886,30 +778,23 @@ def update_listing_meta_data(sku, new_price, new_category_id):
     Returns:
         bool: True if update was successful, False otherwise
     """
-    # Check if file exists using helper function
+    # Check if listing exists using helper function
     if not listing_file_exists(sku):
-        print(f"⚠️  Listing file not found for SKU: {sku}")
+        print(f"⚠️  Listing not found for SKU: {sku}")
         return False
-    
-    # Use absolute path to ensure we're looking in the right directory
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
-    filepath = os.path.join(output_dir, f"{sku}.json")
 
     try:
         # Load the existing listing data
-        with open(filepath, 'r', encoding='utf-8') as f:
-            listing_data = json.load(f)
+        listing_data = load_listing_data(sku=sku)
 
         # Update price and categoryId
         listing_data["offer"]["pricingSummary"]["price"]["value"] = new_price
         listing_data["offer"]["categoryId"] = new_category_id
-        
-        # Save the updated data back to the file
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(listing_data, f, indent=2, ensure_ascii=False)
-        
-        print(f"✅ Updated listing file: {os.path.basename(filepath)}")
+
+        # Save the updated data back
+        _db.save_listing(listing_data)
+
+        print(f"✅ Updated listing: {sku}")
         print(f"   SKU: {sku}")
         print(f"   Price: {new_price}")
         print(f"   Category ID: {new_category_id}")
@@ -942,31 +827,24 @@ def update_listing_images(sku, image_urls):
     if not image_urls or not isinstance(image_urls, list):
         print(f"❌ Error: image_urls must be a non-empty list")
         return False
-    
-    # Use absolute path to ensure we're looking in the right directory
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
-    filepath = os.path.join(output_dir, f"{sku}.json")
 
     try:
         # Load the existing listing data
-        with open(filepath, 'r', encoding='utf-8') as f:
-            listing_data = json.load(f)
+        listing_data = load_listing_data(sku=sku)
 
         # Ensure product structure exists
         if "inventoryItem" not in listing_data:
             listing_data["inventoryItem"] = {}
         if "product" not in listing_data["inventoryItem"]:
             listing_data["inventoryItem"]["product"] = {}
-        
+
         # Update imageUrls
         listing_data["inventoryItem"]["product"]["imageUrls"] = image_urls
-        
-        # Save the updated data back to the file
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(listing_data, f, indent=2, ensure_ascii=False)
-        
-        print(f"✅ Updated listing file: {os.path.basename(filepath)}")
+
+        # Save the updated data back
+        _db.save_listing(listing_data)
+
+        print(f"✅ Updated listing: {sku}")
         print(f"   SKU: {sku}")
         print(f"   Images: {len(image_urls)} image URL(s) added")
         for idx, url in enumerate(image_urls[:5], 1):  # Show first 5
@@ -1267,27 +1145,20 @@ def update_listing_with_aspects(sku, localizedAspects=None, pre_fetched_aspects=
     if not matched_aspects:
         print(f"ℹ️  No matching aspects found")
         return False
-    
-    # Update the listing JSON file
-    # Use absolute path to ensure we're looking in the right directory
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    output_dir = os.path.join(base_dir, GENERATED_LISTINGS_DIR)
-    filepath = os.path.join(output_dir, f"{sku}.json")
-    
+
     try:
         # Ensure aspects dictionary exists
         if "aspects" not in listing_data["inventoryItem"]["product"]:
             listing_data["inventoryItem"]["product"]["aspects"] = {}
-        
+
         # Add or update the matched aspects
         for aspect_name, aspect_value in matched_aspects.items():
             listing_data["inventoryItem"]["product"]["aspects"][aspect_name] = aspect_value
-        
-        # Save the updated data back to the file
-        with open(filepath, 'w', encoding='utf-8') as f:
-            json.dump(listing_data, f, indent=2, ensure_ascii=False)
-        
-        print(f"✅ Updated listing file: {os.path.basename(filepath)}")
+
+        # Save the updated data back
+        _db.save_listing(listing_data)
+
+        print(f"✅ Updated listing: {sku}")
         print(f"   SKU: {sku}")
         for aspect_name, aspect_value in matched_aspects.items():
             print(f"   Added aspect: {aspect_name} = {aspect_value}")
@@ -1303,7 +1174,7 @@ def update_listing_with_aspects(sku, localizedAspects=None, pre_fetched_aspects=
 
 def get_render_settings():
     """
-    Read Studio Render (Step 4) settings from listingPreferences.json.
+    Read Studio Render (Step 4) settings from the preferences table in axis.db.
 
     Returns:
         dict: the full Render Settings surface — material (color, roughness,
@@ -1364,7 +1235,7 @@ def save_render_settings(color=None, roughness=None, resolution=None, fov=None,
                          ambient=None, shadow=None, shadow_softness=None, exposure=None,
                          shot_mode=None, rig=None):
     """
-    Persist Studio Render (Step 4) settings to listingPreferences.json.
+    Persist Studio Render (Step 4) settings to the preferences table in axis.db.
 
     Args (all optional; unchanged when None):
         color (str): Hex color like "#1a1a1a".
@@ -1477,7 +1348,7 @@ def save_render_settings(color=None, roughness=None, resolution=None, fov=None,
 
 def get_render_profiles():
     """
-    Read saved Render Profiles from listingPreferences.json.
+    Read saved Render Profiles from the preferences table in axis.db.
 
     Returns:
         dict: {profile_name: settings_dict}. "Current Settings" is not a
@@ -1491,7 +1362,7 @@ def get_render_profiles():
 def save_render_profile(name, settings):
     """
     Persist a Render Profile (name + full settings snapshot) to
-    listingPreferences.json. Overwrites any existing profile with the same name.
+    the preferences table in axis.db. Overwrites any existing profile with the same name.
 
     Args:
         name (str): Profile name. Must be non-empty and not "Current Settings".
@@ -1736,7 +1607,7 @@ def get_manual_import_last_refreshed():
 
 
 def save_manual_import_last_refreshed(dt_str):
-    """Persists the manual import timestamp to listingPreferences.json."""
+    """Persists the manual import timestamp to the preferences table in axis.db."""
     config = load_config()
     config["manual_listings_last_refreshed"] = dt_str
     save_config(config)
@@ -1744,21 +1615,19 @@ def save_manual_import_last_refreshed(dt_str):
 
 def write_manual_listing_json(item):
     """
-    Write (or update) Generated_Listings/<sellerSku>.json from a get_seller_list() item.
-    The file's sku is the eBay seller SKU (unique per listing); MANUAL_<itemId>
+    Write (or update) a listing row in axis.db from a get_seller_list() item.
+    The row's sku is the eBay seller SKU (unique per listing); MANUAL_<itemId>
     is only a fallback when eBay reports no SKU.
     item keys: item_id, title, quantity, price, image_urls, condition, start_time,
                description, seller_sku, is_variation, category_id.
-    Rewrites an existing file when any eBay-sourced field differs, so stale
+    Rewrites an existing row when any eBay-sourced field differs, so stale
     imports heal on the next sync. Fields that don't come from eBay (models,
     ebay_status, hidden, ...) are preserved across rewrites.
-    Returns True if the file was written, False if unchanged and skipped.
+    Returns True if the row was written, False if unchanged and skipped.
     """
+    _db.ensure_db()
     seller_sku = str(item.get("seller_sku") or "").strip()
     sku = seller_sku or f"{MANUAL_SKU_PREFIX}{item['item_id']}"
-    output_dir = _get_generated_listings_dir()
-    os.makedirs(output_dir, exist_ok=True)
-    path = os.path.join(output_dir, f"{sku}.json")
     data = {
         "sku": sku,
         "ebayListingId": item["item_id"],
@@ -1785,18 +1654,13 @@ def write_manual_listing_json(item):
             "quantity": item["quantity"],
         },
     }
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                existing = json.load(f)
-            if all(existing.get(k) == v for k, v in data.items()):
-                return False
-            # Keep local-only fields the eBay sync doesn't know about.
-            data = {**existing, **data}
-        except (json.JSONDecodeError, KeyError):
-            pass  # corrupt - overwrite
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+    existing = _db.load_listing(sku)
+    if existing is not None:
+        if all(existing.get(k) == v for k, v in data.items()):
+            return False
+        # Keep local-only fields the eBay sync doesn't know about.
+        data = {**existing, **data}
+    _db.save_listing(data)
     return True
 
 

@@ -10,7 +10,7 @@ Non-obvious constraints and patterns. Read the code for what individual files do
 
 **Text model registry**: `backend/text_models.py` is the single source of truth for which LLMs the frontend may offer, gated by which provider key is set in `.env`. When adding a new text model, add it to `OPENROUTER_TEXT_MODELS`/`BEDROCK_TEXT_MODELS` there — don't hardcode it elsewhere.
 
-**Prompts are on disk**: Prompts live in `prompts/*.txt` and are loaded at call time. Edit the `.txt` file to change model behavior; don't inline strings in Python.
+**Prompts are in the database**: Prompts live in the `prompts` table of `axis.db`, seeded from `prompts/*.txt` on first migration (`migrate_from_json()` in `backend/db.py`). Load them via `_load_prompt()` / `_db.get_prompt()`; don't inline strings in Python. The `prompts/*.txt` files remain the seed source for fresh installs — a prompt missing from the DB (e.g. added after an install migrated) can be re-seeded from the file on disk.
 
 **On-disk data** (all gitignored):
 - `Collected-Data/<seller>/` — seller item-ID dumps from the `collect` CLI command

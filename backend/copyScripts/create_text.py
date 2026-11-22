@@ -11,12 +11,18 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 def _load_prompt(path, original_title, original_description, comp_titles=""):
-    with open(path, "r", encoding="utf-8") as f:
-        return f.read().format(
-            original_title=original_title,
-            original_description=original_description,
-            comp_titles=comp_titles,
-        )
+    from backend import db as _db
+    # path is "prompts/<type>/<file>"; the DB key is "<type>/<file>".
+    name = path[len("prompts/"):] if path.startswith("prompts/") else path
+    _db.ensure_db()
+    content = _db.get_prompt(name)
+    if content is None:
+        raise FileNotFoundError(f"prompt not found: {name}")
+    return content.format(
+        original_title=original_title,
+        original_description=original_description,
+        comp_titles=comp_titles,
+    )
 
 
 def create_text(

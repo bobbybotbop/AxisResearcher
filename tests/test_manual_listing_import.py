@@ -7,7 +7,7 @@ SKU — stale files were never rewritten once created because rewrites only
 triggered on quantity changes.
 
 No network or eBay credentials needed: the parser is tested against a fixture
-GetSellerList <Item>, and the writer against a tmp Generated_Listings dir.
+GetSellerList <Item>, and the writer against a tmp axis.db.
 """
 import json
 import os
@@ -18,6 +18,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import backend.db as db
 from backend.ebay_cli import _parse_seller_list_item
 from backend import ebay_cli
 from backend.copyScripts import combine_data
@@ -68,21 +69,24 @@ def test_parse_available_quantity_and_category():
 
 @pytest.fixture()
 def listings_dir(tmp_path, monkeypatch):
-    monkeypatch.setattr(combine_data, "_get_generated_listings_dir", lambda: str(tmp_path))
+    """A tmp axis.db standing in for the listings store (keeps the historical
+    fixture name; the writer is exercised against the DB seam)."""
+    path = tmp_path / "axis.db"
+    monkeypatch.setattr(db, "DB_FILE", str(path))
+    db.init_db()
     return tmp_path
 
 
 def _read(listings_dir, sku="1"):
-    with open(listings_dir / f"{sku}.json", encoding="utf-8") as f:
-        return json.load(f)
+    return db.load_listing(sku)
 
 
 def test_writes_category_sku_quantity(listings_dir):
     assert combine_data.write_manual_listing_json(_item()) is True
     d = _read(listings_dir)
-    # The file is named by the eBay seller SKU, never MANUAL_<itemId>.
+    # The row is keyed by the eBay seller SKU, never MANUAL_<itemId>.
     assert d["sku"] == "1"
-    assert not (listings_dir / "MANUAL_197523731100.json").exists()
+    assert db.load_listing("MANUAL_197523731100") is None
     assert d["offer"]["categoryId"] == "181415"
     assert d["sellerSku"] == "1"
     assert d["offer"]["quantity"] == 15
@@ -111,14 +115,12 @@ def test_stale_file_heals_and_preserves_local_fields(listings_dir):
     """A stale import (missing sellerSku/categoryId) must heal even when the
     quantity is unchanged, and local-only fields must survive the rewrite."""
     combine_data.write_manual_listing_json(_item())
-    path = listings_dir / "1.json"
     d = _read(listings_dir)
     d["sellerSku"] = ""  # stale: missing seller SKU -> UI shows MANUAL_XXX
     d["offer"].pop("categoryId", None)  # stale: missing category
     d["models"] = {"stl": "model-ref"}  # local-only field to preserve
     d["ebay_status"] = "not_found"
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(d, f)
+    db.save_listing(d)
 
     assert combine_data.write_manual_listing_json(_item()) is True  # same quantity!
     healed = _read(listings_dir)
