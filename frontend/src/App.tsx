@@ -13,11 +13,11 @@ import {
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import CreateWorkflow from "./components/CreateWorkflow";
-import ToastContainer from "./components/ToastContainer";
 import StartupToasts, { startTaskToast } from "./components/StartupToasts";
 import {
   startTask,
   startTaskWithId,
+  toast,
   useTaskRunning,
   useTaskRunningByName,
 } from "./utils/statusStore";
@@ -148,7 +148,6 @@ function mergeGeneratedImages(
   );
 }
 
-interface Toast { id: number; type: "success" | "error"; message: string; detail?: string }
 interface TokenInfo { user_token_set: boolean; application_token_set: boolean; user_token: string; application_token: string }
 interface TokenResult { ok: boolean; message: string }
 interface UploadResult { listingId?: string; href?: string; ebayId?: string }
@@ -184,14 +183,6 @@ function App() {
   const bgRemovalAbortControllerRef = useRef<AbortController | null>(null);
   const [listingData, setListingData] = useState<ListingData | null>(null);
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const addToast = (type: "success" | "error", message: string, detail?: string): void => {
-    const id = Date.now() + Math.random();
-    setToasts((prev) => [...prev, { id, type, message, detail }]);
-  };
-  const removeToast = useCallback((id: number): void => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  }, []);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -1135,7 +1126,7 @@ function App() {
 
   const fetchListingPhotos = async (): Promise<void> => {
     if (!listingId.trim()) {
-      addToast("error", "Please enter an eBay listing ID or URL");
+      toast.error("Please enter an eBay listing ID or URL");
       return;
     }
     setLoading(true);
@@ -1212,7 +1203,7 @@ function App() {
       }
     } catch (err) {
       const message = (err as Error).message || "An error occurred while fetching the listing";
-      addToast("error", message);
+      toast.error(message);
       createFailedPhaseRef.current = "fetch";
       pipeline.fail(message);
       setListingLinkSubmitted(false);
@@ -1376,13 +1367,13 @@ function App() {
       });
       const data = await res.json();
       if (!res.ok || data.error) {
-        addToast("error", data.error || "Failed to regenerate title");
+        toast.error(data.error || "Failed to regenerate title");
         return;
       }
       setEditableTitle(data.title);
       if (data.listing_data) setListingData(data.listing_data);
     } catch (err) {
-      addToast("error", (err as Error).message || "Failed to regenerate title");
+      toast.error((err as Error).message || "Failed to regenerate title");
     } finally {
       setIsRegeneratingTitle(false);
     }
@@ -1404,13 +1395,13 @@ function App() {
       });
       const data = await res.json();
       if (!res.ok || data.error) {
-        addToast("error", data.error || "Failed to regenerate description");
+        toast.error(data.error || "Failed to regenerate description");
         return;
       }
       setEditableDescription(data.description);
       if (data.listing_data) setListingData(data.listing_data);
     } catch (err) {
-      addToast("error", (err as Error).message || "Failed to regenerate description");
+      toast.error((err as Error).message || "Failed to regenerate description");
     } finally {
       setIsRegeneratingDescription(false);
     }
@@ -1451,12 +1442,12 @@ function App() {
       });
       const data = await res.json();
       if (!res.ok || data.error) {
-        addToast("error", data.error || "Failed to regenerate metadata");
+        toast.error(data.error || "Failed to regenerate metadata");
         return;
       }
       if (data.listing_data) setListingData(data.listing_data);
     } catch (err) {
-      addToast("error", (err as Error).message || "Failed to regenerate metadata");
+      toast.error((err as Error).message || "Failed to regenerate metadata");
     } finally {
       setIsRegeneratingMetadata(false);
     }
@@ -1554,13 +1545,11 @@ function App() {
           })
           .catch((err) => console.error("Failed to sync images to disk:", err));
       }
-      addToast(
-        "success",
-        `Added ${photoUrls.length} placeholder image${photoUrls.length === 1 ? "" : "s"} (AI generation skipped)`,
+      toast.success(`Added ${photoUrls.length} placeholder image${photoUrls.length === 1 ? "" : "s"} (AI generation skipped)`,
       );
     } catch (err) {
       console.error("Error adding placeholder images:", err);
-      addToast("error", (err as Error).message || "An error occurred while adding placeholder images");
+      toast.error((err as Error).message || "An error occurred while adding placeholder images");
     }
   };
   const handleConfirmCategories = async (): Promise<void> => {
@@ -1718,7 +1707,7 @@ function App() {
                 statusData.errors && statusData.errors.length > 0
                   ? `Image generation completed with errors: ${statusData.errors.join("; ")}`
                   : "Image generation failed";
-              addToast("error", errorMsg);
+              toast.error(errorMsg);
               createFailedPhaseRef.current = "images";
               pipeline?.fail(errorMsg);
             }
@@ -1728,7 +1717,7 @@ function App() {
         } catch (pollErr) {
           console.error("Error polling status:", pollErr);
           clearInterval(pollInterval);
-          addToast("error", "Error checking generation status");
+          toast.error("Error checking generation status");
           createFailedPhaseRef.current = "images";
           pipeline?.fail("Error checking generation status");
         }
@@ -1736,7 +1725,7 @@ function App() {
     } catch (err) {
       console.error("Error generating images:", err);
       const message = (err as Error).message || "An error occurred while generating images";
-      addToast("error", message);
+      toast.error(message);
       createFailedPhaseRef.current = "images";
       pipeline?.fail(message);
     }
@@ -1989,7 +1978,7 @@ function App() {
   const handleRegenerateImages = async (promptOverride?: string): Promise<void> => {
     const promptToUse = (promptOverride ?? customPrompt)?.trim();
     if (!promptToUse) {
-      addToast("error", "Please enter a prompt to guide the regeneration");
+      toast.error("Please enter a prompt to guide the regeneration");
       return;
     }
     const indices =
@@ -2060,7 +2049,7 @@ function App() {
       }
     } catch (err) {
       console.error("Error regenerating images:", err);
-      addToast("error", (err as Error).message || "An error occurred while regenerating images");
+      toast.error((err as Error).message || "An error occurred while regenerating images");
     } finally {
       setIsRegenerating(false);
     }
@@ -2115,7 +2104,7 @@ function App() {
       }
     } catch (err) {
       console.error("Error trimming images:", err);
-      addToast("error", (err as Error).message || "An error occurred while trimming images");
+      toast.error((err as Error).message || "An error occurred while trimming images");
     } finally {
       setIsTrimming(false);
     }
@@ -2123,11 +2112,11 @@ function App() {
 
   const handleAddNewVersions = async (): Promise<void> => {
     if (!customPrompt?.trim()) {
-      addToast("error", "Please enter a prompt to guide the new version");
+      toast.error("Please enter a prompt to guide the new version");
       return;
     }
     if (!currentSku) {
-      addToast("error", "SKU is required. Please fetch photos first.");
+      toast.error("SKU is required. Please fetch photos first.");
       return;
     }
 
@@ -2139,7 +2128,7 @@ function App() {
       .map((i) => generatedImages[i])
       .filter(Boolean);
     if (imagesToRegen.length === 0) {
-      addToast("error", "No valid images to regenerate");
+      toast.error("No valid images to regenerate");
       return;
     }
 
@@ -2189,18 +2178,18 @@ function App() {
       await handleUploadToEbay(currentSku, syncData.listing_data as ListingData | null);
     } catch (err) {
       console.error("Error in add new version:", err);
-      addToast("error", (err as Error).message || "An error occurred while adding new version");
+      toast.error((err as Error).message || "An error occurred while adding new version");
     } finally {
       setIsAddingNewVersions(false);
     }
   };
   const handleCreateListing = async (): Promise<void> => {
     if (!listing) {
-      addToast("error", "Original listing data is required");
+      toast.error("Original listing data is required");
       return;
     }
     if (!currentSku) {
-      addToast("error", "SKU is required. Please fetch photos first.");
+      toast.error("SKU is required. Please fetch photos first.");
       return;
     }
 
@@ -2263,7 +2252,7 @@ function App() {
     } catch (err) {
       console.error("Error creating listing:", err);
       const message = (err as Error).message || "An error occurred while creating listing";
-      addToast("error", message);
+      toast.error(message);
       createFailedPhaseRef.current = "create";
       pipeline?.fail(message);
     }
@@ -2297,7 +2286,7 @@ function App() {
       }
     } catch (err) {
       console.error("Error trimming title:", err);
-      addToast("error", (err as Error).message || "Failed to trim title");
+      toast.error((err as Error).message || "Failed to trim title");
     } finally {
       setIsTrimmingTitle(false);
     }
@@ -2331,7 +2320,7 @@ function App() {
       );
     } catch (err) {
       console.error("Error saving title:", err);
-      addToast("error", (err as Error).message || "Failed to save title");
+      toast.error((err as Error).message || "Failed to save title");
       setAutoSaveStatus((prev) => ({ ...prev, title: "idle" }));
     }
   };
@@ -2367,7 +2356,7 @@ function App() {
       );
     } catch (err) {
       console.error("Error saving description:", err);
-      addToast("error", (err as Error).message || "Failed to save description");
+      toast.error((err as Error).message || "Failed to save description");
       setAutoSaveStatus((prev) => ({ ...prev, description: "idle" }));
     }
   };
@@ -2449,7 +2438,7 @@ function App() {
       }
     } catch (err) {
       console.error("Error fetching listings:", err);
-      addToast("error", (err as Error).message || "An error occurred while fetching listings");
+      toast.error((err as Error).message || "An error occurred while fetching listings");
     } finally {
       setLoadingListings(false);
     }
@@ -2883,7 +2872,7 @@ function App() {
 
   const handleUploadToEbay = async (sku: string, listingData: ListingData | null = null): Promise<void> => {
     if (!sku) {
-      addToast("error", "No SKU provided");
+      toast.error("No SKU provided");
       return;
     }
 
@@ -3474,7 +3463,7 @@ function App() {
       console.log("Testing function completed:", data.result);
     } catch (err) {
       console.error("Error running testing function:", err);
-      addToast("error", (err as Error).message || "An error occurred while running testing function");
+      toast.error((err as Error).message || "An error occurred while running testing function");
     } finally {
       setIsTesting(false);
     }
@@ -3499,7 +3488,7 @@ function App() {
       setListingDetailData(data.listing_data);
     } catch (err) {
       console.error("Error fetching listing details:", err);
-      addToast("error", (err as Error).message || "An error occurred while fetching listing details");
+      toast.error((err as Error).message || "An error occurred while fetching listing details");
     } finally {
       setLoadingListingDetail(false);
     }
@@ -3896,7 +3885,6 @@ function App() {
   };
   return (
     <div className="flex min-h-screen bg-surface-app text-text-primary">
-      <ToastContainer toasts={toasts} onRemove={removeToast} />
       <StartupToasts />
       <aside
         className={`sticky top-0 flex h-screen shrink-0 flex-col border-r border-border-default bg-surface-panel shadow-sm transition-[width] duration-200 ease-out ${
@@ -4208,7 +4196,7 @@ function App() {
               autoSaveStatus={{ title: "idle", description: "idle" }}
               bgRemovedPhotos={testBgRemovedPhotos}
               autoBackgroundRemovalEnabled={autoBackgroundRemovalEnabled}
-              onError={(msg) => addToast("error", msg)}
+              onError={(msg) => toast.error(msg)}
             />
           )}
           {activeTab === "saved-3d-files" && <Saved3DFiles />}
@@ -4497,14 +4485,13 @@ function App() {
                   </button>
                   {imageSearchOpen && (
                     <ImageSearchSteps
-                      addToast={addToast as (type: string, message: string) => void}
                       siteStatus={threeDSiteStatus}
                       enabledSites={THREE_D_SITES.map(({ site }) => site).filter(site => threeDSitesEnabled[site] ?? true)}
                       sitePriority={threeDSitePriority}
                       onUseLink={(link, meta) => {
                         setSharedDownloadLink(link);
                         setSharedDownloadMeta(meta);
-                        addToast("success", `Link ready for the download step: ${link}`);
+                        toast.success(`Link ready for the download step: ${link}`);
                       }}
                     />
                   )}
@@ -4512,7 +4499,6 @@ function App() {
 
                 {/* Title Search pipeline — expandable, open by default */}
                 <TitleSearchPipeline
-                  addToast={addToast as (type: string, message: string) => void}
                   siteStatus={threeDSiteStatus}
                   enabledSites={THREE_D_SITES.map(({ site }) => site).filter(site => threeDSitesEnabled[site] ?? true)}
                   sitePriority={threeDSitePriority}
@@ -4520,13 +4506,12 @@ function App() {
                   onUseLink={(link, meta) => {
                     setSharedDownloadLink(link);
                     setSharedDownloadMeta(meta);
-                    addToast("success", `Link ready for the download step: ${link}`);
+                    toast.success(`Link ready for the download step: ${link}`);
                   }}
                 />
 
                 {/* Shared Steps 3-4 — always visible below both pipelines */}
                 <SharedDownloadRender
-                  addToast={addToast as (type: string, message: string) => void}
                   fileDownloadDelay={threeDDownloadDelay}
                   externalUrl={sharedDownloadLink}
                   externalMeta={sharedDownloadMeta}
@@ -4537,14 +4522,12 @@ function App() {
 
                 {/* Research Pipeline — Copy Seller */}
                 <ResearchPipeline
-                  addToast={addToast as (type: string, message: string) => void}
                 />
 
                 <hr className="border-border-default" />
 
                 {/* Title-simplification config for the Copy Seller pipeline */}
                 <TitleSimplificationSettings
-                  addToast={addToast as (type: string, message: string) => void}
                 />
               </div>
             </div>
@@ -5471,7 +5454,7 @@ function App() {
               onCancelPhotoRegeneration={handleCancelPhotoRegeneration}
               autoBackgroundRemovalEnabled={autoBackgroundRemovalEnabled}
               bgRemovedPhotos={bgRemovedPhotos}
-              onError={(msg) => addToast("error", msg)}
+              onError={(msg) => toast.error(msg)}
             />
           )}
           {promptModalOpen && (

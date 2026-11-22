@@ -9,6 +9,7 @@ import { estimateApiCallCost } from "../constants/research";
 import {
   dismissPipeline,
   startPipelineWithId,
+  toast,
   type PipelineHandle,
 } from "../utils/statusStore";
 import type {
@@ -28,17 +29,13 @@ const sliderClass = "w-full accent-primary";
 const inputClass =
   "rounded-lg border-2 border-border-default bg-surface-panel px-4 py-2 text-text-primary transition-colors focus:border-primary focus:outline-none disabled:bg-surface-hover";
 
-interface ResearchPipelineProps {
-  addToast?: (type: string, message: string) => void;
-}
-
 interface MetricsProgress {
   current: number;
   total: number;
   title: string;
 }
 
-export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
+export default function ResearchPipeline() {
   const [seller, setSeller] = useState("");
   const [topN, setTopN] = useState(25);
   const [k, setK] = useState(20);
@@ -89,7 +86,7 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
       const res = await fetch(`/api/research/copy-seller/runs/${runId}`);
       const body = (await res.json()) as { run?: PipelineRun; error?: string | null };
       if (!res.ok || !body.run) {
-        addToast?.("error", body.error || "Failed to load run");
+        toast.error(body.error || "Failed to load run");
         return;
       }
       const run = body.run;
@@ -107,12 +104,10 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
       setSeller(run.seller);
       setRunSummary(null);
       setLoadedRunId(run.run_id);
-      addToast?.(
-        "success",
-        `Loaded run from ${new Date(run.timestamp).toLocaleString()} — ${loadedCandidates.length} Product Candidates`,
+      toast.success(`Loaded run from ${new Date(run.timestamp).toLocaleString()} — ${loadedCandidates.length} Product Candidates`,
       );
     } catch (err) {
-      addToast?.("error", (err as Error).message || "Failed to load run");
+      toast.error((err as Error).message || "Failed to load run");
     } finally {
       setIsLoadingRun(false);
     }
@@ -133,7 +128,7 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
   const handleRun = async (): Promise<void> => {
     const trimmedSeller = seller.trim();
     if (!trimmedSeller) {
-      addToast?.("error", "Please enter a seller username");
+      toast.error("Please enter a seller username");
       return;
     }
     setIsRunning(true);
@@ -206,15 +201,13 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
       );
       setLoadedRunId(data?.run_id ?? null);
       pipeline.succeed();
-      addToast?.(
-        "success",
-        `Copy Seller run complete: ${data?.product_candidates?.length ?? 0} Product Candidates`,
+      toast.success(`Copy Seller run complete: ${data?.product_candidates?.length ?? 0} Product Candidates`,
       );
       // The run was persisted on the backend; refresh the past-runs list.
       void fetchPastRuns();
     } catch (err) {
       pipeline.fail((err as Error).message || "Copy Seller run failed");
-      addToast?.("error", (err as Error).message || "Copy Seller run failed");
+      toast.error((err as Error).message || "Copy Seller run failed");
     } finally {
       setIsRunning(false);
       setMetricsProgress(null);

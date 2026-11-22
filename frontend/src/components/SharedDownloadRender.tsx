@@ -10,6 +10,7 @@ import { fetchWithProgress } from "../utils/fetchWithProgress";
 import {
   dismissPipeline,
   startPipelineWithId,
+  toast,
   type PipelineHandle,
 } from "../utils/statusStore";
 import { DOWNLOAD_MODE_FILES, DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, type DownloadMode, type Pipeline, type MatchLabel } from "../constants/files3d";
@@ -151,7 +152,6 @@ interface DownloadMeta {
 }
 
 interface SharedDownloadRenderProps {
-  addToast?: (type: string, message: string) => void;
   fileDownloadDelay?: number;
   externalUrl?: string;
   externalMeta?: DownloadMeta | null;
@@ -163,7 +163,7 @@ interface SharedDownloadRenderProps {
 // (render progress text, preview, results) below are unchanged.
 const DOWNLOAD_RENDER_STEPS = ["Download 3D file", "Studio render"];
 
-function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, externalMeta, onExternalUrlConsumed }: SharedDownloadRenderProps) {
+function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta, onExternalUrlConsumed }: SharedDownloadRenderProps) {
   // Step 3 — Download 3D File
   const [step3Url, setStep3Url] = useState("");
   const [step3LoadingMode, setStep3LoadingMode] = useState<DownloadMode | null>(null);
@@ -450,7 +450,7 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, ex
         }
         if (!savedToFolder) {
           downloadEntriesIndividually(entries);
-          addToast?.("info", `Downloading ${entries.length} files individually — browser may ask to allow multiple downloads`);
+          toast.info(`Downloading ${entries.length} files individually — browser may ask to allow multiple downloads`);
         }
         setStep3Result({ filename: filename.replace(/\.zip$/i, ""), bytes: blob.size, fileCount: entries.length });
         pipeline.advance(); // → Studio render
@@ -467,7 +467,7 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, ex
       applyRenderCandidates(pickRenderCandidates(entries));
       setStep3Result({ filename, bytes: blob.size });
       pipeline.advance(); // → Studio render
-      if (step3Meta) addToast?.("success", "Saved to Saved 3D Files");
+      if (step3Meta) toast.success("Saved to Saved 3D Files");
     } catch (err) {
       pipeline.fail((err as Error).message || "Download failed");
       setStep3Error((err as Error).message || "Download failed");
@@ -632,7 +632,6 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, ex
             editingProfile={editingProfile}
             onBack={() => setStep4View("dropdown")}
             onSavedCurrentSettings={reloadRenderSettings}
-            addToast={addToast}
           />
         ) : (
           /* Render Profile — selecting one copies its values into Current
@@ -644,7 +643,6 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, ex
                 setEditingProfile(mode === "create" ? "create" : name);
                 setStep4View("editor");
               }}
-              addToast={addToast}
             />
           </div>
         )}

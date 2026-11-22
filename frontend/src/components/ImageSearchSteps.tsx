@@ -8,6 +8,7 @@ import { filterOperationalThreeDResults, toastSkippedSites } from "../utils/filt
 import {
   dismissPipeline,
   startPipelineWithId,
+  toast,
   type PipelineHandle,
 } from "../utils/statusStore";
 
@@ -42,14 +43,13 @@ interface ForwardedLinkMeta {
 }
 
 interface ImageSearchStepsProps {
-  addToast?: (type: string, message: string) => void;
   siteStatus?: ThreeDSiteStatus | null;
   enabledSites?: string[];
   sitePriority?: string[];
   onUseLink?: (link: string, meta: ForwardedLinkMeta) => void;
 }
 
-function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePriority, onUseLink }: ImageSearchStepsProps) {
+function ImageSearchSteps({ siteStatus = null, enabledSites, sitePriority, onUseLink }: ImageSearchStepsProps) {
   // Step 1 — Fetch eBay Photos
   const [step1Link, setStep1Link] = useState("");
   const [step1Photos, setStep1Photos] = useState<string[]>([]);
@@ -73,7 +73,7 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
     e.preventDefault();
     const trimmed = step1Link.trim();
     if (!trimmed) {
-      addToast?.("error", "Please enter an eBay listing ID or URL");
+      toast.error("Please enter an eBay listing ID or URL");
       return;
     }
     setStep1Loading(true);
@@ -108,7 +108,7 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
       pipeline.advance(); // → Reverse image search
     } catch (err) {
       pipeline.fail((err as Error).message || "Failed to fetch listing photos");
-      addToast?.("error", (err as Error).message || "Failed to fetch listing photos");
+      toast.error((err as Error).message || "Failed to fetch listing photos");
     } finally {
       setStep1Loading(false);
       setStep1Link("");
@@ -131,16 +131,16 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
       // Skip results from 3D sites whose scraper failed the operational test
       const { filtered, skippedSites } = filterOperationalThreeDResults(data.results, siteStatus);
       setStep2Results(filtered);
-      toastSkippedSites(addToast, skippedSites);
+      toastSkippedSites(skippedSites);
       if (filtered.length === 0 && skippedSites.length === 0) {
-        addToast?.("info", "No 3D file results found for this image");
+        toast.info("No 3D file results found for this image");
         pipelineRef.current?.fail("No 3D file results found for this image");
       } else {
         pipelineRef.current?.succeed();
       }
     } catch (err) {
       pipelineRef.current?.fail((err as Error).message || "Search failed");
-      addToast?.("error", (err as Error).message || "Search failed");
+      toast.error((err as Error).message || "Search failed");
     } finally {
       setStep2Loading(false);
     }
