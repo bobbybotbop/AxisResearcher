@@ -9,8 +9,11 @@ from app import app
 FAKE_SERP = {
     "image_results": [
         {"title": "t", "link": "https://www.thingiverse.com/thing:789", "source": "s", "thumbnail": ""},
+        {"title": "t", "link": "https://www.ebay.com/itm/555", "source": "s", "thumbnail": ""},
         {"title": "t", "link": "https://www.printables.com/model/123", "source": "s", "thumbnail": ""},
+        {"title": "t", "link": "https://www.reddit.com/r/3Dprinting/comments/abc", "source": "s", "thumbnail": ""},
         {"title": "t", "link": "https://makerworld.com/en/models/456", "source": "s", "thumbnail": ""},
+        {"title": "t", "link": "https://example-blog.com/post/1", "source": "s", "thumbnail": ""},
     ]
 }
 
@@ -37,8 +40,9 @@ def test_serp_lens_applies_site_priorities(client, fake_search):
         "https://www.printables.com/model/123",
         "https://makerworld.com/en/models/456",
         "https://www.thingiverse.com/thing:789",
+        "https://example-blog.com/post/1",
     ]
-    assert [r["priority_rank"] for r in results] == [0, 1, 2]
+    assert [r["priority_rank"] for r in results] == [0, 1, 2, None]
 
 
 def test_serp_lens_without_priorities_keeps_google_order(client, fake_search):
@@ -50,8 +54,23 @@ def test_serp_lens_without_priorities_keeps_google_order(client, fake_search):
         "https://www.thingiverse.com/thing:789",
         "https://www.printables.com/model/123",
         "https://makerworld.com/en/models/456",
+        "https://example-blog.com/post/1",
     ]
     assert all(r["priority_rank"] is None for r in results)
+
+
+def test_serp_lens_drops_blacklisted_results(client, fake_search):
+    res = client.post("/api/serp-lens", json={"image_url": "https://example.com/img.jpg"})
+    assert res.status_code == 200
+    results = res.get_json()["results"]
+    links = [r["link"] for r in results]
+    assert all(r["site_type"] != "blacklisted" for r in results)
+    assert "https://www.ebay.com/itm/555" not in links
+    assert "https://www.reddit.com/r/3Dprinting/comments/abc" not in links
+    # whitelisted and neutral results remain, labeled
+    by_link = {r["link"]: r for r in results}
+    assert by_link["https://www.thingiverse.com/thing:789"]["site_type"] == "whitelisted"
+    assert by_link["https://example-blog.com/post/1"]["site_type"] == "neutral"
 
 
 def test_serp_lens_rejects_non_list_priorities(client, fake_search):

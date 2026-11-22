@@ -3242,6 +3242,7 @@ def serp_lens_search():
 
         raw = search_by_image(image_url)
         links = extract_top_links(raw, limit=10)
+        links = [r for r in links if r.get("site_type") != "blacklisted"]
         links = filter_links_by_enabled_sites(links, enabled_sites)
         links = order_by_site_priority(links, site_priorities)
 
