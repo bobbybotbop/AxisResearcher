@@ -220,12 +220,15 @@ function App() {
     }
   });
   const [textModel, setTextModel] = useState(() => {
+    const DEFAULT_TEXT_MODEL = "anthropic/claude-haiku-4.5";
     try {
-      return (
-        localStorage.getItem("axisTextModel") || "deepseek/deepseek-v4-flash"
-      );
+      const stored = localStorage.getItem("axisTextModel");
+      // Migrate: the old default was deepseek; users who never deliberately
+      // changed it should follow the new default.
+      if (!stored || stored === "deepseek/deepseek-v4-flash") return DEFAULT_TEXT_MODEL;
+      return stored;
     } catch {
-      return "deepseek/deepseek-v4-flash";
+      return DEFAULT_TEXT_MODEL;
     }
   });
   const [textModelOptions, setTextModelOptions] = useState<ModelOption[]>([]);

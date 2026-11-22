@@ -4,6 +4,13 @@ export type ImageModelOption = ModelOption & { defaultSize?: string };
 
 export const DEFAULT_TEXT_MODEL_OPTIONS: ModelOption[] = [
   {
+    value: "anthropic/claude-haiku-4.5",
+    label: "Claude Haiku 4.5",
+    provider: "openrouter",
+    inputCostPer1M: 1.0,
+    outputCostPer1M: 5.0,
+  },
+  {
     value: "deepseek/deepseek-v4-flash",
     label: "DeepSeek V4 Flash",
     provider: "openrouter",
