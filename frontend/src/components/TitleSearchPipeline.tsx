@@ -1,7 +1,8 @@
 import { useState } from "react";
 import MessageBarInput from "./MessageBarInput";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
-import { threeDSiteKeyFromLink, type ThreeDSiteStatus } from "../constants/files3d";
+import { PIPELINE_TITLE_SEARCH, MATCH_LABEL_CONFIRMED_IMAGE_MATCH, MATCH_LABEL_UNCONFIRMED_TITLE_MATCH, type ThreeDSiteStatus, type Pipeline, type MatchLabel as ForwardedMatchLabel } from "../constants/files3d";
+import { filterOperationalThreeDResults, toastSkippedSites } from "../utils/filterThreeDResults";
 
 interface TextSearchResult {
   title: string;
@@ -24,8 +25,8 @@ const DEFAULT_OPTIMIZE_PROMPT = "";
 interface ForwardedLinkMeta {
   ebayUrl: string;
   ebayTitle: string;
-  pipeline: "image_search" | "title_search";
-  matchLabel: "confirmed_image_match" | "unconfirmed_title_match";
+  pipeline: Pipeline;
+  matchLabel: ForwardedMatchLabel;
 }
 
 interface TitleSearchPipelineProps {
@@ -208,22 +209,11 @@ function TitleSearchPipeline({
       const data = (await res.json()) as { results?: TextSearchResult[]; error?: string };
       if (!res.ok || data.error) throw new Error(data.error || "Search failed");
       // Whitelisted results only, already ordered by site priority by the backend
-      const whitelisted = (data.results || []).filter((r) => r.site_type === "whitelisted");
-      const skippedSites = new Set<string>();
-      const filtered = whitelisted.filter((r) => {
-        const key = threeDSiteKeyFromLink(r.link);
-        if (key && siteStatus?.[key] && !siteStatus[key].ok) {
-          skippedSites.add(key);
-          return false;
-        }
-        return true;
-      });
+      const { filtered, skippedSites } = filterOperationalThreeDResults(data.results, siteStatus);
       setResults(filtered);
-      if (skippedSites.size > 0) {
-        addToast?.("info", `Skipped results from ${[...skippedSites].join(", ")} — site failed its operational test (see Settings > 3D File Sites)`);
-      }
+      toastSkippedSites(addToast, skippedSites);
       if (filtered.length === 0) {
-        if (skippedSites.size === 0) addToast?.("info", "No 3D file results found for this title");
+        if (skippedSites.length === 0) addToast?.("info", "No 3D file results found for this title");
         return;
       }
       const top = filtered[0];
@@ -241,8 +231,8 @@ function TitleSearchPipeline({
     onUseLink?.(topLink.link, {
       ebayUrl: step1Link.trim(),
       ebayTitle: originalTitle,
-      pipeline: "title_search",
-      matchLabel: matchLabel === "confirmed" ? "confirmed_image_match" : "unconfirmed_title_match",
+      pipeline: PIPELINE_TITLE_SEARCH,
+      matchLabel: matchLabel === "confirmed" ? MATCH_LABEL_CONFIRMED_IMAGE_MATCH : MATCH_LABEL_UNCONFIRMED_TITLE_MATCH,
     });
   };
 
@@ -395,7 +385,7 @@ function TitleSearchPipeline({
                       return (
                         <li
                           key={r.link}
-                          className="flex items-center gap-3 rounded-lg border border-green-500/40 bg-green-500/5 p-3"
+                          className="flex items-center gap-3 rounded-lg border border-success/40 bg-success/5 p-3"
                         >
                           <span className="w-5 shrink-0 text-right text-sm font-bold text-text-muted">
                             {i + 1}.
@@ -410,7 +400,7 @@ function TitleSearchPipeline({
                               >
                                 {r.title || r.link}
                               </a>
-                              <span className="shrink-0 rounded-full bg-green-500/15 px-2 py-0.5 text-xs font-medium text-green-400">
+                              <span className="shrink-0 rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
                                 3D site
                               </span>
                             </div>
@@ -444,12 +434,12 @@ function TitleSearchPipeline({
                   </span>
                 )}
                 {matchLabel === "confirmed" && (
-                  <span className="shrink-0 rounded-full bg-green-500/15 px-2 py-0.5 text-xs font-medium text-green-400">
+                  <span className="shrink-0 rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
                     Confirmed image match
                   </span>
                 )}
                 {matchLabel === "unconfirmed" && (
-                  <span className="shrink-0 rounded-full bg-yellow-500/15 px-2 py-0.5 text-xs font-medium text-yellow-400">
+                  <span className="shrink-0 rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">
                     Unconfirmed title match
                   </span>
                 )}

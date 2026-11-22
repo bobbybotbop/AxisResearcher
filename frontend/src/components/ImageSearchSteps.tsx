@@ -1,7 +1,8 @@
 import { useState } from "react";
 import MessageBarInput from "./MessageBarInput";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
-import { threeDSiteKeyFromLink, type ThreeDSiteStatus } from "../constants/files3d";
+import { PIPELINE_IMAGE_SEARCH, MATCH_LABEL_CONFIRMED_IMAGE_MATCH, type ThreeDSiteStatus, type Pipeline, type MatchLabel } from "../constants/files3d";
+import { filterOperationalThreeDResults, toastSkippedSites } from "../utils/filterThreeDResults";
 
 interface SearchResult {
   site_type?: string;
@@ -23,8 +24,8 @@ const canForwardToDownload = (link: string) =>
 interface ForwardedLinkMeta {
   ebayUrl: string;
   ebayTitle: string;
-  pipeline: "image_search" | "title_search";
-  matchLabel: "confirmed_image_match" | "unconfirmed_title_match";
+  pipeline: Pipeline;
+  matchLabel: MatchLabel;
 }
 
 interface ImageSearchStepsProps {
@@ -97,21 +98,10 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
       const data = await res.json() as { error?: string; results?: SearchResult[] };
       if (!res.ok || data.error) throw new Error(data.error || "Search failed");
       // Skip results from 3D sites whose scraper failed the operational test
-      const whitelisted = (data.results || []).filter(r => r.site_type === "whitelisted");
-      const skippedSites = new Set<string>();
-      const filtered = whitelisted.filter(r => {
-        const key = threeDSiteKeyFromLink(r.link);
-        if (key && siteStatus?.[key] && !siteStatus[key].ok) {
-          skippedSites.add(key);
-          return false;
-        }
-        return true;
-      });
+      const { filtered, skippedSites } = filterOperationalThreeDResults(data.results, siteStatus);
       setStep2Results(filtered);
-      if (skippedSites.size > 0) {
-        addToast?.("info", `Skipped results from ${[...skippedSites].join(", ")} — site failed its operational test (see Settings > 3D File Sites)`);
-      }
-      if (filtered.length === 0 && skippedSites.size === 0) addToast?.("info", "No 3D file results found for this image");
+      toastSkippedSites(addToast, skippedSites);
+      if (filtered.length === 0 && skippedSites.length === 0) addToast?.("info", "No 3D file results found for this image");
     } catch (err) {
       addToast?.("error", (err as Error).message || "Search failed");
     } finally {
@@ -222,7 +212,7 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
                 return (
                   <li
                     key={r.link}
-                    className="flex items-center gap-3 rounded-lg border border-green-500/40 bg-green-500/5 p-3"
+                    className="flex items-center gap-3 rounded-lg border border-success/40 bg-success/5 p-3"
                   >
                     <span className="w-5 shrink-0 text-right text-sm font-bold text-text-muted">
                       {i + 1}.
@@ -244,7 +234,7 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
                         >
                           {r.title || r.link}
                         </a>
-                        <span className="shrink-0 rounded-full bg-green-500/15 px-2 py-0.5 text-xs font-medium text-green-400">
+                        <span className="shrink-0 rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
                           3D site
                         </span>
                       </div>
@@ -258,8 +248,8 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
                         onClick={() => onUseLink?.(r.link, {
                           ebayUrl: fetchedListingUrl,
                           ebayTitle: step1Title,
-                          pipeline: "image_search",
-                          matchLabel: "confirmed_image_match",
+                          pipeline: PIPELINE_IMAGE_SEARCH,
+                          matchLabel: MATCH_LABEL_CONFIRMED_IMAGE_MATCH,
                         })}
                       >
                         Use →

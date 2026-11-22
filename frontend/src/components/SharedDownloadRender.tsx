@@ -6,7 +6,7 @@ import RenderProfileEditor from "./RenderProfileEditor";
 import StudioRenderPreview, { type StudioRenderPreviewHandle } from "./StudioRenderPreview";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
-import { DOWNLOAD_MODE_FILES, DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, type DownloadMode } from "../constants/files3d";
+import { DOWNLOAD_MODE_FILES, DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, type DownloadMode, type Pipeline, type MatchLabel } from "../constants/files3d";
 import {
   DEFAULT_RENDER_SHOT_MODE,
   modelExtensionOf,
@@ -140,8 +140,8 @@ const isDownloadSupported = (link: string) =>
 interface DownloadMeta {
   ebayUrl: string;
   ebayTitle: string;
-  pipeline: "image_search" | "title_search";
-  matchLabel: "confirmed_image_match" | "unconfirmed_title_match";
+  pipeline: Pipeline;
+  matchLabel: MatchLabel;
 }
 
 interface SharedDownloadRenderProps {
@@ -576,18 +576,18 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, ex
         </form>
         <p className="text-xs">
           {step3Url.trim() && !step3Supported ? (
-            <span className="text-amber-400">Unsupported site</span>
+            <span className="text-warning">Unsupported site</span>
           ) : (
             <span className="text-text-muted">Supported: printables.com, thingiverse.com, makerworld.com, cults3d.com (free only)</span>
           )}
         </p>
         {step3Result && (
-          <p className="text-sm text-green-400">
+          <p className="text-sm text-success">
             Downloaded: {step3Result.filename}{step3Result.fileCount !== undefined ? ` (${step3Result.fileCount} file${step3Result.fileCount !== 1 ? "s" : ""} unzipped)` : ""} ({formatBytes(step3Result.bytes)})
           </p>
         )}
         {step3Error && (
-          <p className="text-sm text-red-400">{step3Error}</p>
+          <p className="text-sm text-danger">{step3Error}</p>
         )}
       </div>
       {/* Step 4 — Studio Render */}
@@ -755,7 +755,7 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, ex
           </div>
         )}
         {step4Error && (
-          <p className="text-sm text-red-400">{step4Error}</p>
+          <p className="text-sm text-danger">{step4Error}</p>
         )}
       </div>
     </div>

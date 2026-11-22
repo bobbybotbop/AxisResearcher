@@ -7,9 +7,10 @@ import {
   Database,
   Table2,
 } from "lucide-react";
+import { DATA_BROWSER_TABLES, type DataBrowserTableName } from "../constants/dataBrowser";
 
-const TABLES = ["listings", "preferences", "logs", "prompts"] as const;
-type TableName = (typeof TABLES)[number];
+const TABLES = DATA_BROWSER_TABLES;
+type TableName = DataBrowserTableName;
 
 const TABLE_LABELS: Record<TableName, string> = {
   listings: "listings",

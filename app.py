@@ -72,14 +72,15 @@ from backend.copyScripts.upload_to_ebay import upload_complete_listing
 from backend.promoted_listings import promote_listing, PromotionError
 from backend.logger import log_event
 from backend import db as _db
-from backend.constants.models import DEFAULT_TEXT_MODEL, DEFAULT_IMAGE_MODEL, DEFAULT_CLASSIFIER_MODEL
+from backend.constants.models import DEFAULT_TEXT_MODEL, DEFAULT_IMAGE_MODEL, DEFAULT_CLASSIFIER_MODEL, DEFAULT_TITLE_SEARCH_MODEL
+from backend.constants.data_browser import DATA_BROWSER_TABLES, DATA_BROWSER_MAX_PAGE_SIZE
 from backend.constants.listing import (
     ANGLE_VARIANTS, PROMPT_TYPES, TITLE_MIN_LEN, TITLE_MAX_LEN,
     TITLE_TARGET_LEN, TITLE_MAX_ATTEMPTS, SKIP_CATEGORIES,
     CATEGORY_TO_IMAGE_TYPE, EBAY_STATUS_NOT_FOUND,
 )
 from backend.constants.ebay import EBAY_MARKETPLACE_ID, EBAY_BROWSE_API_BASE, EBAY_INVENTORY_API_BASE
-from backend.constants.paths import GENERATED_IMAGES_DIR, SAVED_3D_FILES_DIR as _SAVED_3D_FILES_DIR_NAME
+from backend.constants.paths import GENERATED_IMAGES_DIR, PROMPTS_DIR, SAVED_3D_FILES_DIR as _SAVED_3D_FILES_DIR_NAME
 from backend.constants.render import (
     DEFAULT_RENDER_AMBIENT, DEFAULT_RENDER_AZIMUTH, DEFAULT_RENDER_COLOR,
     DEFAULT_RENDER_ELEVATION, DEFAULT_RENDER_EXPOSURE, DEFAULT_RENDER_FILL_ENERGY,
@@ -1087,7 +1088,18 @@ def _load_prompt(filename):
     _db.ensure_db()
     content = _db.get_prompt(filename)
     if content is None:
-        raise FileNotFoundError(f"prompt not found: {filename}")
+        # Seed-on-missing fallback: installs that migrated before this prompt
+        # was added won't have it in the DB — load it from prompts/ on disk
+        # and seed the DB so later reads hit the database.
+        disk_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), PROMPTS_DIR, filename)
+        if not os.path.isfile(disk_path):
+            raise FileNotFoundError(f"prompt not found: {filename}")
+        with open(disk_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        try:
+            _db.save_prompt(filename, content)
+        except Exception as e:
+            print(f"[API] could not seed prompt {filename} into DB: {e}")
     return content
 
 
@@ -2974,19 +2986,15 @@ def api_get_logs():
     return jsonify({'logs': _db.get_logs()})
 
 
-_DATA_BROWSER_TABLES = {"listings", "preferences", "logs", "prompts"}
-_DATA_BROWSER_MAX_PAGE_SIZE = 200
-
-
 @app.route('/api/data-browser/<table>', methods=['GET'])
 def api_data_browser(table):
-    if table not in _DATA_BROWSER_TABLES:
+    if table not in DATA_BROWSER_TABLES:
         return jsonify({"error": f"Unknown table: {table}"}), 400
     _db.ensure_db()
     page = request.args.get("page", 1, type=int)
     page_size = request.args.get("page_size", 25, type=int)
     page = max(1, page)
-    page_size = max(1, min(page_size, _DATA_BROWSER_MAX_PAGE_SIZE))
+    page_size = max(1, min(page_size, DATA_BROWSER_MAX_PAGE_SIZE))
     offset = (page - 1) * page_size
 
     conn = sqlite3.connect(_db.DB_FILE, timeout=30)
@@ -3099,9 +3107,6 @@ def serp_lens_search():
     except Exception as e:
         print(f"[API] SerpAPI lens error: {e}")
         return jsonify({"error": f"SerpAPI search failed: {str(e)}"}), 500
-
-
-DEFAULT_TITLE_SEARCH_MODEL = "anthropic/claude-haiku-4.5"
 
 
 @app.route('/api/optimize-title/prompt', methods=['GET'])
@@ -3245,22 +3250,7 @@ def scrape_site_images():
             return jsonify({"error": "link is required"}), 400
 
         link = data["link"].strip()
-
-        if "thingiverse.com" in link:
-            images = tv_scrape_images(link)
-        elif "printables.com" in link:
-            images = printables_scrape_images(link)
-        elif "makerworld.com" in link:
-            images = mw_scrape_images(link)
-        elif "cults3d.com" in link:
-            images = cults3d_scrape_images(link)
-        elif "thangs.com" in link:
-            images = thangs_scrape_images(link)
-        elif "yeggi.com" in link:
-            images = []
-        else:
-            return jsonify({"error": "Unsupported site — supported: thingiverse.com, printables.com, makerworld.com, cults3d.com, thangs.com, yeggi.com"}), 400
-
+        images = _scrape_site_image_urls(link)
         return jsonify({"images": images}), 200
 
     except ValueError as e:
@@ -3284,7 +3274,8 @@ def _download_image(url, timeout=10):
 
 
 def _scrape_site_image_urls(link):
-    """Dispatch to the per-site image scraper, mirroring /api/scrape-site-images."""
+    """Dispatch to the per-site image scraper. Shared by /api/scrape-site-images
+    and /api/compare-images. Raises ValueError for unsupported sites."""
     if "thingiverse.com" in link:
         return tv_scrape_images(link)
     if "printables.com" in link:

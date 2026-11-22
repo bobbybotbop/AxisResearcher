@@ -3,6 +3,12 @@ import { ChevronLeft, ChevronRight, RefreshCw, Search, X } from "lucide-react";
 import Lightbox from "./Lightbox";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { formatListingDateTime } from "../utils/listingDisplay";
+import {
+  PIPELINE_IMAGE_SEARCH,
+  PIPELINE_TITLE_SEARCH,
+  MATCH_LABEL_CONFIRMED_IMAGE_MATCH,
+  MATCH_LABEL_UNCONFIRMED_TITLE_MATCH,
+} from "../constants/files3d";
 
 interface Saved3DFile {
   id: number;
@@ -26,13 +32,13 @@ interface Saved3DFilesResponse {
 }
 
 const MATCH_LABEL_TEXT: Record<string, string> = {
-  confirmed_image_match: "Confirmed image match",
-  unconfirmed_title_match: "Unconfirmed title match",
+  [MATCH_LABEL_CONFIRMED_IMAGE_MATCH]: "Confirmed image match",
+  [MATCH_LABEL_UNCONFIRMED_TITLE_MATCH]: "Unconfirmed title match",
 };
 
 const PIPELINE_TEXT: Record<string, string> = {
-  image_search: "Image Search",
-  title_search: "Title Search",
+  [PIPELINE_IMAGE_SEARCH]: "Image Search",
+  [PIPELINE_TITLE_SEARCH]: "Title Search",
 };
 
 function matchLabelText(raw: string): string {
@@ -48,7 +54,7 @@ function imageUrl(entry: Saved3DFile, filename: string): string {
 }
 
 function MatchLabelBadge({ label }: { label: string }) {
-  const confirmed = label === "confirmed_image_match";
+  const confirmed = label === MATCH_LABEL_CONFIRMED_IMAGE_MATCH;
   const cls = confirmed
     ? "border-success/30 bg-success/10 text-success"
     : "border-warning/30 bg-warning/10 text-warning";

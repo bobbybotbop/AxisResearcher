@@ -26,8 +26,21 @@ export type ThreeDSiteStatus = Record<string, { ok: boolean; message: string }>;
 // user-configurable in Settings).
 export const THREE_D_SITE_STATUS_STORAGE_KEY = "axis3dSiteStatus";
 export const THREE_D_SITE_TESTED_AT_STORAGE_KEY = "axis3dSiteTestedAt";
+export const THREE_D_SITE_IMAGE_STATUS_STORAGE_KEY = "axis3dSiteImageStatus";
 export const THREE_D_SITES_ENABLED_STORAGE_KEY = "axis3dSitesEnabled";
 export const THREE_D_SITE_PRIORITY_STORAGE_KEY = "axis3dSitePriority";
+
+// Pipelines that can produce a 3D file link for the shared download step
+export const PIPELINE_IMAGE_SEARCH = "image_search" as const;
+export const PIPELINE_TITLE_SEARCH = "title_search" as const;
+export type Pipeline = typeof PIPELINE_IMAGE_SEARCH | typeof PIPELINE_TITLE_SEARCH;
+
+// Match labels recorded on a Saved 3D File: "confirmed" = an eBay photo
+// matched a site image (pHash); "unconfirmed" = title-search link without an
+// image confirmation
+export const MATCH_LABEL_CONFIRMED_IMAGE_MATCH = "confirmed_image_match" as const;
+export const MATCH_LABEL_UNCONFIRMED_TITLE_MATCH = "unconfirmed_title_match" as const;
+export type MatchLabel = typeof MATCH_LABEL_CONFIRMED_IMAGE_MATCH | typeof MATCH_LABEL_UNCONFIRMED_TITLE_MATCH;
 
 // The user's site-priority order, most-preferred first. Stored order may be
 // stale (sites added/removed), so reconcile against the canonical list:

@@ -39,10 +39,10 @@ import type { ImageModelOption } from "./constants/models";
 import { TAB_PATHS } from "./constants/routes";
 import { createPlaceholderImageDataUrl, renderPlaceholderImagePngBlob } from "./constants/placeholder";
 import type { TabName } from "./constants/routes";
-import { THREE_D_SITES, THREE_D_SITE_STATUS_STORAGE_KEY, THREE_D_SITE_TESTED_AT_STORAGE_KEY, THREE_D_SITES_ENABLED_STORAGE_KEY, THREE_D_SITE_PRIORITY_STORAGE_KEY, normalizeThreeDSitePriority } from "./constants/files3d";
+import { THREE_D_SITES, THREE_D_SITE_STATUS_STORAGE_KEY, THREE_D_SITE_TESTED_AT_STORAGE_KEY, THREE_D_SITE_IMAGE_STATUS_STORAGE_KEY, THREE_D_SITES_ENABLED_STORAGE_KEY, THREE_D_SITE_PRIORITY_STORAGE_KEY, normalizeThreeDSitePriority, PIPELINE_IMAGE_SEARCH, PIPELINE_TITLE_SEARCH, MATCH_LABEL_CONFIRMED_IMAGE_MATCH, MATCH_LABEL_UNCONFIRMED_TITLE_MATCH } from "./constants/files3d";
 import { DEFAULT_OPERATION_COOLDOWN_HOURS, EBAY_STARTUP_SYNCED_AT_STORAGE_KEY, EBAY_STARTUP_SYNC_EVENT, IMPORT_SYNC_COOLDOWN_MS, MS_PER_HOUR, STOCK_QUANTITIES_STORAGE_KEY, STOCK_REFRESHED_AT_STORAGE_KEY } from "./constants/cooldown";
 import type { EbayStartupSyncSummary } from "./constants/cooldown";
-import type { ThreeDSiteStatus } from "./constants/files3d";
+import type { ThreeDSiteStatus, Pipeline, MatchLabel } from "./constants/files3d";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import type { DropResult } from "@hello-pangea/dnd";
 import type { Listing, ModelOption, ProgressState, ImageGenProgress } from "./types/listing";
@@ -311,6 +311,16 @@ function App() {
       return null;
     }
   });
+  // Image-scraper probe results (separate endpoint from the download probe —
+  // the Cults3D image probe launches a browser and can take a minute)
+  const [threeDSiteImageStatus, setThreeDSiteImageStatus] = useState<ThreeDSiteStatus | null>(() => {
+    try {
+      const stored = localStorage.getItem(THREE_D_SITE_IMAGE_STATUS_STORAGE_KEY);
+      return stored ? (JSON.parse(stored) as ThreeDSiteStatus) : null;
+    } catch {
+      return null;
+    }
+  });
   const [threeDSitesEnabled, setThreeDSitesEnabled] = useState<Record<string, boolean>>(() => {
     try {
       const stored = localStorage.getItem(THREE_D_SITES_ENABLED_STORAGE_KEY);
@@ -335,8 +345,8 @@ function App() {
   const [sharedDownloadMeta, setSharedDownloadMeta] = useState<{
     ebayUrl: string;
     ebayTitle: string;
-    pipeline: "image_search" | "title_search";
-    matchLabel: "confirmed_image_match" | "unconfirmed_title_match";
+    pipeline: Pipeline;
+    matchLabel: MatchLabel;
   } | null>(null);
   const [imageSearchOpen, setImageSearchOpen] = useState(false);
   const threeDSiteAutoTestRan = useRef(false);
@@ -2659,14 +2669,24 @@ function App() {
   const handleTest3dSites = async (): Promise<void> => {
     setThreeDSiteTesting(true);
     try {
-      const res = await fetch("/api/test-3d-sites");
-      const data = await res.json() as { results: ThreeDSiteStatus };
+      const [downloadRes, imageRes] = await Promise.all([
+        fetch("/api/test-3d-sites"),
+        fetch("/api/test-3d-site-images"),
+      ]);
+      const data = await downloadRes.json() as { results: ThreeDSiteStatus };
       setThreeDSiteStatus(data.results);
       const now = Date.now();
       setThreeDSiteTestedAt(now);
       try {
         localStorage.setItem(THREE_D_SITE_STATUS_STORAGE_KEY, JSON.stringify(data.results));
         localStorage.setItem(THREE_D_SITE_TESTED_AT_STORAGE_KEY, String(now));
+      } catch {
+        // ignore
+      }
+      const imageData = await imageRes.json() as { results: ThreeDSiteStatus };
+      setThreeDSiteImageStatus(imageData.results);
+      try {
+        localStorage.setItem(THREE_D_SITE_IMAGE_STATUS_STORAGE_KEY, JSON.stringify(imageData.results));
       } catch {
         // ignore
       }
@@ -4944,6 +4964,7 @@ function App() {
                             if (!info) return null;
                             const { supported, requiresAuth } = info;
                             const testResult = threeDSiteStatus?.[site];
+                            const imageTestResult = threeDSiteImageStatus?.[site];
                             const isCults3d = site === "cults3d.com";
                             const isMakerworld = site === "makerworld.com";
                             const credStatus = isCults3d ? cults3dCredStatus : isMakerworld ? makerworldCredStatus : null;
@@ -4981,12 +5002,12 @@ function App() {
                                       <div className="flex items-center gap-2">
                                         {supported ? (
                                           threeDSiteTesting && !testResult ? (
-                                            <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">Download: Checking...</span>
+                                            <span className="rounded bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning">Download: Checking...</span>
                                           ) : testResult ? (
                                             testResult.ok ? (
-                                              <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-900">Download: Operational</span>
+                                              <span className="rounded bg-success/10 px-2 py-0.5 text-xs font-semibold text-success">Download: Operational</span>
                                             ) : (
-                                              <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-900">Download: Down — {testResult.message}</span>
+                                              <span className="rounded bg-danger/10 px-2 py-0.5 text-xs font-semibold text-danger">Download: Down — {testResult.message}</span>
                                             )
                                           ) : (
                                             <span className="rounded bg-surface-hover px-2 py-0.5 text-xs font-semibold text-text-muted">Download: Not tested</span>
@@ -4994,7 +5015,17 @@ function App() {
                                         ) : (
                                           <span className="rounded bg-surface-hover px-2 py-0.5 text-xs font-semibold text-text-muted">Download: Search only</span>
                                         )}
-                                        <span className="rounded bg-surface-hover px-2 py-0.5 text-xs font-semibold text-text-muted">Images: Not tested</span>
+                                        {threeDSiteTesting && !imageTestResult ? (
+                                          <span className="rounded bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning">Images: Checking...</span>
+                                        ) : imageTestResult ? (
+                                          imageTestResult.ok ? (
+                                            <span className="rounded bg-success/10 px-2 py-0.5 text-xs font-semibold text-success">Images: Operational</span>
+                                          ) : (
+                                            <span className="rounded bg-danger/10 px-2 py-0.5 text-xs font-semibold text-danger">Images: Down — {imageTestResult.message}</span>
+                                          )
+                                        ) : (
+                                          <span className="rounded bg-surface-hover px-2 py-0.5 text-xs font-semibold text-text-muted">Images: Not tested</span>
+                                        )}
                               {requiresAuth && credStatus !== null && (
                                 <span className={`rounded px-2 py-0.5 text-xs font-semibold ${credStatus.has_credentials ? "bg-emerald-100 text-emerald-900" : "bg-amber-100 text-amber-900"}`}>
                                   {credStatus.has_credentials
