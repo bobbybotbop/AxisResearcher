@@ -27,11 +27,13 @@ import Saved3DFiles from "./components/Saved3DFiles";
 import ImageSearchSteps from "./components/ImageSearchSteps";
 import SharedDownloadRender from "./components/SharedDownloadRender";
 import TitleSearchPipeline from "./components/TitleSearchPipeline";
+import ResearchPipeline from "./components/ResearchPipeline";
 import NumberInput from "./components/NumberInput";
 import { MOCK_DATA, MOCK_GENERATED_TITLE, MOCK_GENERATED_DESCRIPTION } from "./mockData";
 import { createTestWorkflowState } from "./testWorkflowState";
 import { trimTransparentPadding } from "./utils/trimImage";
 import { isDraft, isReadyToUpload, isUploaded } from "./utils/listingStatus";
+import TitleSimplificationSettings from "./components/TitleSimplificationSettings";
 import { btnPill, btnPillSm } from "./styles/buttonPill";
 import { fetchWithProgress } from "./utils/fetchWithProgress";
 import { DEFAULT_TEXT_MODEL_OPTIONS, IMAGE_MODEL_OPTIONS, CLASSIFIER_MODEL_OPTIONS, PROVIDER_LABELS } from "./constants/models";
@@ -4540,6 +4542,20 @@ function App() {
                   externalUrl={sharedDownloadLink}
                   externalMeta={sharedDownloadMeta}
                   onExternalUrlConsumed={() => { setSharedDownloadLink(""); setSharedDownloadMeta(null); }}
+                />
+
+                <hr className="border-border-default" />
+
+                {/* Research Pipeline — Copy Seller */}
+                <ResearchPipeline
+                  addToast={addToast as (type: string, message: string) => void}
+                />
+
+                <hr className="border-border-default" />
+
+                {/* Title-simplification config for the Copy Seller pipeline */}
+                <TitleSimplificationSettings
+                  addToast={addToast as (type: string, message: string) => void}
                 />
               </div>
             </div>

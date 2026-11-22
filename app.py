@@ -57,6 +57,13 @@ from backend.copyScripts.create_image import (
 )
 from backend.copyScripts.combine_data import get_next_sku, create_listing_with_preferences, update_listing_images, update_listing_title_description, update_listing_meta_data, load_listing_data, update_listing_with_aspects, compute_aspects_for_category, save_ebay_listing_id, update_listing_models, get_auto_restock_settings, save_auto_restock_settings, update_local_listing_quantity, extract_metadata_for_llm, get_minimum_images_setting, save_minimum_images_setting, get_manual_import_last_refreshed, save_manual_import_last_refreshed, write_manual_listing_json, get_promoted_listing_settings, save_promoted_listing_settings, get_promoted_listing_campaign_ids, save_promoted_listing_campaign_ids, set_listing_ebay_status, get_operation_cooldown_setting, save_operation_cooldown_setting, migrate_hide_not_found_listings, get_render_settings, save_render_settings, get_render_profiles, save_render_profile, delete_render_profile, get_active_render_profile, set_active_render_profile, validate_rig
 from backend.helper_functions import remove_html_tags
+from backend.copy_seller import (
+    get_title_simplification_config,
+    list_pipeline_runs,
+    load_pipeline_run,
+    run_copy_seller,
+    save_title_simplification_config,
+)
 import os
 import json
 import sqlite3
@@ -226,9 +233,9 @@ def create_prompt(prompt_type):
 
 
 # --- Streaming progress helpers (NDJSON) ---
-def progress_event(step, status):
-    """Send a progress event as an NDJSON line."""
-    return json.dumps({"type": "progress", "step": step, "status": status}) + "\n"
+def progress_event(step, status, **extra):
+    """Send a progress event as an NDJSON line. Extra fields are merged in."""
+    return json.dumps({"type": "progress", "step": step, "status": status, **extra}) + "\n"
 
 def result_event(data):
     """Send a final result event as an NDJSON line."""
@@ -248,6 +255,105 @@ def streaming_response(generator):
             'X-Accel-Buffering': 'no'
         }
     )
+
+@app.route('/api/research/copy-seller', methods=['POST'])
+def research_copy_seller():
+    """
+    Run the Copy Seller research pipeline for an eBay seller.
+    Streams progress events and the final raw (unranked) Product Candidates as NDJSON.
+    Body: { seller, top_n?, k?, min_sold? }
+    """
+    data = request.get_json()
+
+    def generate():
+        if not data:
+            yield error_event("Request body must be JSON")
+            return
+        seller = (data.get("seller") or "").strip()
+        if not seller:
+            yield error_event("seller is required")
+            return
+        try:
+            top_n = int(data.get("top_n", 25))
+            k = int(data.get("k", 20))
+            min_sold = int(data.get("min_sold", 1))
+        except (TypeError, ValueError):
+            yield error_event("top_n, k, and min_sold must be integers")
+            return
+        weights = data.get("weights")
+        if weights is not None and not isinstance(weights, dict):
+            yield error_event("weights must be an object")
+            return
+
+        print(f"[API] /api/research/copy-seller: seller={seller} top_n={top_n} k={k} min_sold={min_sold}")
+        for event in run_copy_seller(seller, top_n=top_n, k=k, min_sold=min_sold, weights=weights):
+            event_type = event.get("type")
+            if event_type == "progress":
+                extra = {k: v for k, v in event.items() if k not in ("type", "step", "status")}
+                yield progress_event(event.get("step", ""), event.get("status", ""), **extra)
+            elif event_type == "result":
+                yield result_event(event.get("data"))
+            elif event_type == "error":
+                yield error_event(event.get("error", "Unknown error"))
+            else:
+                yield json.dumps(event) + "\n"
+
+    return streaming_response(generate())
+
+@app.route('/api/research/copy-seller/runs', methods=['GET'])
+def list_copy_seller_runs():
+    """
+    List past Copy Seller Pipeline Runs as summaries (newest first).
+    Follows the /api/listings read-many-JSON pattern.
+    """
+    try:
+        print("[API] /api/research/copy-seller/runs endpoint called")
+        return jsonify({"runs": list_pipeline_runs(), "error": None}), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e), "runs": []}), 500
+
+@app.route('/api/research/copy-seller/runs/<run_id>', methods=['GET'])
+def get_copy_seller_run(run_id):
+    """Fetch one full Pipeline Run (input + weights + candidates) by run_id."""
+    try:
+        print(f"[API] /api/research/copy-seller/runs/{run_id} endpoint called")
+        run = load_pipeline_run(run_id)
+        if run is None:
+            return jsonify({"error": f"Run not found: {run_id}", "run": None}), 404
+        return jsonify({"run": run, "error": None}), 200
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e), "run": None}), 500
+
+@app.route('/api/research/title-simplification', methods=['GET', 'POST'])
+def api_title_simplification():
+    """
+    Read or update the Copy Seller title-simplification config (ticket 07).
+
+    GET:        returns {"stopwords": [...], "max_words": int} — the editable
+                knobs behind the deterministic trim.
+    POST:       JSON body with any subset of those keys; persists and returns
+                the saved state.
+    """
+    if request.method == 'GET':
+        try:
+            return jsonify(get_title_simplification_config()), 200
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    body = request.get_json(silent=True) or {}
+    try:
+        config = save_title_simplification_config(
+            stopwords=body.get('stopwords'),
+            max_words=body.get('max_words'),
+        )
+        return jsonify(config), 200
+    except (TypeError, ValueError) as e:
+        return jsonify({'error': str(e)}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/generate-text', methods=['POST'])
 def generate_text():
