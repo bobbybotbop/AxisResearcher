@@ -24,15 +24,15 @@ def _classify_site(link: str) -> str:
     return "neutral"
 
 
-def search_by_text(query: str, max_results: int = 35) -> list[dict]:
+def search_by_text(query: str) -> list[dict]:
     api_key = os.getenv("serp_api_token")
     if not api_key:
         raise ValueError("serp_api_token is not set in .env")
 
+    exclusions = " ".join(f"-site:{domain}" for domain in BLACKLISTED_SITES)
     search = GoogleSearch({
-        "engine": "google",
-        "q": query,
-        "num": max_results,
+        "engine": "google_light",
+        "q": f"{query} {exclusions}",
         "api_key": api_key,
     })
     raw = search.get_dict()
@@ -50,8 +50,6 @@ def search_by_text(query: str, max_results: int = 35) -> list[dict]:
             "snippet": item.get("snippet", ""),
             "site_type": _classify_site(link),
         })
-        if len(results) >= max_results:
-            break
 
     print(f"[serp-text-search] query={query!r} — all {len(results)} results (pre-filter):")
     print(json.dumps(results, indent=2))

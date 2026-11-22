@@ -18,4 +18,5 @@ BLACKLISTED_SITES = [
     "temu.com",
     "mercari.com",
     "poshmark.com",
+    "reddit.com",
 ]

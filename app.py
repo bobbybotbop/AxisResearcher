@@ -3319,7 +3319,6 @@ def serp_text_search():
     Expects JSON: {
         "query": "benchy 3d file",
         "enabled_sites": ["printables.com", ...] (optional; omitted means all sites),
-        "max_results": 35 (optional),
         "site_priorities": ["thingiverse.com", ...] (optional; domains in priority order)
     }
     Returns JSON: {"results": [{"title", "link", "snippet", "site_type", "priority_rank"}, ...]}
@@ -3336,12 +3335,10 @@ def serp_text_search():
         site_priorities = data.get("site_priorities")  # list[str] | None; domains in priority order
         if site_priorities is not None and not isinstance(site_priorities, list):
             return jsonify({"error": "site_priorities must be a list of strings"}), 400
-        max_results = data.get("max_results", 35)
-        if not isinstance(max_results, int) or max_results < 1:
-            return jsonify({"error": "max_results must be a positive integer"}), 400
         print(f"[API] SerpAPI text search for: {query}")
 
-        results = search_by_text(query, max_results=max_results)
+        results = search_by_text(query)
+        results = [r for r in results if r.get("site_type") != "blacklisted"]
         results = filter_links_by_enabled_sites(results, enabled_sites)
         results = order_by_site_priority(results, site_priorities)
 

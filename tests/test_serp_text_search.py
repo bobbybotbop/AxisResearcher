@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 
 import backend.serp as serp_module
 from backend.serp import search_by_text, order_by_site_priority
-from backend.constants.serp import SITE_TYPE_WHITELISTED
+from backend.constants.serp import BLACKLISTED_SITES, SITE_TYPE_WHITELISTED
 
 
 def _mock_google_search(get_dict_return):
@@ -31,19 +31,40 @@ SERPAPI_TEXT_RESPONSE = {
             "link": "https://example-blog.com/post/1",
             "snippet": "A blog post about benchy.",
         },
+        {
+            "title": "Benchy on Reddit",
+            "link": "https://www.reddit.com/r/3Dprinting/comments/abc/benchy",
+            "snippet": "Discussion about benchy.",
+        },
     ]
 }
 
 
-def test_search_by_text_uses_google_engine_with_query():
+def test_search_by_text_uses_google_light_engine_with_query():
     with patch.dict(os.environ, {"serp_api_token": "test-key"}):
         with patch.object(serp_module, "GoogleSearch") as mock_gs:
             mock_gs.return_value = _mock_google_search({"organic_results": []})
             search_by_text("benchy 3d file")
             params = mock_gs.call_args[0][0]
-            assert params["engine"] == "google"
-            assert params["q"] == "benchy 3d file"
+            assert params["engine"] == "google_light"
+            assert params["q"].startswith("benchy 3d file")
             assert params["api_key"] == "test-key"
+            assert "num" not in params
+
+
+def test_search_by_text_appends_site_exclusions_for_every_blacklisted_domain():
+    with patch.dict(os.environ, {"serp_api_token": "test-key"}):
+        with patch.object(serp_module, "GoogleSearch") as mock_gs:
+            mock_gs.return_value = _mock_google_search({"organic_results": []})
+            search_by_text("benchy 3d file")
+            q = mock_gs.call_args[0][0]["q"]
+            for domain in BLACKLISTED_SITES:
+                assert f"-site:{domain}" in q
+
+
+def test_search_by_text_does_not_accept_max_results():
+    import inspect
+    assert "max_results" not in inspect.signature(search_by_text).parameters
 
 
 def test_search_by_text_raises_when_api_key_missing():
@@ -62,7 +83,7 @@ def test_search_by_text_extracts_and_classifies_organic_results():
             mock_gs.return_value = _mock_google_search(SERPAPI_TEXT_RESPONSE)
             results = search_by_text("benchy 3d file")
 
-    assert len(results) == 3
+    assert len(results) == 4
     first = results[0]
     assert first["title"] == "Benchy - 3D model"
     assert first["link"] == "https://www.thingiverse.com/thing:763622"
@@ -70,6 +91,7 @@ def test_search_by_text_extracts_and_classifies_organic_results():
     assert first["site_type"] == SITE_TYPE_WHITELISTED
     assert results[1]["site_type"] == "blacklisted"
     assert results[2]["site_type"] == "neutral"
+    assert results[3]["site_type"] == "blacklisted"  # reddit.com
 
 
 PRIORITY_LINKS = [
