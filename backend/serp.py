@@ -2,7 +2,13 @@ import json
 import os
 from serpapi import GoogleSearch
 from urllib.parse import urlparse
-from backend.constants.serp import WHITELISTED_SITES, BLACKLISTED_SITES, SITE_TYPE_WHITELISTED
+from backend.constants.serp import (
+    WHITELISTED_SITES,
+    BLACKLISTED_SITES,
+    SITE_TYPE_WHITELISTED,
+    SITE_TYPE_BLACKLISTED,
+    SITE_TYPE_NEUTRAL,
+)
 
 
 def _extract_host(url: str) -> str:
@@ -18,10 +24,10 @@ def _classify_site(link: str) -> str:
         if any(host == s or host.endswith("." + s) for s in WHITELISTED_SITES):
             return SITE_TYPE_WHITELISTED
         if any(host == s or host.endswith("." + s) for s in BLACKLISTED_SITES):
-            return "blacklisted"
+            return SITE_TYPE_BLACKLISTED
     except Exception:
         pass
-    return "neutral"
+    return SITE_TYPE_NEUTRAL
 
 
 def search_by_text(query: str) -> list[dict]:
@@ -119,6 +125,11 @@ def order_by_site_priority(links: list[dict], site_priorities: list[str] | None)
     ranked = [(rank_of(r["link"]), idx, r) for idx, r in enumerate(links)]
     ranked.sort(key=lambda t: (t[0] is None, t[0] if t[0] is not None else t[1]))
     return [{**r, "priority_rank": rank} for rank, _, r in ranked]
+
+
+def drop_blacklisted(links: list[dict]) -> list[dict]:
+    """Drop results classified as blacklisted (marketplaces, Reddit)."""
+    return [r for r in links if r.get("site_type") != SITE_TYPE_BLACKLISTED]
 
 
 def filter_links_by_enabled_sites(links: list[dict], enabled_sites: list[str] | None) -> list[dict]:

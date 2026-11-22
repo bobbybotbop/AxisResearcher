@@ -1,4 +1,6 @@
 SITE_TYPE_WHITELISTED = "whitelisted"
+SITE_TYPE_BLACKLISTED = "blacklisted"
+SITE_TYPE_NEUTRAL = "neutral"
 
 WHITELISTED_SITES = [
     "makerworld.com",

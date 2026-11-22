@@ -39,7 +39,7 @@ from flask import Flask, jsonify, request, Response, stream_with_context
 from flask_cors import CORS
 from werkzeug.serving import WSGIRequestHandler
 from backend.copyScripts.CopyListingMain import copy_listing_main, testing_function
-from backend.serp import search_by_image, extract_top_links, filter_links_by_enabled_sites, search_by_text, order_by_site_priority
+from backend.serp import search_by_image, extract_top_links, filter_links_by_enabled_sites, search_by_text, order_by_site_priority, drop_blacklisted
 from backend.downloaders.thingiverse import extract_thing_id, stream_zip as tv_stream_zip, probe as probe_thingiverse, scrape_images as tv_scrape_images, probe_images as probe_images_thingiverse
 from backend.downloaders.printables import extract_model_id as printables_model_id, build_zip as printables_build_zip, probe as probe_printables, scrape_images as printables_scrape_images, probe_images as probe_images_printables
 from backend.downloaders.makerworld import extract_model_info as mw_extract_model_info, download_3mf as mw_download_3mf, probe as probe_makerworld, open_session as mw_open_session, session_status as mw_session_status, close_session as mw_close_session, scrape_images as mw_scrape_images, probe_images as probe_images_makerworld
@@ -3242,7 +3242,7 @@ def serp_lens_search():
 
         raw = search_by_image(image_url)
         links = extract_top_links(raw, limit=10)
-        links = [r for r in links if r.get("site_type") != "blacklisted"]
+        links = drop_blacklisted(links)
         links = filter_links_by_enabled_sites(links, enabled_sites)
         links = order_by_site_priority(links, site_priorities)
 
@@ -3339,7 +3339,7 @@ def serp_text_search():
         print(f"[API] SerpAPI text search for: {query}")
 
         results = search_by_text(query)
-        results = [r for r in results if r.get("site_type") != "blacklisted"]
+        results = drop_blacklisted(results)
         results = filter_links_by_enabled_sites(results, enabled_sites)
         results = order_by_site_priority(results, site_priorities)
 
