@@ -1,5 +1,6 @@
 import { useState } from "react";
 import MessageBarInput from "./MessageBarInput";
+import { fetchWithProgress } from "../utils/fetchWithProgress";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { PIPELINE_TITLE_SEARCH, MATCH_LABEL_CONFIRMED_IMAGE_MATCH, MATCH_LABEL_UNCONFIRMED_TITLE_MATCH, type ThreeDSiteStatus, type Pipeline, type MatchLabel as ForwardedMatchLabel } from "../constants/files3d";
 import { filterOperationalThreeDResults, toastSkippedSites } from "../utils/filterThreeDResults";
@@ -91,16 +92,21 @@ function TitleSearchPipeline({
     setSiteImages([]);
     setMatchLabel(null);
     try {
-      const res = await fetch(`/api/photos/${encodeURIComponent(trimmed)}?classify=false`);
-      const data = (await res.json()) as {
+      // /api/photos streams NDJSON progress events; fetchWithProgress parses the
+      // stream and returns the final `result` payload (or throws on `error`).
+      const data = (await fetchWithProgress(
+        `/api/photos/${encodeURIComponent(trimmed)}?classify=false`,
+        {},
+        () => {},
+      )) as {
         photos?: string[];
         listing?: { title?: string };
         error?: string;
       };
-      if (!res.ok || data.error) throw new Error(data.error || "Failed to fetch listing");
-      const fetchedPhotos = data.photos || [];
+      if (data?.error) throw new Error(data.error || "Failed to fetch listing");
+      const fetchedPhotos = data?.photos || [];
       setPhotos(fetchedPhotos);
-      const title = data.listing?.title || "";
+      const title = data?.listing?.title || "";
       setOriginalTitle(title);
       if (!title) addToast?.("info", "Listing fetched but no title found");
     } catch (err) {

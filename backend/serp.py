@@ -1,3 +1,4 @@
+import json
 import os
 from serpapi import GoogleSearch
 from urllib.parse import urlparse
@@ -51,6 +52,10 @@ def search_by_text(query: str, max_results: int = 35) -> list[dict]:
         })
         if len(results) >= max_results:
             break
+
+    print(f"[serp-text-search] query={query!r} — all {len(results)} results (pre-filter):")
+    print(json.dumps(results, indent=2))
+
     return results
 
 
@@ -89,6 +94,9 @@ def extract_top_links(serpapi_response: dict, limit: int = 10) -> list[dict]:
         if r["link"] not in seen:
             seen.add(r["link"])
             unique.append(r)
+
+    print(f"[serp-image-search] all {len(unique)} results (pre-filter, pre-limit):")
+    print(json.dumps(unique, indent=2))
 
     return unique[:limit]
 

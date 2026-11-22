@@ -64,9 +64,117 @@ function cellPreview(value: unknown): string {
   return String(value);
 }
 
-/** Render a single field in the expanded detail view. */
-function DetailField({ name, value }: { name: string; value: unknown }) {
+/** Render a single editable field in the expanded detail view. */
+function DetailField({
+  name,
+  value,
+  editable,
+  onSave,
+}: {
+  name: string;
+  value: unknown;
+  editable: boolean;
+  onSave: (newValue: string) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
   const imageUrls = extractImageUrls(value);
+
+  const strValue =
+    value === null || value === undefined
+      ? ""
+      : typeof value === "string"
+        ? value
+        : JSON.stringify(value, null, 2);
+
+  function startEdit() {
+    if (!editable) return;
+    setDraft(strValue);
+    setSaveError(null);
+    setEditing(true);
+  }
+
+  async function commit() {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onSave(draft);
+      setEditing(false);
+    } catch (err) {
+      setSaveError((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleKey(e: React.KeyboardEvent) {
+    if (e.key === "Escape") {
+      setEditing(false);
+      setSaveError(null);
+    } else if (e.key === "Enter" && (e.ctrlKey || e.metaKey || strValue.length <= 200)) {
+      e.preventDefault();
+      commit();
+    }
+  }
+
+  const label = (
+    <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+      {name}
+    </span>
+  );
+
+  if (editing) {
+    const isLong = strValue.length > 200;
+    return (
+      <div className="flex flex-col gap-1">
+        {label}
+        {isLong ? (
+          <textarea
+            autoFocus
+            value={draft}
+            disabled={saving}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleKey}
+            rows={Math.min(12, draft.split("\n").length + 1)}
+            className="max-h-64 overflow-auto rounded-md border border-primary bg-surface-app p-3 text-xs text-text-primary focus:outline-none"
+          />
+        ) : (
+          <input
+            autoFocus
+            value={draft}
+            disabled={saving}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={handleKey}
+            onBlur={commit}
+            className="rounded-md border border-primary bg-surface-app px-2 py-1 text-sm text-text-primary focus:outline-none"
+          />
+        )}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={commit}
+            disabled={saving}
+            className="rounded-md bg-primary px-2 py-1 text-xs text-white disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+          <button
+            onClick={() => {
+              setEditing(false);
+              setSaveError(null);
+            }}
+            disabled={saving}
+            className="rounded-md border border-border-default px-2 py-1 text-xs text-text-muted hover:text-text-primary"
+          >
+            Cancel
+          </button>
+          {saveError && <span className="text-xs text-danger">{saveError}</span>}
+        </div>
+      </div>
+    );
+  }
 
   if (imageUrls.length > 0) {
     return (
@@ -101,7 +209,11 @@ function DetailField({ name, value }: { name: string; value: unknown }) {
             </a>
           ))}
         </div>
-        <span className="break-all text-xs text-text-muted">
+        <span
+          onClick={startEdit}
+          title={editable ? "Click to edit" : undefined}
+          className={`break-all text-xs text-text-muted ${editable ? "cursor-text hover:text-text-primary" : ""}`}
+        >
           {typeof value === "string" && value.length > 200
             ? value.slice(0, 200) + "…"
             : String(value)}
@@ -111,22 +223,26 @@ function DetailField({ name, value }: { name: string; value: unknown }) {
   }
 
   // Long text (like raw_json or content) — render in a scrollable block
-  const strValue =
-    typeof value === "string" ? value : JSON.stringify(value, null, 2);
   const isLong = strValue.length > 200;
 
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-xs font-semibold uppercase tracking-wide text-text-muted">
-        {name}
-      </span>
-      {isLong ? (
-        <pre className="max-h-64 overflow-auto rounded-md border border-border-default bg-surface-app p-3 text-xs text-text-secondary whitespace-pre-wrap break-all">
-          {strValue}
-        </pre>
-      ) : (
-        <span className="text-sm text-text-primary break-all">{strValue}</span>
-      )}
+      {label}
+      <div
+        onClick={startEdit}
+        title={editable ? "Click to edit" : undefined}
+        className={editable ? "cursor-text rounded-md hover:bg-surface-hover" : ""}
+      >
+        {isLong ? (
+          <pre className="max-h-64 overflow-auto rounded-md border border-border-default bg-surface-app p-3 text-xs text-text-secondary whitespace-pre-wrap break-all">
+            {strValue}
+          </pre>
+        ) : (
+          <span className="text-sm text-text-primary break-all">
+            {strValue || <span className="text-text-muted italic">empty</span>}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -179,8 +295,50 @@ export default function DataBrowser() {
     });
   }
 
+  const PK_COLUMN: Record<TableName, string> = {
+    listings: "sku",
+    preferences: "key",
+    logs: "id",
+    prompts: "name",
+  };
+
+  async function saveField(
+    pk: unknown,
+    column: string,
+    value: string,
+  ): Promise<void> {
+    const res = await fetch(`/api/data-browser/${selectedTable}/update`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pk, column, value }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    // Update local row state so the UI reflects the change immediately.
+    setData((prev) => {
+      if (!prev) return prev;
+      const pkCol = PK_COLUMN[selectedTable];
+      return {
+        ...prev,
+        rows: prev.rows.map((r) =>
+          r[pkCol] === pk ? { ...r, [column]: value } : r,
+        ),
+      };
+    });
+  }
+
   // Pick key columns for the collapsed row display
   function keyColumns(row: Record<string, unknown>): [string, unknown][] {
+    if (!data) return [];
+    const keys = columnKeys();
+    return keys
+      .filter((k) => k in row)
+      .map((k) => [k, row[k]] as [string, unknown]);
+  }
+
+  function columnKeys(): string[] {
     if (!data) return [];
     const preferred: Record<TableName, string[]> = {
       listings: ["sku", "title", "price", "quantity", "ebay_status"],
@@ -188,10 +346,28 @@ export default function DataBrowser() {
       logs: ["id", "timestamp", "event", "status"],
       prompts: ["name", "updated_at"],
     };
-    const keys = preferred[selectedTable] || data.columns.slice(0, 4);
-    return keys
-      .filter((k) => k in row)
-      .map((k) => [k, row[k]] as [string, unknown]);
+    return preferred[selectedTable] || data.columns.slice(0, 4);
+  }
+
+  // Grid template: chevron + one track per column. Title flexes, others fixed.
+  function gridTemplate(): string {
+    const widths: Record<string, string> = {
+      sku: "5rem",
+      title: "minmax(6rem,1fr)",
+      price: "6rem",
+      quantity: "6rem",
+      ebay_status: "8rem",
+      key: "10rem",
+      value: "minmax(6rem,1fr)",
+      id: "4rem",
+      timestamp: "11rem",
+      event: "minmax(6rem,1fr)",
+      status: "7rem",
+      name: "minmax(6rem,1fr)",
+      updated_at: "11rem",
+    };
+    const tracks = columnKeys().map((k) => widths[k] || "minmax(6rem,1fr)");
+    return `1.5rem ${tracks.join(" ")}`;
   }
 
   return (
@@ -250,7 +426,23 @@ export default function DataBrowser() {
           {data && data.rows.length > 0 && (
             <>
               <div className="flex-1 overflow-auto">
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col">
+                  {/* Header row */}
+                  <div
+                    className="grid items-center gap-2 border-b border-border-default px-3 py-2"
+                    style={{ gridTemplateColumns: gridTemplate() }}
+                  >
+                    <span />
+                    {columnKeys().map((key) => (
+                      <span
+                        key={key}
+                        className="truncate text-xs font-semibold uppercase tracking-wide text-text-muted"
+                      >
+                        {key}
+                      </span>
+                    ))}
+                  </div>
+
                   {data.rows.map((row, index) => {
                     const isExpanded = expandedRows.has(index);
                     const preview = keyColumns(row);
@@ -258,43 +450,48 @@ export default function DataBrowser() {
                       <div key={index} className="flex flex-col">
                         {/* Collapsed row */}
                         <div
-                          className="flex cursor-pointer items-center gap-3 rounded-md px-3 py-2.5 text-sm hover:bg-surface-hover"
+                          className={`grid cursor-pointer items-center gap-2 border-b border-border-default px-3 py-2.5 text-sm hover:bg-surface-hover ${
+                            isExpanded ? "bg-surface-hover" : ""
+                          }`}
+                          style={{ gridTemplateColumns: gridTemplate() }}
                           onClick={() => toggleRow(index)}
                         >
-                          <span className="shrink-0 text-text-muted">
+                          <span className="text-text-muted">
                             {isExpanded ? (
                               <ChevronDown size={14} />
                             ) : (
                               <ChevronRight size={14} />
                             )}
                           </span>
-                          <div className="flex min-w-0 flex-1 items-center gap-4">
-                            {preview.map(([key, value]) => (
-                              <div
-                                key={key}
-                                className="min-w-0 flex items-center gap-1"
-                              >
-                                <span className="shrink-0 text-xs text-text-muted">
-                                  {key}:
-                                </span>
-                                <span className="truncate text-text-primary">
-                                  {cellPreview(value)}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
+                          {preview.map(([key, value]) => (
+                            <span
+                              key={key}
+                              className="truncate text-text-primary"
+                              title={cellPreview(value)}
+                            >
+                              {cellPreview(value)}
+                            </span>
+                          ))}
                         </div>
 
                         {/* Expanded detail */}
                         {isExpanded && (
-                          <div className="ml-9 mb-2 flex flex-col gap-3 rounded-md border border-border-default bg-surface-panel p-4">
-                            {Object.entries(row).map(([key, value]) => (
-                              <DetailField
-                                key={key}
-                                name={key}
-                                value={value}
-                              />
-                            ))}
+                          <div className="ml-9 my-2 flex flex-col gap-3 rounded-md border border-border-default bg-surface-panel p-4">
+                            {Object.entries(row).map(([key, value]) => {
+                              const pkCol = PK_COLUMN[selectedTable];
+                              const isPk = key === pkCol;
+                              return (
+                                <DetailField
+                                  key={key}
+                                  name={key}
+                                  value={value}
+                                  editable={!isPk}
+                                  onSave={(newValue) =>
+                                    saveField(row[pkCol], key, newValue)
+                                  }
+                                />
+                              );
+                            })}
                           </div>
                         )}
                       </div>

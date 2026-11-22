@@ -3023,6 +3023,49 @@ def api_data_browser(table):
     })
 
 
+# Primary key column for each browsable table, used to target row updates.
+DATA_BROWSER_PK = {
+    "listings": "sku",
+    "preferences": "key",
+    "logs": "id",
+    "prompts": "name",
+}
+
+
+@app.route('/api/data-browser/<table>/update', methods=['PUT'])
+def api_data_browser_update(table):
+    if table not in DATA_BROWSER_TABLES:
+        return jsonify({"error": f"Unknown table: {table}"}), 400
+    body = request.get_json(silent=True) or {}
+    pk_value = body.get("pk")
+    column = body.get("column")
+    value = body.get("value")
+    if pk_value is None or not column:
+        return jsonify({"error": "Missing 'pk' or 'column'"}), 400
+
+    _db.ensure_db()
+    conn = sqlite3.connect(_db.DB_FILE, timeout=30)
+    try:
+        pk_col = DATA_BROWSER_PK[table]
+        valid_cols = {row[1] for row in conn.execute(f"PRAGMA table_info([{table}])").fetchall()}
+        if column not in valid_cols:
+            return jsonify({"error": f"Unknown column: {column}"}), 400
+        if column == pk_col:
+            return jsonify({"error": "Cannot edit primary key"}), 400
+
+        cur = conn.execute(
+            f"UPDATE [{table}] SET [{column}] = ? WHERE [{pk_col}] = ?",
+            (value, pk_value),
+        )
+        conn.commit()
+        if cur.rowcount == 0:
+            return jsonify({"error": "Row not found"}), 404
+    finally:
+        conn.close()
+
+    return jsonify({"ok": True, "table": table, "column": column, "pk": pk_value})
+
+
 @app.route('/api/testing', methods=['POST'])
 def run_testing_function():
     """

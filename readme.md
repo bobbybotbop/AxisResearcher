@@ -202,15 +202,11 @@ Ensure you run `collect` before `process`. Verify seller username matches folder
 
 - title SEO is not SEOing: https://www.ebay.com/sch/i.html?_nkw=X3+Band+Protector+Edge+Guards&_sacat=0&_from=R40&_trksid=p2332490.m570.l1313
 
-- have skip photos and delete photos -> skip just doesn't pass it though AI
-  - wut is the best workflow for that
-
 - maybe include original images + AI to get minimum number of images
 
 
 
 goals "!" = not important:
-[] make restock feature for existing products
 [] fully streamline the listing process
   [] are all variant pics found?
   [] advertisement
@@ -228,9 +224,11 @@ copy seller:
     2c. calculate demand coefficent: account for ratio of listings vs sold and days since last sold and maybe historic demand consistancy / slope
 
 
-next make this work:
-
-downscale all images to 1024x1024
 
 
+## goals:
+- 1 for 1 match image for 3d file -> label as confirmed match
+  - otherwise, -> label as unconfirmed title match and let user decide
+
+- build research part ASAP
 

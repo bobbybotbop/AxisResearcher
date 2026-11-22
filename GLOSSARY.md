@@ -1,7 +1,34 @@
 # Glossary
 
 ## 3D File Finder
-The multi-step wizard (in `ThreeDFileFinder.tsx`) that goes from an eBay photo to a downloaded 3D printable model: Step 1 fetch eBay photos, Step 2 reverse image search, Step 3 download the 3D file, Step 4 Studio Render.
+The multi-step wizard (in the Testing tab: `ImageSearchSteps.tsx` + `TitleSearchPipeline.tsx` + the shared `SharedDownloadRender.tsx`) that goes from an eBay listing to a downloaded 3D printable model. It contains two selectable pipelines — Image Search and Title Search — that share a common download (Step 3) and Studio Render (Step 4) stage.
+
+## Image Search Pipeline
+The original 3D File Finder flow: Step 1 fetch eBay photos, Step 2 reverse image search via SerpAPI, then shared Steps 3–4.
+
+## Title Search Pipeline
+The newer 3D File Finder flow: paste an eBay link → fetch the listing title → optimize the title via Claude Haiku (strip sales terms like quantity, color, condition) → append " 3d file" → Google text search via SerpAPI → pick the best link by site priority → Image Confirmation → shared Steps 3–4.
+
+## Image Confirmation
+A non-blocking step in the Title Search Pipeline after a candidate link is chosen. All eBay listing photos and all main model images from the candidate 3D file site page are downloaded and compared using perceptual hash (pHash) on the backend. The result labels the saved 3D file as either "Confirmed image match" or "Unconfirmed title match" — it does not block the download.
+
+## Site Image Scraper
+A per-site module (parallel to the per-site downloaders) that extracts the main model gallery images from a 3D file site page. Uses the most reliable deterministic method per site — data API where available, DOM scraping where necessary:
+- **Thingiverse**: v2 API `things/{id}/complete` → `images[].url`
+- **Printables**: GraphQL `images[].filePath` → `media.printables.com/{filePath}`
+- **Thangs**: `__NEXT_DATA__` JSON → `attachments[].imageUrl`
+- **MakerWorld**: SSR `div.swiper-slide > img.swiper-lazy` src (strip resize params) or design API `pictures[]`
+- **Cults3D**: lightbox `div.slides__slide img` `data-src` → `fbi.cults3d.com` originals
+Each scraper has its own status/probe (like the download probes) so site changes are detected.
+
+## Saved 3D File
+A persisted record of a downloaded 3D file, stored in the SQLite database and browsable in the "Saved 3D Files" tab. Contains: the downloaded 3D file (on disk, path in DB), the source site URL, the eBay listing URL (stored as a link, photos not saved), the eBay listing title, the match label ("Confirmed image match" or "Unconfirmed title match"), the pipeline that produced it (Image Search or Title Search), images from the 3D file website stored locally (not rendered images), and a timestamp.
+
+## Saved 3D Files Tab
+A new top-level tab in the app, laid out like the History tab: searchable, paginated list of Saved 3D File cards with title, source site, match label, timestamp, and a gallery of the source site's images. No 3D rendered images are stored here.
+
+## Site Priority
+The user-defined ordering of 3D file sites (Thingiverse, Printables, MakerWorld, Cults3D, Thangs, Yeggi) that determines which candidate link is chosen when multiple whitelisted sites appear in search results. Editable via drag-and-drop in the Settings tab using `@hello-pangea/dnd` (the project's existing DnD library). Applies to both pipelines' result ranking. Stored in localStorage.
 
 ## Studio Render (Step 4)
 The fourth step of the 3D File Finder: renders the downloaded 3D model into a professional product photo — pure white background, soft grounding shadow, "Amazon hero shot" look — via headless Blender on the backend. Exactly one camera angle per render (for now).
@@ -32,6 +59,39 @@ In the Profile Editor's Multi Shot Mode, the main square three.js view showing t
 
 ## Render Mesh
 The single canonical mesh both the Step 4 preview and the Blender render work from. Downloaded files in formats Blender 3.6 imports natively (.stl, .obj, .ply) are used as-is; .step/.stp are normalized to .stl with gmsh (pip wheel) and .3mf with trimesh (pure-Python pip package) — both are project dependencies, not machine installs — guaranteeing the preview and the render always show the same geometry. .amf files are not supported at all: they are excluded from the preferred download extensions and rejected with a clear ".amf is not supported" error already in the download step.
+
+## SQLite Database
+The single persistent store for all structured application data, replacing `listingPreferences.json`, `Generated_Listings/*.json`, `logs.ndjson`, and `prompts/*.txt`. Uses Python's stdlib `sqlite3` (no ORM). Binary files (generated images, 3D files) stay on disk; the database stores their paths. Secrets remain in `.env`. Frontend localStorage is unaffected.
+
+## Data Browser Tab
+A new top-level tab for debugging: a file-browser-style interface over the SQLite database. Pick a table from a sidebar (listings, preferences, logs, prompts, saved_3d_files), see paginated rows, click to expand full JSON detail. No SQL query interface — purely visual browsing.
+
+## Testing Tab Philosophy
+The Testing tab is a development sandbox: every control, threshold, and intermediate value should be exposed and editable so features can be debugged and tuned before promotion to the main workflow. Nothing in the Testing tab should be a hidden constant.
+
+## Research Pipeline
+A named, multi-step market-research workflow under the Testing tab, distinct from the 3D File Finder pipelines (which find 3D files). A Research Pipeline takes a typed input (e.g. an eBay seller), collects raw per-product metrics, and produces a ranked list of Product Candidates. "Copy Seller" is the first Research Pipeline.
+
+## Pipeline Run
+A persisted record of one execution of a Research Pipeline: its input, the ranking weights used, a timestamp, and the resulting ranked Product Candidates. Runs are saved so different weight configurations can be compared.
+
+## Product Candidate
+A single product identified by a Research Pipeline, carrying: the seller's representative eBay listing link, a simplified search phrase, and its collected market metrics. The ranked unit of a Pipeline Run.
+
+## Demand Coefficient
+The ratio of active listings to sold listings for a Product Candidate's simplified search phrase — a proxy for how saturated vs. in-demand a product is.
+
+## Competition Count
+The number of active listings also selling the same product (matching the Product Candidate's simplified search phrase). A standalone metric, separate from the Demand Coefficient.
+
+## Sold Velocity
+A Product Candidate's total sold quantity divided by its listing age (estimatedSoldQuantity ÷ days since itemCreationDate, both from the eBay Browse API). A proxy for how fast a product sells. Caveat: estimatedSoldQuantity is an estimate, and itemCreationDate resets on relist.
+
+## Ranking Weights
+The user-adjustable importances applied to each metric to compute a Product Candidate's rank. Weights affect scoring only, not metric collection, so re-weighting re-ranks instantly from cached metrics. Each metric is min-max normalized to 0–1 across the run's products before weighting, so a given weight means the same thing on every slider; raw values are shown alongside normalized ones. All metrics are oriented "higher is better" (Competition Count is inverted during normalization).
+
+## eBay API Budget
+The app's eBay API usage is capped at roughly 5,000 calls per day. Research Pipelines must be designed to bound their per-run call count (top-N listing cap, top-K sold-sum cap) so a run cannot blow the daily budget.
 
 ## Camera Intent
 The camera state captured from the Step 4 live preview when the user presses Render: viewing direction, look-at target, and field of view. The backend reproduces the *direction and FOV* but auto-computes the distance so the whole model is always framed, regardless of the model's original scale or origin.

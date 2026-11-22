@@ -1,5 +1,6 @@
 import { useState } from "react";
 import MessageBarInput from "./MessageBarInput";
+import { fetchWithProgress } from "../utils/fetchWithProgress";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { PIPELINE_IMAGE_SEARCH, MATCH_LABEL_CONFIRMED_IMAGE_MATCH, type ThreeDSiteStatus, type Pipeline, type MatchLabel } from "../constants/files3d";
 import { filterOperationalThreeDResults, toastSkippedSites } from "../utils/filterThreeDResults";
@@ -64,16 +65,21 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
     setStep1Title("");
     setStep1Selected(null);
     try {
-      const res = await fetch(`/api/photos/${encodeURIComponent(trimmed)}?classify=false`);
-      const data = await res.json() as {
+      // /api/photos streams NDJSON progress events; fetchWithProgress parses the
+      // stream and returns the final `result` payload (or throws on `error`).
+      const data = await fetchWithProgress(
+        `/api/photos/${encodeURIComponent(trimmed)}?classify=false`,
+        {},
+        () => {},
+      ) as {
         photos?: string[];
         listing?: { title?: string };
         error?: string;
       };
-      if (!res.ok || data.error) throw new Error(data.error || "Failed to fetch photos");
-      const photos = data.photos || [];
+      if (data?.error) throw new Error(data.error || "Failed to fetch photos");
+      const photos = data?.photos || [];
       setStep1Photos(photos);
-      setStep1Title(data.listing?.title || "");
+      setStep1Title(data?.listing?.title || "");
       setFetchedListingUrl(trimmed);
       if (photos.length > 0) setStep1Selected(photos[0]);
     } catch (err) {
