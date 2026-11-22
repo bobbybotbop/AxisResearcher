@@ -95,3 +95,15 @@ The app's eBay API usage is capped at roughly 5,000 calls per day. Research Pipe
 
 ## Camera Intent
 The camera state captured from the Step 4 live preview when the user presses Render: viewing direction, look-at target, and field of view. The backend reproduces the *direction and FOV* but auto-computes the distance so the whole model is always framed, regardless of the model's original scale or origin.
+
+## Task
+The atomic unit of async work in the status system. A Task has an id, a name, a status (pending / running / success / error), optional progress (current / total), and an optional error message. A Task may be standalone (e.g. "Generate images") or part of a Pipeline. Replaces the ad-hoc `is*` boolean flags and one-off progress objects.
+
+## Pipeline
+A named, ordered sequence of Tasks with a current index. A Pipeline renders as a step tracker (e.g. the Create workflow); a standalone Task renders as a progress bar or toast. Replaces the four parallel `ProgressState` objects.
+
+## Status Store
+The single frontend store that owns all Task and Pipeline state. Every async operation in the app reports through it, replacing the fragmented `useState` booleans, `ToastContainer`, and `StartupToasts` with one pipeline. Scope is strictly *waiting-state* UI: spinners, progress bars, skeletons, toasts, and step statuses while the user waits. It never touches feature inputs or outputs (whitelisted results, candidate lists, form values, intermediate debug values) — those stay in the features that own them.
+
+## PipelineTracker
+The single component that renders a Pipeline as a step tracker: per-step status icon (pending / running / done / error), step name, and the active step's determinate progress as text ("3 of 8"). It is a pure status renderer — it can display any step's waiting state regardless of whether that step also has a bespoke detail UI below it. Used by the Create workflow and all Testing pipelines.
