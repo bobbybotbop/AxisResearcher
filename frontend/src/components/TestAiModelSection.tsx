@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { btnPillSm } from "../styles/buttonPill";
+import { startTask } from "../utils/statusStore";
 import type { ModelOption } from "../types/listing";
 
 const DEFAULT_TEXT_PROMPT = "Reply with exactly: OK";
@@ -79,6 +80,7 @@ export default function TestAiModelSection({
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setIsLoading(true);
+    const task = startTask(`Testing ${kind} model`);
 
     try {
       const res = await fetch("/api/test-ai-model", {
@@ -93,17 +95,20 @@ export default function TestAiModelSection({
         image_url?: string;
       };
       if (!res.ok || data.error) {
+        const message = data.error || "Model test failed";
+        task.fail(message);
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            content: data.error || "Model test failed",
+            content: message,
             serverLog: data.server_log || null,
             ok: false,
           },
         ]);
         return;
       }
+      task.succeed("Model responded");
       setMessages((prev) => [
         ...prev,
         {
@@ -114,11 +119,13 @@ export default function TestAiModelSection({
         },
       ]);
     } catch (err) {
+      const message = (err as Error).message || "Model test failed";
+      task.fail(message);
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: (err as Error).message || "Model test failed",
+          content: message,
           serverLog: null,
           ok: false,
         },

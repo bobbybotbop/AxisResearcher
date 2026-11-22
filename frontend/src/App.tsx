@@ -15,6 +15,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import CreateWorkflow from "./components/CreateWorkflow";
 import ToastContainer from "./components/ToastContainer";
 import StartupToasts, { startTaskToast } from "./components/StartupToasts";
+import { startTask } from "./utils/statusStore";
 import GeneratedListingCard from "./components/GeneratedListingCard";
 import CompactListingRow from "./components/CompactListingRow";
 import ListingDetailModal from "./components/ListingDetailModal";
@@ -3363,6 +3364,7 @@ function App() {
   const handleTestAppToken = async (): Promise<void> => {
     setIsTestingAppToken(true);
     setAppTokenResult(null);
+    const task = startTask("Testing application token");
     try {
       const response = await fetch("/api/test-application-token", {
         method: "POST",
@@ -3370,8 +3372,16 @@ function App() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Test failed");
       setAppTokenResult(data.result);
+      const result = data.result as TokenResult | undefined;
+      if (result && !result.ok) {
+        task.fail(result.message);
+      } else {
+        task.succeed(result?.message);
+      }
     } catch (err) {
-      setAppTokenResult({ ok: false, message: (err as Error).message });
+      const message = (err as Error).message;
+      setAppTokenResult({ ok: false, message });
+      task.fail(message);
     } finally {
       setIsTestingAppToken(false);
     }
@@ -3380,13 +3390,22 @@ function App() {
   const handleTestUserToken = async (): Promise<void> => {
     setIsTestingUserToken(true);
     setUserTokenResult(null);
+    const task = startTask("Testing user token");
     try {
       const response = await fetch("/api/test-user-token", { method: "POST" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Test failed");
       setUserTokenResult(data.result);
+      const result = data.result as TokenResult | undefined;
+      if (result && !result.ok) {
+        task.fail(result.message);
+      } else {
+        task.succeed(result?.message);
+      }
     } catch (err) {
-      setUserTokenResult({ ok: false, message: (err as Error).message });
+      const message = (err as Error).message;
+      setUserTokenResult({ ok: false, message });
+      task.fail(message);
     } finally {
       setIsTestingUserToken(false);
     }

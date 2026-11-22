@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, RefreshCw, Search, X } from "lucide-react";
 import Lightbox from "./Lightbox";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { formatListingDateTime } from "../utils/listingDisplay";
+import { startTask } from "../utils/statusStore";
 import {
   PIPELINE_IMAGE_SEARCH,
   PIPELINE_TITLE_SEARCH,
@@ -97,6 +98,62 @@ function Badges({ entry }: { entry: Saved3DFile }) {
       <SiteBadge site={entry.source_site} />
       <MatchLabelBadge label={entry.match_label} />
       <PipelineBadge pipeline={entry.pipeline} />
+    </div>
+  );
+}
+
+function SkeletonBar({ className }: { className: string }) {
+  return <div className={`animate-pulse rounded bg-surface-hover ${className}`} />;
+}
+
+function CompactSaved3DFileRowSkeleton() {
+  return (
+    <div
+      aria-hidden="true"
+      className="flex w-full overflow-hidden rounded-xl border border-border-default bg-surface-panel shadow-sm"
+    >
+      <SkeletonBar className="h-20 w-24 shrink-0 rounded-none" />
+      <div className="flex min-w-0 flex-1 flex-col justify-center gap-2 px-3 py-2">
+        <SkeletonBar className="h-4 w-2/3" />
+        <SkeletonBar className="h-3 w-1/3" />
+      </div>
+    </div>
+  );
+}
+
+function DetailedSaved3DFileCardSkeleton() {
+  return (
+    <div
+      aria-hidden="true"
+      className="flex w-full flex-col overflow-hidden rounded-xl border border-border-default bg-surface-panel shadow-sm md:flex-row md:items-stretch"
+    >
+      <div className="w-full shrink-0 border-b border-border-default md:w-[30%] md:max-w-md md:border-b-0 md:border-r">
+        <SkeletonBar className="aspect-square w-full rounded-none" />
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-3 p-4 sm:p-5">
+        <SkeletonBar className="h-5 w-3/4" />
+        <div className="flex gap-1.5">
+          <SkeletonBar className="h-5 w-16 rounded-full" />
+          <SkeletonBar className="h-5 w-24 rounded-full" />
+          <SkeletonBar className="h-5 w-20 rounded-full" />
+        </div>
+        <SkeletonBar className="h-3 w-1/3" />
+        <SkeletonBar className="h-3 w-1/2" />
+      </div>
+    </div>
+  );
+}
+
+function Saved3DFileSkeletons({ viewMode }: { viewMode: "compact" | "detailed" }) {
+  return (
+    <div className="flex flex-col gap-4" role="status" aria-label="Loading saved 3D files">
+      {Array.from({ length: 4 }, (_, i) =>
+        viewMode === "compact" ? (
+          <CompactSaved3DFileRowSkeleton key={i} />
+        ) : (
+          <DetailedSaved3DFileCardSkeleton key={i} />
+        ),
+      )}
     </div>
   );
 }
@@ -313,16 +370,20 @@ function Saved3DFileDetailModal({
   const handleDelete = async () => {
     setDeleting(true);
     setDeleteError(null);
+    const task = startTask(`Deleting saved 3D file #${entry.id}`);
     try {
       const res = await fetch(`/api/saved-3d-files/${entry.id}`, { method: "DELETE" });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         throw new Error(err.error || `HTTP ${res.status}`);
       }
+      task.succeed("Saved 3D file deleted");
       onDeleted(entry.id);
       onClose();
     } catch (err) {
-      setDeleteError((err as Error).message);
+      const message = (err as Error).message;
+      task.fail(message);
+      setDeleteError(message);
       setDeleting(false);
       setConfirmDelete(false);
     }
@@ -633,10 +694,7 @@ export default function Saved3DFiles() {
 
       {/* List */}
       {loading && !data ? (
-        <div className="flex flex-col items-center justify-center gap-4 py-12">
-          <div className="h-12 w-12 animate-spin rounded-full border-4 border-border-default border-t-primary" />
-          <p className="text-text-muted">Loading saved 3D files...</p>
-        </div>
+        <Saved3DFileSkeletons viewMode={viewMode} />
       ) : (data?.items.length ?? 0) === 0 ? (
         <div className="rounded-xl border border-border-default bg-surface-muted p-8 text-center">
           <p className="text-text-muted">
