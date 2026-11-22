@@ -11,6 +11,8 @@
  * so snapshots stay referentially stable between emissions.
  */
 
+import { useSyncExternalStore } from "react";
+
 export type TaskStatus = "pending" | "running" | "success" | "error";
 
 export interface TaskProgress {
@@ -26,6 +28,8 @@ export interface Task {
   error?: string;
   /** Optional completion/failure message surfaced by the toast module. */
   message?: string;
+  /** Optional long-form detail the toast module reveals on click. */
+  detail?: string;
 }
 
 export interface Pipeline {
@@ -42,9 +46,9 @@ export interface TaskHandle {
   /** Report determinate progress. No-op after settle. */
   progress: (current: number) => void;
   /** Mark the task done; its toast auto-dismisses. */
-  succeed: (message?: string) => void;
+  succeed: (message?: string, detail?: string) => void;
   /** Mark the task failed; its toast persists until dismissed. */
-  fail: (error: string) => void;
+  fail: (error: string, detail?: string) => void;
 }
 
 export interface PipelineHandle {
@@ -185,21 +189,21 @@ export function startTaskWithId(
         console.warn("[status-store] failed to update task progress:", err);
       }
     },
-    succeed(message) {
+    succeed(message, detail) {
       if (settled) return;
       settled = true;
       try {
-        patchTask(id, { status: "success", message });
+        patchTask(id, { status: "success", message, detail });
         setTimeout(() => dismissTask(id), SUCCESS_DISMISS_MS);
       } catch (err) {
         console.warn("[status-store] failed to settle task:", err);
       }
     },
-    fail(error) {
+    fail(error, detail) {
       if (settled) return;
       settled = true;
       try {
-        patchTask(id, { status: "error", error, message: error });
+        patchTask(id, { status: "error", error, message: error, detail });
       } catch (err) {
         console.warn("[status-store] failed to settle task:", err);
       }
@@ -377,3 +381,27 @@ function getSnapshot(): StoreState {
 
 /** React binding: subscribe a component to the full store snapshot. */
 export const statusStore = { subscribe, getSnapshot };
+
+/**
+ * React binding: derive a feature's waiting state from a task id held in a
+ * ref/state. Returns true while that task is still pending/running in the
+ * store, false once it settles (or if the id is null). Lets features drop
+ * their local `is*` waiting booleans and read waiting state from the store.
+ */
+export function useTaskRunning(id: number | null): boolean {
+  const { tasks } = useSyncExternalStore(subscribe, getSnapshot);
+  if (id === null) return false;
+  const task = tasks.find((t) => t.id === id);
+  return task !== undefined && (task.status === "pending" || task.status === "running");
+}
+
+/**
+ * React binding: true while any standalone task with the given name is still
+ * running. Replaces feature-level `is*` booleans for single request/response
+ * operations (sync, restock, bulk delete) — the operation's waiting state
+ * lives in the store, not in a useState flag.
+ */
+export function useTaskRunningByName(name: string): boolean {
+  const { tasks } = useSyncExternalStore(subscribe, getSnapshot);
+  return tasks.some((t) => t.name === name && t.status === "running");
+}

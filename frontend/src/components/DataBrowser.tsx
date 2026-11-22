@@ -8,6 +8,8 @@ import {
   Table2,
 } from "lucide-react";
 import { DATA_BROWSER_TABLES, type DataBrowserTableName } from "../constants/dataBrowser";
+import { startTask } from "../utils/statusStore";
+import LoadingBar from "./LoadingBar";
 
 const TABLES = DATA_BROWSER_TABLES;
 type TableName = DataBrowserTableName;
@@ -259,6 +261,7 @@ export default function DataBrowser() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     setFetchError(null);
+    const task = startTask(`Load ${selectedTable} table`);
     try {
       const res = await fetch(
         `/api/data-browser/${selectedTable}?page=${page}&page_size=${pageSize}`,
@@ -269,8 +272,11 @@ export default function DataBrowser() {
       }
       const json = (await res.json()) as DataBrowserResponse;
       setData(json);
+      task.succeed();
     } catch (err) {
-      setFetchError((err as Error).message);
+      const message = (err as Error).message;
+      setFetchError(message);
+      task.fail(message);
     } finally {
       setLoading(false);
     }
@@ -410,7 +416,8 @@ export default function DataBrowser() {
         </div>
 
         {/* Main area: rows */}
-        <div className="flex flex-1 flex-col overflow-hidden">
+        <div className="relative flex flex-1 flex-col overflow-hidden">
+          <LoadingBar active={loading} />
           {fetchError && (
             <div className="mb-4 rounded-md bg-danger/10 px-4 py-3 text-sm text-danger">
               {fetchError}

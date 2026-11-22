@@ -15,8 +15,16 @@ import { useLocation, useNavigate } from "react-router-dom";
 import CreateWorkflow from "./components/CreateWorkflow";
 import ToastContainer from "./components/ToastContainer";
 import StartupToasts, { startTaskToast } from "./components/StartupToasts";
+import {
+  startTask,
+  startTaskWithId,
+  useTaskRunning,
+  useTaskRunningByName,
+} from "./utils/statusStore";
 import GeneratedListingCard from "./components/GeneratedListingCard";
+import type { CardUploadStatus } from "./components/GeneratedListingCard";
 import CompactListingRow from "./components/CompactListingRow";
+import ListingCardSkeleton from "./components/ListingCardSkeleton";
 import ListingDetailModal from "./components/ListingDetailModal";
 import UploadListingsToolbar from "./components/UploadListingsToolbar";
 import ApiKeyManagementSection from "./components/ApiKeyManagementSection";
@@ -152,6 +160,13 @@ interface ListingData {
 }
 type AutoSaveStatus = { title: "idle" | "saving" | "saved"; description: "idle" | "saving" | "saved" }
 
+// Status Store task names for the History/Upload operations (ADR 0002). The
+// `is*` waiting-state booleans for these operations are derived from running
+// store tasks via useTaskRunning, not held in useState.
+const SYNC_TASK_NAME = "Syncing with eBay";
+const RESTOCK_TASK_NAME = "Restocking listings";
+const BULK_DELETE_TASK_NAME = "Deleting listings";
+
 function App() {
   const [photos, setPhotos] = useState<string[]>([]);
   const [categories, setCategories] = useState<Record<string, string>>({});
@@ -168,7 +183,6 @@ function App() {
   const testTextGenTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const bgRemovalAbortControllerRef = useRef<AbortController | null>(null);
   const [listingData, setListingData] = useState<ListingData | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const addToast = (type: "success" | "error", message: string, detail?: string): void => {
@@ -403,9 +417,11 @@ function App() {
   const [isTesting, setIsTesting] = useState(false);
   const [testingId, setTestingId] = useState("");
   const [appTokenResult, setAppTokenResult] = useState<TokenResult | null>(null);
-  const [isTestingAppToken, setIsTestingAppToken] = useState(false);
+  const [appTokenTaskId, setAppTokenTaskId] = useState<number | null>(null);
+  const isTestingAppToken = useTaskRunning(appTokenTaskId);
   const [userTokenResult, setUserTokenResult] = useState<TokenResult | null>(null);
-  const [isTestingUserToken, setIsTestingUserToken] = useState(false);
+  const [userTokenTaskId, setUserTokenTaskId] = useState<number | null>(null);
+  const isTestingUserToken = useTaskRunning(userTokenTaskId);
   const [allListings, setAllListings] = useState<Listing[]>([]);
   const [uploadListingsSearch, setUploadListingsSearch] = useState("");
   const [uploadListingsShowDrafts, setUploadListingsShowDrafts] =
@@ -415,6 +431,10 @@ function App() {
   const [loadingListings, setLoadingListings] = useState(false);
   const [uploadingSkus, setUploadingSkus] = useState<Set<string>>(new Set());
   const [uploadResults, setUploadResults] = useState<Record<string, UploadResult>>({});
+  // Per-card upload badge state (spinner → check/error). Waiting-state UI only;
+  // the summary toast is emitted through the Status Store.
+  const [uploadStatuses, setUploadStatuses] = useState<Record<string, CardUploadStatus>>({});
+  const uploadBatchRef = useRef<{ total: number; settled: number; failures: string[] } | null>(null);
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [listingDetailData, setListingDetailData] = useState<unknown>(null);
   const [loadingListingDetail, setLoadingListingDetail] = useState(false);
@@ -434,12 +454,14 @@ function App() {
   const [autoRestockQuantity, setAutoRestockQuantity] = useState(15);
   const [minimumImagesPerListing, setMinimumImagesPerListing] = useState(10);
   const [autoRestockConfirm, setAutoRestockConfirm] = useState<{ nextEnabled: boolean; nextQuantity: number } | null>(null);
-  const [isRestocking, setIsRestocking] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
+  // Waiting state for sync/restock/bulk-delete lives in the Status Store (ADR
+  // 0002) — these booleans are derived from running store tasks, not useState.
+  const isRestocking = useTaskRunningByName(RESTOCK_TASK_NAME);
+  const isSyncing = useTaskRunningByName(SYNC_TASK_NAME);
   const [syncLastRefreshed, setSyncLastRefreshed] = useState<string | null>(null);
   const [historySelectMode, setHistorySelectMode] = useState<boolean>(false);
   const [historySelectedSkus, setHistorySelectedSkus] = useState<Set<string>>(new Set());
-  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const isBulkDeleting = useTaskRunningByName(BULK_DELETE_TASK_NAME);
   const autoRestockRanRef = useRef<boolean>(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
@@ -1833,7 +1855,7 @@ function App() {
   const handleBulkDeleteListings = async (): Promise<void> => {
     const skus = Array.from(historySelectedSkus);
     if (skus.length === 0) return;
-    setIsBulkDeleting(true);
+    const task = startTask(BULK_DELETE_TASK_NAME, { total: skus.length });
     try {
       const res = await fetch('/api/listings/bulk-delete', {
         method: 'POST',
@@ -1842,17 +1864,23 @@ function App() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      if (data.errors?.length > 0) {
-        addToast('error', `${data.errors.length} listing(s) could not be deleted`);
-      }
+      task.progress(skus.length);
+      const failed: number = data.errors?.length ?? 0;
+      const succeeded = skus.length - failed;
       setHistorySelectMode(false);
       setHistorySelectedSkus(new Set());
       await fetchAllListings();
+      if (failed > 0) {
+        task.fail(
+          `${succeeded} deleted, ${failed} could not be deleted`,
+          (data.errors as string[]).join("\n"),
+        );
+      } else {
+        task.succeed(`${succeeded} listing${succeeded === 1 ? "" : "s"} deleted`);
+      }
     } catch (err) {
       console.error('[History] bulk delete failed:', err);
-      addToast('error', (err as Error).message || 'Bulk delete failed');
-    } finally {
-      setIsBulkDeleting(false);
+      task.fail((err as Error).message || 'Bulk delete failed');
     }
   };
 
@@ -2477,7 +2505,7 @@ function App() {
       .map((l) => l.sku);
     if (!skus.length) return;
 
-    setIsRestocking(true);
+    const task = startTask(RESTOCK_TASK_NAME, { total: skus.length });
     try {
       const res = await fetch("/api/listings/restock", {
         method: "POST",
@@ -2486,6 +2514,7 @@ function App() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to restock listings");
+      task.progress(skus.length);
 
       const skuToListing = (data.failed?.length || data.not_found?.length)
         ? Object.fromEntries(allListings.map((l) => [l.sku, l]))
@@ -2501,13 +2530,15 @@ function App() {
           return next;
         });
       }
+
+      const problemLines: string[] = [];
       if (data.failed?.length) {
         const failedErrors = data.failed_errors || {};
         data.failed.forEach((sku: string) => {
           const l = skuToListing[sku];
           const raw = l?.title || sku;
           const title = raw.length > 50 ? raw.slice(0, 50) + "\u2026" : raw;
-          addToast("error", `Failed to restock "${title}"`);
+          problemLines.push(`Failed to restock "${title}"`);
           const ebayId = l?.ebayListingId || "";
           const url = ebayId
             ? `https://www.ebay.com/itm/${ebayId}`
@@ -2526,19 +2557,27 @@ function App() {
           const l = skuToListing[sku];
           const raw = (l?.title as string) || sku;
           const title = raw.length > 50 ? raw.slice(0, 50) + '…' : raw;
-          addToast('error', `"${title}" not found on eBay`);
+          problemLines.push(`"${title}" not found on eBay`);
         });
+      }
+
+      const updatedCount: number = data.updated?.length ?? 0;
+      if (problemLines.length > 0) {
+        task.fail(
+          `${updatedCount} restocked, ${problemLines.length} failed`,
+          problemLines.join("\n"),
+        );
+      } else {
+        task.succeed(`Restocked ${updatedCount} listing${updatedCount === 1 ? "" : "s"} to ${qty}`);
       }
     } catch (err) {
       console.error("Error restocking listings:", err);
-      addToast("error", (err as Error).message || "Failed to restock listings");
-    } finally {
-      setIsRestocking(false);
+      task.fail((err as Error).message || "Failed to restock listings");
     }
   };
 
   const handleSyncWithEbay = async (): Promise<void> => {
-    setIsSyncing(true);
+    const task = startTask(SYNC_TASK_NAME);
     try {
       const res = await fetch('/api/listings/sync-active', {
         method: 'POST',
@@ -2554,17 +2593,15 @@ function App() {
           )
         );
       }
-      addToast('success', `Sync complete: ${data.active} active, ${data.newly_inactive} marked inactive, ${data.updated} updated`);
       await fetchAllListings();
+      task.succeed(`Sync complete: ${data.active} active, ${data.newly_inactive} marked inactive, ${data.updated} updated`);
     } catch (err) {
-      addToast('error', (err as Error).message || 'Sync failed');
-    } finally {
-      setIsSyncing(false);
+      task.fail((err as Error).message || 'Sync failed');
     }
   };
 
   const handleSyncEbayListings = async (): Promise<void> => {
-    setIsSyncing(true);
+    const task = startTask(SYNC_TASK_NAME);
     try {
       const res = await fetch('/api/import-listings', { method: 'POST' });
       const data = await res.json();
@@ -2572,13 +2609,11 @@ function App() {
       const imported = data.imported ?? 0;
       const updated = data.updated ?? 0;
       const skipped = data.skipped ?? 0;
-      addToast('success', `Sync complete: ${imported} imported, ${updated} updated, ${skipped} skipped`);
       setSyncLastRefreshed(new Date().toISOString());
       await fetchAllListings();
+      task.succeed(`Sync complete: ${imported} imported, ${updated} updated, ${skipped} skipped`);
     } catch (err) {
-      addToast('error', (err as Error).message || 'Sync failed');
-    } finally {
-      setIsSyncing(false);
+      task.fail((err as Error).message || 'Sync failed');
     }
   };
 
@@ -2853,6 +2888,13 @@ function App() {
     }
 
     setUploadingSkus((prev) => new Set(prev).add(sku));
+    setUploadStatuses((prev) => ({ ...prev, [sku]: "uploading" }));
+    // Join the current upload batch; when the last in-flight upload settles,
+    // one summary toast reports "N succeeded, M failed" (ADR 0002).
+    if (!uploadBatchRef.current) {
+      uploadBatchRef.current = { total: 0, settled: 0, failures: [] };
+    }
+    uploadBatchRef.current.total += 1;
 
     if (uploadPipelineId != null) dismissPipeline(uploadPipelineId);
     const { id: pipelineId, handle: pipeline } = startPipelineWithId(
@@ -2903,18 +2945,11 @@ function App() {
         ...prev,
         [sku]: data.upload_result!,
       }));
+      setUploadStatuses((prev) => ({ ...prev, [sku]: "success" }));
 
       if (sku === listingData?.sku) {
         setUploadResult(data.upload_result ?? null);
       }
-
-      addToast(
-        "success",
-        "Upload successful",
-        data.upload_result.listingId
-          ? `Listing ID: ${data.upload_result.listingId}`
-          : "Listing is now live on eBay",
-      );
 
       fetchAllListings();
 
@@ -2922,14 +2957,38 @@ function App() {
     } catch (err) {
       console.error("Error uploading listing:", err);
       const message = (err as Error).message || "An error occurred while uploading listing";
-      addToast("error", message);
       pipeline.fail(message);
+      setUploadStatuses((prev) => ({ ...prev, [sku]: "error" }));
+      if (uploadBatchRef.current) {
+        uploadBatchRef.current.failures.push(
+          `${sku}: ${(err as Error).message || "upload failed"}`,
+        );
+      }
     } finally {
       setUploadingSkus((prev) => {
         const newSet = new Set(prev);
         newSet.delete(sku);
         return newSet;
       });
+      const batch = uploadBatchRef.current;
+      if (batch) {
+        batch.settled += 1;
+        if (batch.settled >= batch.total) {
+          const succeeded = batch.total - batch.failures.length;
+          const summary =
+            batch.failures.length === 0
+              ? `${succeeded} upload${succeeded === 1 ? "" : "s"} succeeded`
+              : `${succeeded} succeeded, ${batch.failures.length} failed`;
+          const detail = batch.failures.length ? batch.failures.join("\n") : undefined;
+          const toast = startTask("Upload summary");
+          if (batch.failures.length === 0) {
+            toast.succeed(summary);
+          } else {
+            toast.fail(summary, detail);
+          }
+          uploadBatchRef.current = null;
+        }
+      }
     }
   };
 
@@ -3338,8 +3397,9 @@ function App() {
     }`;
 
   const handleTestAppToken = async (): Promise<void> => {
-    setIsTestingAppToken(true);
     setAppTokenResult(null);
+    const { id, handle: task } = startTaskWithId("Testing application token");
+    setAppTokenTaskId(id);
     try {
       const response = await fetch("/api/test-application-token", {
         method: "POST",
@@ -3347,25 +3407,38 @@ function App() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Test failed");
       setAppTokenResult(data.result);
+      const result = data.result as TokenResult | undefined;
+      if (result && !result.ok) {
+        task.fail(result.message);
+      } else {
+        task.succeed(result?.message);
+      }
     } catch (err) {
-      setAppTokenResult({ ok: false, message: (err as Error).message });
-    } finally {
-      setIsTestingAppToken(false);
+      const message = (err as Error).message;
+      setAppTokenResult({ ok: false, message });
+      task.fail(message);
     }
   };
 
   const handleTestUserToken = async (): Promise<void> => {
-    setIsTestingUserToken(true);
     setUserTokenResult(null);
+    const { id, handle: task } = startTaskWithId("Testing user token");
+    setUserTokenTaskId(id);
     try {
       const response = await fetch("/api/test-user-token", { method: "POST" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Test failed");
       setUserTokenResult(data.result);
+      const result = data.result as TokenResult | undefined;
+      if (result && !result.ok) {
+        task.fail(result.message);
+      } else {
+        task.succeed(result?.message);
+      }
     } catch (err) {
-      setUserTokenResult({ ok: false, message: (err as Error).message });
-    } finally {
-      setIsTestingUserToken(false);
+      const message = (err as Error).message;
+      setUserTokenResult({ ok: false, message });
+      task.fail(message);
     }
   };
 
@@ -4203,9 +4276,10 @@ function App() {
               </div>
 
               {loadingListings ? (
-                <div className="flex flex-col items-center justify-center gap-4 py-12">
-                  <div className="h-12 w-12 animate-spin rounded-full border-4 border-border-default border-t-primary" />
-                  <p className="text-text-muted">Loading history...</p>
+                <div className="flex flex-col gap-4" aria-busy="true" aria-label="Loading history">
+                  {Array.from({ length: historyPageSize }, (_, i) => (
+                    <ListingCardSkeleton key={i} viewMode={historyViewMode} />
+                  ))}
                 </div>
               ) : allListings.length === 0 ? (
                 <div className="rounded-xl border border-border-default bg-surface-muted p-8 text-center">
@@ -4230,6 +4304,7 @@ function App() {
                           onCardClick={handleListingClick}
                           onUpload={(l) => handleUploadToEbay(l.sku!, l)}
                           isUploading={uploadingSkus.has(listing.sku!)}
+                          uploadStatus={uploadStatuses[listing.sku!] ?? null}
                           uploadResult={uploadResults[listing.sku!]}
                           quantity={listingQuantities[listing.sku!]}
                           loadingQuantity={loadingQuantities}
@@ -4248,6 +4323,7 @@ function App() {
                           onCardClick={handleListingClick}
                           onUpload={(l) => handleUploadToEbay(l.sku!, l)}
                           isUploading={uploadingSkus.has(listing.sku!)}
+                          uploadStatus={uploadStatuses[listing.sku!] ?? null}
                           uploadResult={uploadResults[listing.sku!]}
                           quantity={listingQuantities[listing.sku!]}
                           loadingQuantity={loadingQuantities}

@@ -12,11 +12,15 @@ interface UploadResult {
   href?: string;
 }
 
+/** Per-card upload waiting state, owned by the Status Store (ADR 0002). */
+export type CardUploadStatus = "uploading" | "success" | "error";
+
 interface CompactListingRowProps {
   listing: Listing;
   onCardClick?: (listing: Listing) => void;
   onUpload?: (listing: Listing) => void;
   isUploading?: boolean;
+  uploadStatus?: CardUploadStatus | null;
   uploadResult?: UploadResult | null;
   quantity?: number | null;
   loadingQuantity?: boolean;
@@ -62,6 +66,7 @@ export default function CompactListingRow({
   onCardClick,
   onUpload,
   isUploading,
+  uploadStatus,
   uploadResult,
   quantity,
   loadingQuantity,
@@ -89,8 +94,52 @@ export default function CompactListingRow({
 
   const createdDateTime = listing.createdDateTime as string | undefined;
 
+  const resolvedUploadStatus: CardUploadStatus | null =
+    uploadStatus ?? (isUploading ? "uploading" : null);
+
   return (
     <div className="relative w-full">
+      {resolvedUploadStatus && (
+        <div
+          className="absolute -top-2 left-3 z-10"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          <span
+            role={resolvedUploadStatus === "error" ? "alert" : "status"}
+            title={
+              resolvedUploadStatus === "uploading"
+                ? "Uploading to eBay…"
+                : resolvedUploadStatus === "success"
+                  ? "Uploaded to eBay"
+                  : "Upload failed"
+            }
+            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold shadow-sm ${
+              resolvedUploadStatus === "uploading"
+                ? "border-border-default bg-surface-panel text-text-primary"
+                : resolvedUploadStatus === "success"
+                  ? "border-success/30 bg-success text-white"
+                  : "border-danger/30 bg-danger text-white"
+            }`}
+          >
+            {resolvedUploadStatus === "uploading" ? (
+              <span
+                className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
+                aria-hidden="true"
+              />
+            ) : (
+              <span aria-hidden="true">
+                {resolvedUploadStatus === "success" ? "✓" : "✕"}
+              </span>
+            )}
+            {resolvedUploadStatus === "uploading"
+              ? "Uploading"
+              : resolvedUploadStatus === "success"
+                ? "Uploaded"
+                : "Failed"}
+          </span>
+        </div>
+      )}
       {isReady && (
         <div
           className="absolute -top-2 right-3 z-10 flex items-center gap-2"

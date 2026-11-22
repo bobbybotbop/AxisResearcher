@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { RefreshCw, CheckCircle, XCircle, ChevronRight, ChevronDown, ExternalLink } from "lucide-react";
 import { LOG_EVENT_LABELS, LOG_FILTER_CHIPS, LOG_SECTION_LABELS } from "../constants/logs";
 import type { FilterOption } from "../constants/logs";
+import { startTask } from "../utils/statusStore";
+import LoadingBar from "./LoadingBar";
 
 interface LogEntry {
   event: string;
@@ -301,13 +303,17 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     setFetchError(null);
+    const task = startTask("Load activity log");
     try {
       const res = await fetch("/api/logs");
       if (!res.ok) throw new Error(`Failed to load logs (${res.status})`);
       const data = await res.json() as { logs?: LogEntry[] };
       setLogs(data.logs || []);
+      task.succeed();
     } catch (err) {
-      setFetchError((err as Error).message);
+      const message = (err as Error).message;
+      setFetchError(message);
+      task.fail(message);
     } finally {
       setLoading(false);
     }
@@ -362,7 +368,8 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
   }
 
   return (
-    <div className="flex flex-col py-6 px-2">
+    <div className="relative flex flex-col py-6 px-2">
+      <LoadingBar active={loading} />
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold text-text-primary">Activity Log</h1>
         <button
