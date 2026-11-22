@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, RefreshCw, Search, X } from "lucide-react";
 import Lightbox from "./Lightbox";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { formatListingDateTime } from "../utils/listingDisplay";
-import { startTaskWithId, useTaskRunning } from "../utils/statusStore";
+import { startTask, startTaskWithId, useTaskRunning } from "../utils/statusStore";
 import {
   PIPELINE_IMAGE_SEARCH,
   PIPELINE_TITLE_SEARCH,
@@ -590,6 +590,9 @@ export default function Saved3DFiles() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     setFetchError(null);
+    // Report the load through the Status Store (ADR 0002); the skeleton cards
+    // stay gated on the local loading flag as their local trigger.
+    const task = startTask("Load saved 3D files");
     try {
       const res = await fetch(`/api/saved-3d-files?page=${page}&page_size=${pageSize}`);
       if (!res.ok) {
@@ -597,8 +600,11 @@ export default function Saved3DFiles() {
         throw new Error(err.error || `HTTP ${res.status}`);
       }
       setData((await res.json()) as Saved3DFilesResponse);
+      task.succeed();
     } catch (err) {
-      setFetchError((err as Error).message);
+      const message = (err as Error).message;
+      setFetchError(message);
+      task.fail(message);
     } finally {
       setLoading(false);
     }

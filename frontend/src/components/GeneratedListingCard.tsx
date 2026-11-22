@@ -6,7 +6,11 @@ import {
   formatCategoryShort,
 } from "../utils/listingDisplay";
 import { displaySku } from "../utils/listingStatus";
+import CardUploadBadge from "./CardUploadBadge";
+import type { CardUploadStatus } from "./CardUploadBadge";
 import type { Listing } from "../types/listing";
+
+export type { CardUploadStatus };
 
 const THUMB_PX = 80;
 const THUMB_GAP = 8;
@@ -15,9 +19,6 @@ interface UploadResult {
   listingId?: string;
   href?: string;
 }
-
-/** Per-card upload waiting state, owned by the Status Store (ADR 0002). */
-export type CardUploadStatus = "uploading" | "success" | "error";
 
 interface GeneratedListingCardProps {
   listing: Listing;
@@ -174,45 +175,7 @@ export default function GeneratedListingCard({
   return (
     <div className="relative w-full">
       {resolvedUploadStatus && (
-        <div
-          className="absolute left-3 top-3 z-10"
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => e.stopPropagation()}
-        >
-          <span
-            role={resolvedUploadStatus === "error" ? "alert" : "status"}
-            title={
-              resolvedUploadStatus === "uploading"
-                ? "Uploading to eBay…"
-                : resolvedUploadStatus === "success"
-                  ? "Uploaded to eBay"
-                  : "Upload failed"
-            }
-            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold shadow-sm ${
-              resolvedUploadStatus === "uploading"
-                ? "border-border-default bg-surface-panel text-text-primary"
-                : resolvedUploadStatus === "success"
-                  ? "border-success/30 bg-success text-white"
-                  : "border-danger/30 bg-danger text-white"
-            }`}
-          >
-            {resolvedUploadStatus === "uploading" ? (
-              <span
-                className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
-                aria-hidden="true"
-              />
-            ) : (
-              <span aria-hidden="true">
-                {resolvedUploadStatus === "success" ? "✓" : "✕"}
-              </span>
-            )}
-            {resolvedUploadStatus === "uploading"
-              ? "Uploading"
-              : resolvedUploadStatus === "success"
-                ? "Uploaded"
-                : "Failed"}
-          </span>
-        </div>
+        <CardUploadBadge status={resolvedUploadStatus} className="left-3 top-3" />
       )}
       {isReady && (
         <div

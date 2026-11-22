@@ -12,7 +12,7 @@ function StepIcon({ status }: { status: Task["status"] }) {
   switch (status) {
     case "success":
       return (
-        <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-green-500 text-sm font-bold text-white">
+        <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-success text-sm font-bold text-white">
           ✓
         </span>
       );
@@ -47,9 +47,9 @@ function StepRow({
   onRetry?: () => void;
 }) {
   const statusColors: Record<Task["status"], string> = {
-    success: "text-green-600",
+    success: "text-success",
     running: "font-semibold text-primary",
-    error: "text-red-600",
+    error: "text-danger",
     pending: "text-text-muted",
   };
   return (
@@ -65,11 +65,11 @@ function StepRow({
       </div>
       {step.status === "error" && (
         <div className="ml-9 flex flex-wrap items-center gap-2">
-          <span className="text-sm text-red-600">{step.error}</span>
+          <span className="text-sm text-danger">{step.error}</span>
           {onRetry && (
             <button
               type="button"
-              className="rounded-md border border-red-300 bg-red-50 px-2.5 py-1 text-xs font-semibold text-red-700 hover:bg-red-100"
+              className="rounded-md border border-danger/30 bg-danger/10 px-2.5 py-1 text-xs font-semibold text-danger hover:bg-danger/20"
               onClick={onRetry}
             >
               Retry
@@ -105,8 +105,8 @@ function PipelineTracker({ pipelineId, onRetry }: PipelineTrackerProps) {
   const progressPercent = totalCount > 0 ? (completedCount / totalCount) * 100 : 0;
   const barColor =
     pipeline.status === "error"
-      ? "bg-gradient-to-r from-red-500 to-red-600"
-      : "bg-gradient-to-r from-green-500 to-green-600";
+      ? "bg-gradient-to-r from-danger to-danger"
+      : "bg-gradient-to-r from-success to-success";
 
   return (
     <div className="my-5 rounded-lg border border-border-default bg-surface-muted p-4">

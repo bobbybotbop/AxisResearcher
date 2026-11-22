@@ -36,7 +36,6 @@ import ImageSearchSteps from "./components/ImageSearchSteps";
 import SharedDownloadRender from "./components/SharedDownloadRender";
 import TitleSearchPipeline from "./components/TitleSearchPipeline";
 import ResearchPipeline from "./components/ResearchPipeline";
-import StatusStoreDemo from "./components/StatusStoreDemo";
 import NumberInput from "./components/NumberInput";
 import { MOCK_DATA, MOCK_GENERATED_TITLE, MOCK_GENERATED_DESCRIPTION } from "./mockData";
 import { createTestWorkflowState } from "./testWorkflowState";
@@ -2986,6 +2985,17 @@ function App() {
     localStorage.setItem("axisHistoryViewMode", mode);
   };
 
+  /**
+   * Retry a failed upload-to-eBay pipeline run. handleUploadToEbay dismisses
+   * the failed pipeline and starts a fresh one, so retry just re-invokes it
+   * with the current listing's sku/data.
+   */
+  const handleRetryUpload = (): void => {
+    const sku = listingData?.sku;
+    if (!sku) return;
+    void handleUploadToEbay(sku, listingData);
+  };
+
   const handleTabChange = (tab: TabName): void => {
     navigate(TAB_PATHS[tab] ?? TAB_PATHS.create);
   };
@@ -4430,9 +4440,6 @@ function App() {
                   Use this section to test functions and debug code.
                 </p>
 
-                {/* Temporary Status Store demo harness (ticket 01) */}
-                <StatusStoreDemo />
-
                 <div className="flex flex-col gap-2">
                   <label
                     htmlFor="testing-id"
@@ -5404,6 +5411,7 @@ function App() {
               createPipelineId={createPipelineId}
               uploadPipelineId={uploadPipelineId}
               onRetryCreate={handleRetryCreatePhase}
+              onRetryUpload={handleRetryUpload}
               uploadingSkus={uploadingSkus}
               isTrimmingTitle={isTrimmingTitle}
               autoSaveStatus={autoSaveStatus}

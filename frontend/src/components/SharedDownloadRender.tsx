@@ -220,6 +220,9 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
   // Waiting state lives in the Status Store; only the pipeline id is local.
   const [pipelineId, setPipelineId] = useState<number | null>(null);
   const pipelineRef = useRef<PipelineHandle | null>(null);
+  // Last download mode attempted — lets Retry re-run a failed download with the
+  // same mode after the failed pipeline is dismissed.
+  const lastDownloadModeRef = useRef<DownloadMode>(DOWNLOAD_MODE_FULL_ZIP);
 
   // Accept an external URL (from either pipeline) into the Step 3 input,
   // along with the listing/pipeline metadata for the download auto-save
@@ -397,6 +400,7 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
   const handleStep3Download = async (mode: DownloadMode) => {
     const link = step3Url.trim();
     if (!link || !step3Supported) return;
+    lastDownloadModeRef.current = mode;
     setStep3LoadingMode(mode);
     setStep3Result(null);
     setStep3Error(null);
@@ -554,10 +558,32 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
     }
   };
 
+  /**
+   * Retry the failed pipeline. The store settles a failed pipeline permanently,
+   * so a retry dismisses it and re-runs against a fresh pipeline: re-run the
+   * render when the download already produced a render file, otherwise re-run
+   * the download with the last mode.
+   */
+  const handleRetry = () => {
+    if (renderFile) {
+      if (pipelineId != null) dismissPipeline(pipelineId);
+      const { id: newPipelineId, handle: pipeline } = startPipelineWithId(
+        "Download + Render",
+        [DOWNLOAD_RENDER_STEPS[1]],
+      );
+      pipelineRef.current = pipeline;
+      setPipelineId(newPipelineId);
+      void handleStep4Render();
+    } else {
+      // handleStep3Download dismisses the failed pipeline and starts a fresh one
+      void handleStep3Download(lastDownloadModeRef.current);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-4">
       {/* Waiting state: one Pipeline in the Status Store (ADR 0002) */}
-      <PipelineTracker pipelineId={pipelineId} />
+      <PipelineTracker pipelineId={pipelineId} onRetry={handleRetry} />
 
       {/* Step 3 — Download 3D File */}
       <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
