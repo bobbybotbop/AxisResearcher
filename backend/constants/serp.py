@@ -22,3 +22,9 @@ BLACKLISTED_SITES = [
     "poshmark.com",
     "reddit.com",
 ]
+
+# Domains excluded from the text-search query itself via -site: clauses.
+# Includes every blacklisted domain plus yeggi: yeggi stays whitelisted as a
+# result source (its aggregator links are valid), but its own pages tend to
+# crowd out the source sites it aggregates, so it's excluded from the query.
+QUERY_EXCLUDED_SITES = BLACKLISTED_SITES + ["yeggi.com"]

@@ -5,7 +5,7 @@ from unittest.mock import patch, MagicMock
 
 import backend.serp as serp_module
 from backend.serp import search_by_text, order_by_site_priority
-from backend.constants.serp import BLACKLISTED_SITES, SITE_TYPE_WHITELISTED
+from backend.constants.serp import BLACKLISTED_SITES, QUERY_EXCLUDED_SITES, SITE_TYPE_WHITELISTED
 
 
 def _mock_google_search(get_dict_return):
@@ -70,6 +70,16 @@ def test_search_by_text_appends_site_exclusions_for_every_blacklisted_domain():
             q = mock_gs.call_args[0][0]["q"]
             for domain in BLACKLISTED_SITES:
                 assert f"-site:{domain}" in q
+
+
+def test_search_by_text_excludes_yeggi_from_query():
+    with patch.dict(os.environ, {"serp_api_token": "test-key"}):
+        with patch.object(serp_module, "GoogleSearch") as mock_gs:
+            mock_gs.return_value = _mock_google_search({"organic_results": []})
+            search_by_text("benchy 3d file")
+            q = mock_gs.call_args[0][0]["q"]
+            assert "-site:yeggi.com" in q
+            assert "yeggi.com" in QUERY_EXCLUDED_SITES
 
 
 def test_search_by_text_sends_num_from_max_results():

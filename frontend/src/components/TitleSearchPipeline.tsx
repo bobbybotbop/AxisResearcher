@@ -78,6 +78,8 @@ function TitleSearchPipeline({
   const [defaultPrompt, setDefaultPrompt] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<TextSearchResult[]>([]);
+  const [retryingShortened, setRetryingShortened] = useState(false);
+  const [shortenedTitle, setShortenedTitle] = useState<string | null>(null);
 
   // Step 3 — Top-priority link image confirmation
   const [topLink, setTopLink] = useState<TextSearchResult | null>(null);
@@ -88,10 +90,10 @@ function TitleSearchPipeline({
   const [pipelineId, setPipelineId] = useState<number | null>(null);
   const pipelineRef = useRef<PipelineHandle | null>(null);
 
-  const searchQuery = () => {
-    const base = optimizedTitle.trim();
-    if (!base) return "";
-    return base.endsWith(" 3d file") ? base : `${base} 3d file`;
+  const searchQuery = (base: string) => {
+    const trimmed = base.trim();
+    if (!trimmed) return "";
+    return trimmed.endsWith(" 3d file") ? trimmed : `${trimmed} 3d file`;
   };
 
   const handleStep1Submit = async (e: React.FormEvent) => {
@@ -109,6 +111,8 @@ function TitleSearchPipeline({
     setTopLink(null);
     setSiteImages([]);
     setMatchLabel(null);
+    setRetryingShortened(false);
+    setShortenedTitle(null);
     if (pipelineId != null) dismissPipeline(pipelineId);
     const { id: newPipelineId, handle: pipeline } = startPipelineWithId(
       "Title Search",
@@ -177,7 +181,9 @@ function TitleSearchPipeline({
       });
       const data = (await res.json()) as { optimized_title?: string; error?: string };
       if (!res.ok || data.error) throw new Error(data.error || "Title optimization failed");
-      setOptimizedTitle(data.optimized_title || "");
+      const optimized = data.optimized_title || "";
+      setOptimizedTitle(optimized);
+      if (optimized.trim()) void runSearch(optimized);
     } catch (err) {
       toast.error((err as Error).message || "Title optimization failed");
     } finally {
@@ -224,12 +230,28 @@ function TitleSearchPipeline({
     }
   };
 
-  const handleSearch = async () => {
-    const query = searchQuery();
-    if (!query) {
-      toast.error("Optimized title is empty — wait for optimization to finish");
-      return;
+  const shortenTitle = async (title: string): Promise<string | null> => {
+    try {
+      const res = await fetch("/api/shorten-title", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          ...(textModel ? { text_model: textModel } : {}),
+        }),
+      });
+      const data = (await res.json()) as { shortened_title?: string; error?: string };
+      if (!res.ok || data.error) throw new Error(data.error || "Title shortening failed");
+      return data.shortened_title || null;
+    } catch (err) {
+      toast.error((err as Error).message || "Title shortening failed");
+      return null;
     }
+  };
+
+  const runSearch = async (base: string, isRetry = false) => {
+    const query = searchQuery(base);
+    if (!query) return;
     setSearching(true);
     setResults([]);
     setTopLink(null);
@@ -252,6 +274,19 @@ function TitleSearchPipeline({
       setResults(filtered);
       toastSkippedSites(skippedSites);
       if (filtered.length === 0) {
+        // No viable whitelisted link — retry once with a shortened query
+        // (first version/model code only, unnecessary words cut).
+        if (!isRetry) {
+          setRetryingShortened(true);
+          const shortened = await shortenTitle(base);
+          if (shortened && shortened.trim() && shortened.trim() !== base.trim()) {
+            setShortenedTitle(shortened);
+            toast.info(`No whitelisted results — retrying with shorter query: "${shortened}"`);
+            await runSearch(shortened, true);
+            return;
+          }
+          setShortenedTitle(null);
+        }
         if (skippedSites.length === 0) toast.info("No 3D file results found for this title");
         pipelineRef.current?.fail("No 3D file results found for this title");
         return;
@@ -265,6 +300,7 @@ function TitleSearchPipeline({
       toast.error((err as Error).message || "Search failed");
     } finally {
       setSearching(false);
+      if (isRetry) setRetryingShortened(false);
     }
   };
 
@@ -283,7 +319,9 @@ function TitleSearchPipeline({
       );
       pipelineRef.current = pipeline;
       setPipelineId(newPipelineId);
-      void handleSearch();
+      setRetryingShortened(false);
+      setShortenedTitle(null);
+      void runSearch(optimizedTitle);
     } else if (step1Link.trim()) {
       void handleStep1Submit({ preventDefault: () => {} } as React.FormEvent);
     }
@@ -398,15 +436,25 @@ function TitleSearchPipeline({
                 <p className="text-sm text-text-primary">
                   {optimizing ? "Optimizing..." : optimizedTitle || "—"}
                 </p>
+                {shortenedTitle && (
+                  <p className="text-xs text-text-muted">
+                    No whitelisted results for the full title — retried with:{" "}
+                    <span className="text-text-primary">{shortenedTitle}</span>
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-3">
                 <button
                   type="button"
                   className={btnPill}
-                  onClick={handleSearch}
-                  disabled={searching || !optimizedTitle.trim()}
+                  onClick={() => void runSearch(optimizedTitle)}
+                  disabled={searching || optimizing || !optimizedTitle.trim()}
                 >
-                  {searching ? "Searching..." : "Search"}
+                  {searching
+                    ? retryingShortened
+                      ? "Retrying with shorter query..."
+                      : "Searching..."
+                    : "Search again"}
                 </button>
               </div>
               {results.length > 0 && (

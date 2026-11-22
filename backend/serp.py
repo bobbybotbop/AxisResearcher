@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from backend.constants.serp import (
     WHITELISTED_SITES,
     BLACKLISTED_SITES,
+    QUERY_EXCLUDED_SITES,
     SITE_TYPE_WHITELISTED,
     SITE_TYPE_BLACKLISTED,
     SITE_TYPE_NEUTRAL,
@@ -66,7 +67,7 @@ def search_by_text(query: str, max_results: int = 35) -> list[dict]:
     if not api_key:
         raise ValueError("serp_api_token is not set in .env")
 
-    exclusions = " ".join(f"-site:{domain}" for domain in BLACKLISTED_SITES)
+    exclusions = " ".join(f"-site:{domain}" for domain in QUERY_EXCLUDED_SITES)
     search = GoogleSearch({
         "engine": "google",
         "q": f"{query} {exclusions}",

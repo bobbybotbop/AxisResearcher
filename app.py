@@ -3311,6 +3311,46 @@ def optimize_title():
         return jsonify({"error": f"Title optimization failed: {str(e)}"}), 500
 
 
+@app.route('/api/shorten-title', methods=['POST'])
+def shorten_title():
+    """
+    Shorten an optimized search title for a retry search after the full
+    version found no viable whitelisted link. Keeps the first version/model
+    number/code and drops the rest, and cuts unnecessary words.
+
+    Expects JSON: {
+        "title": "optimized title to shorten",
+        "text_model": "model id" (optional; defaults to Claude Haiku)
+    }
+    Returns JSON: {"shortened_title": "..."}
+    """
+    try:
+        data = request.get_json()
+        if not data or not data.get("title", "").strip():
+            return jsonify({"error": "title is required"}), 400
+
+        title = data["title"].strip()
+        template = _load_prompt("title/shortenTitleForSearch.txt")
+        prompt = template.replace("{title}", title)
+
+        text_model = data.get("text_model") or DEFAULT_TITLE_SEARCH_MODEL
+        print(f"[API] /api/shorten-title model={text_model} title='{title}'")
+
+        raw = call_text_llm(prompt, model=text_model)
+        shortened = _sanitize_title(raw)
+        if not shortened:
+            return jsonify({"error": "Failed to get response from AI"}), 502
+
+        print(f"[API] /api/shorten-title result: '{shortened}'")
+        return jsonify({"shortened_title": shortened}), 200
+
+    except FileNotFoundError:
+        return jsonify({"error": "Title shortening prompt not found"}), 500
+    except Exception as e:
+        print(f"[API] /api/shorten-title error: {e}")
+        return jsonify({"error": f"Title shortening failed: {str(e)}"}), 500
+
+
 @app.route('/api/serp-text-search', methods=['POST'])
 def serp_text_search():
     """

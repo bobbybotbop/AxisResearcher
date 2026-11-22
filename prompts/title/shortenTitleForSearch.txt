@@ -1,0 +1,12 @@
+You are shortening a search query for finding a 3D printable file on sites like Printables, Thingiverse, MakerWorld, Cults3D, and Thangs. The longer version of this query already failed to find a matching file, so a broader query is needed.
+
+Given the search title below, output ONLY a shorter version:
+
+- If the title lists multiple versions, model numbers, or product codes (e.g. RL550, XL650, XL750, Super 1050, RL1100), keep ONLY the first one and delete the rest.
+- Cut unnecessary words: keep the core product type and the brand/designer name, drop secondary descriptors, materials, colors, and marketing words.
+
+Example: "Powder Measure Knob Dillon RL550 XL650 XL750 Super 1050 RL1100" becomes "Powder Measure Knob Dillon RL550"
+
+Output a single line with only the shortened title — no quotes, no explanation, no punctuation at the end.
+
+Search title: {title}

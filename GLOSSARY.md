@@ -7,7 +7,7 @@ The multi-step wizard (in the Testing tab: `ImageSearchSteps.tsx` + `TitleSearch
 The original 3D File Finder flow: Step 1 fetch eBay photos, Step 2 reverse image search via SerpAPI with Blacklisted Sites filtered server-side, then shared Steps 3–4.
 
 ## Title Search Pipeline
-The newer 3D File Finder flow: paste an eBay link → fetch the listing title → optimize the title via Claude Haiku (strip sales terms like quantity, color, condition) → append " 3d file" → Google text search via SerpAPI, excluding Blacklisted Sites in the query itself → pick the best link by site priority → Image Confirmation → shared Steps 3–4.
+The newer 3D File Finder flow: paste an eBay link → fetch the listing title → optimize the title via Claude Haiku (strip sales terms like quantity, color, condition) → append " 3d file" → Google text search via SerpAPI, excluding Blacklisted Sites (and Yeggi) in the query itself → pick the best link by site priority → Image Confirmation → shared Steps 3–4. If no viable whitelisted link is found, the search retries once automatically with a shortened query (first version/model code only, unnecessary words cut via Haiku).
 
 ## Blacklisted Site
 A domain that search results must never come from: marketplaces (eBay, Amazon, Walmart, Etsy, AliExpress, Temu, Mercari, Poshmark) and Reddit. Also treated as blacklisted: a link on a whitelisted 3D file site that doesn't point to a specific product page (e.g. a Printables tag page) — such links can't be downloaded, so they're excluded the same way. Blacklisted Sites are excluded from Title Search Pipeline queries and filtered out of both pipelines' results server-side. Counterpart to the whitelisted 3D file sites ranked by Site Priority.

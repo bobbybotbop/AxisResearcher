@@ -120,3 +120,58 @@ def test_get_default_prompt_returns_template_with_placeholder(client):
     prompt = resp.get_json()["prompt"]
     assert "{title}" in prompt
     assert len(prompt) > 50
+
+
+# --- /api/shorten-title ---
+
+
+def test_shorten_requires_title(client):
+    resp = client.post("/api/shorten-title", json={})
+    assert resp.status_code == 400
+    assert "title" in resp.get_json()["error"]
+
+
+def test_shorten_returns_shortened_title(client, monkeypatch):
+    monkeypatch.setattr(
+        app_module, "call_text_llm",
+        lambda prompt, model=None: "Powder Measure Knob Dillon RL550",
+    )
+    resp = client.post("/api/shorten-title", json={
+        "title": "Powder Measure Knob Dillon RL550 XL650 XL750 Super 1050 RL1100",
+    })
+    assert resp.status_code == 200
+    assert resp.get_json()["shortened_title"] == "Powder Measure Knob Dillon RL550"
+
+
+def test_shorten_prompt_contains_title_and_first_version_rule(client, monkeypatch):
+    captured = {}
+
+    def fake_llm(prompt, model=None):
+        captured["prompt"] = prompt
+        return "Dillon RL550"
+
+    monkeypatch.setattr(app_module, "call_text_llm", fake_llm)
+    resp = client.post("/api/shorten-title", json={"title": "Dillon RL550 XL650"})
+    assert resp.status_code == 200
+    assert "Dillon RL550 XL650" in captured["prompt"]
+    assert "first" in captured["prompt"].lower()
+
+
+def test_shorten_defaults_to_haiku_model(client, monkeypatch):
+    captured = {}
+
+    def fake_llm(prompt, model=None):
+        captured["model"] = model
+        return "Dillon RL550"
+
+    monkeypatch.setattr(app_module, "call_text_llm", fake_llm)
+    resp = client.post("/api/shorten-title", json={"title": "Dillon RL550 XL650"})
+    assert resp.status_code == 200
+    assert captured["model"] == "anthropic/claude-haiku-4.5"
+
+
+def test_shorten_llm_failure_returns_502(client, monkeypatch):
+    monkeypatch.setattr(app_module, "call_text_llm", lambda prompt, model=None: None)
+    resp = client.post("/api/shorten-title", json={"title": "Dillon RL550"})
+    assert resp.status_code == 502
+    assert "error" in resp.get_json()
