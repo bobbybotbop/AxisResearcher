@@ -36,7 +36,6 @@ interface TextSearchResult {
 // (or comparison impossible) — the download is never blocked either way.
 type MatchLabel = "checking" | "confirmed" | "unconfirmed";
 
-const DEFAULT_MAX_RESULTS = 35;
 const DEFAULT_OPTIMIZE_PROMPT = "";
 
 // Metadata forwarded with the top link so the shared download step can
@@ -77,7 +76,6 @@ function TitleSearchPipeline({
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptTemplate, setPromptTemplate] = useState(DEFAULT_OPTIMIZE_PROMPT);
   const [defaultPrompt, setDefaultPrompt] = useState<string | null>(null);
-  const [maxResults, setMaxResults] = useState(DEFAULT_MAX_RESULTS);
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<TextSearchResult[]>([]);
 
@@ -240,7 +238,6 @@ function TitleSearchPipeline({
           query,
           enabled_sites: enabledSites,
           site_priorities: sitePriority,
-          max_results: maxResults,
         }),
       });
       const data = (await res.json()) as { results?: TextSearchResult[]; error?: string };
@@ -414,19 +411,6 @@ function TitleSearchPipeline({
                 </button>
               </div>
               <div className="flex items-center gap-3">
-                <div className="flex flex-col gap-1">
-                  <label htmlFor="title-search-max-results" className="text-xs font-semibold text-text-muted">
-                    Max results
-                  </label>
-                  <input
-                    id="title-search-max-results"
-                    type="number"
-                    min={1}
-                    className="w-24 rounded-lg border-2 border-border-default bg-surface-panel px-3 py-2 text-text-primary transition-colors focus:border-primary focus:outline-none"
-                    value={maxResults}
-                    onChange={(e) => setMaxResults(Math.max(1, parseInt(e.target.value, 10) || DEFAULT_MAX_RESULTS))}
-                  />
-                </div>
                 <button
                   type="button"
                   className={btnPill}
