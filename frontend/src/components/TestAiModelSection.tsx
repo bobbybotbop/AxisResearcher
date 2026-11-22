@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { btnPillSm } from "../styles/buttonPill";
-import { startTask } from "../utils/statusStore";
+import { startTaskWithId, useTaskRunning } from "../utils/statusStore";
 import type { ModelOption } from "../types/listing";
 
 const DEFAULT_TEXT_PROMPT = "Reply with exactly: OK";
@@ -49,7 +49,8 @@ export default function TestAiModelSection({
   const [model, setModel] = useState(textModel);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [testTaskId, setTestTaskId] = useState<number | null>(null);
+  const isLoading = useTaskRunning(testTaskId);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -79,8 +80,8 @@ export default function TestAiModelSection({
     const userMessage: ChatMessage = { role: "user", content: prompt };
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
-    setIsLoading(true);
-    const task = startTask(`Testing ${kind} model`);
+    const { id, handle: task } = startTaskWithId(`Testing ${kind} model`);
+    setTestTaskId(id);
 
     try {
       const res = await fetch("/api/test-ai-model", {
@@ -130,8 +131,6 @@ export default function TestAiModelSection({
           ok: false,
         },
       ]);
-    } finally {
-      setIsLoading(false);
     }
   };
 

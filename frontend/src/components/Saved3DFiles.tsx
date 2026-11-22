@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, RefreshCw, Search, X } from "lucide-react";
 import Lightbox from "./Lightbox";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { formatListingDateTime } from "../utils/listingDisplay";
-import { startTask } from "../utils/statusStore";
+import { startTaskWithId, useTaskRunning } from "../utils/statusStore";
 import {
   PIPELINE_IMAGE_SEARCH,
   PIPELINE_TITLE_SEARCH,
@@ -360,17 +360,18 @@ function Saved3DFileDetailModal({
   const [heroIndex, setHeroIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteTaskId, setDeleteTaskId] = useState<number | null>(null);
+  const deletePending = useTaskRunning(deleteTaskId);
 
   const urls = entry.images.map((name) => imageUrl(entry, name));
   const safeHero = urls.length ? heroIndex % urls.length : 0;
   const title = entry.ebay_listing_title || "No title";
 
   const handleDelete = async () => {
-    setDeleting(true);
     setDeleteError(null);
-    const task = startTask(`Deleting saved 3D file #${entry.id}`);
+    const { id, handle: task } = startTaskWithId(`Deleting saved 3D file #${entry.id}`);
+    setDeleteTaskId(id);
     try {
       const res = await fetch(`/api/saved-3d-files/${entry.id}`, { method: "DELETE" });
       if (!res.ok) {
@@ -384,7 +385,6 @@ function Saved3DFileDetailModal({
       const message = (err as Error).message;
       task.fail(message);
       setDeleteError(message);
-      setDeleting(false);
       setConfirmDelete(false);
     }
   };
@@ -491,15 +491,15 @@ function Saved3DFileDetailModal({
                   <>
                     <button
                       type="button"
-                      disabled={deleting}
+                      disabled={deletePending}
                       className="rounded-full border border-danger/30 bg-danger px-6 py-2.5 text-base font-light leading-snug tracking-tight text-white transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
                       onClick={handleDelete}
                     >
-                      {deleting ? "Deleting..." : "Confirm delete"}
+                      {deletePending ? "Deleting..." : "Confirm delete"}
                     </button>
                     <button
                       type="button"
-                      disabled={deleting}
+                      disabled={deletePending}
                       className={btnPill}
                       onClick={() => setConfirmDelete(false)}
                     >

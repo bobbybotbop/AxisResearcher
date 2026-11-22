@@ -15,7 +15,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import CreateWorkflow from "./components/CreateWorkflow";
 import ToastContainer from "./components/ToastContainer";
 import StartupToasts, { startTaskToast } from "./components/StartupToasts";
-import { startTask } from "./utils/statusStore";
+import { startTaskWithId, useTaskRunning } from "./utils/statusStore";
 import GeneratedListingCard from "./components/GeneratedListingCard";
 import CompactListingRow from "./components/CompactListingRow";
 import ListingDetailModal from "./components/ListingDetailModal";
@@ -393,9 +393,11 @@ function App() {
   const [isTesting, setIsTesting] = useState(false);
   const [testingId, setTestingId] = useState("");
   const [appTokenResult, setAppTokenResult] = useState<TokenResult | null>(null);
-  const [isTestingAppToken, setIsTestingAppToken] = useState(false);
+  const [appTokenTaskId, setAppTokenTaskId] = useState<number | null>(null);
+  const isTestingAppToken = useTaskRunning(appTokenTaskId);
   const [userTokenResult, setUserTokenResult] = useState<TokenResult | null>(null);
-  const [isTestingUserToken, setIsTestingUserToken] = useState(false);
+  const [userTokenTaskId, setUserTokenTaskId] = useState<number | null>(null);
+  const isTestingUserToken = useTaskRunning(userTokenTaskId);
   const [allListings, setAllListings] = useState<Listing[]>([]);
   const [uploadListingsSearch, setUploadListingsSearch] = useState("");
   const [uploadListingsShowDrafts, setUploadListingsShowDrafts] =
@@ -3362,9 +3364,9 @@ function App() {
     }`;
 
   const handleTestAppToken = async (): Promise<void> => {
-    setIsTestingAppToken(true);
     setAppTokenResult(null);
-    const task = startTask("Testing application token");
+    const { id, handle: task } = startTaskWithId("Testing application token");
+    setAppTokenTaskId(id);
     try {
       const response = await fetch("/api/test-application-token", {
         method: "POST",
@@ -3382,15 +3384,13 @@ function App() {
       const message = (err as Error).message;
       setAppTokenResult({ ok: false, message });
       task.fail(message);
-    } finally {
-      setIsTestingAppToken(false);
     }
   };
 
   const handleTestUserToken = async (): Promise<void> => {
-    setIsTestingUserToken(true);
     setUserTokenResult(null);
-    const task = startTask("Testing user token");
+    const { id, handle: task } = startTaskWithId("Testing user token");
+    setUserTokenTaskId(id);
     try {
       const response = await fetch("/api/test-user-token", { method: "POST" });
       const data = await response.json();
@@ -3406,8 +3406,6 @@ function App() {
       const message = (err as Error).message;
       setUserTokenResult({ ok: false, message });
       task.fail(message);
-    } finally {
-      setIsTestingUserToken(false);
     }
   };
 
