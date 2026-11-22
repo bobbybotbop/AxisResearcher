@@ -5,7 +5,7 @@ import ImageUploadModal from "./ImageUploadModal";
 import type { PendingImage } from "./ImageUploadModal";
 import MessageBarInput from "./MessageBarInput";
 import Lightbox from "./Lightbox";
-import ProgressIndicator from "./ProgressIndicator";
+import PipelineTracker from "./PipelineTracker";
 import ImageCanvas from "./ImageCanvas";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import type { DropResult } from "@hello-pangea/dnd";
@@ -19,25 +19,6 @@ import {
   formatListingDateTime,
   formatCategoryShort,
 } from "../utils/listingDisplay";
-
-interface ProgressState {
-  isActive: boolean;
-  totalSteps: string[];
-  currentStep: string | null;
-  completedSteps: string[];
-}
-
-interface ImageGenProgress {
-  isActive: boolean;
-  completed: number;
-  total: number;
-}
-
-interface BgRemovalProgress {
-  isActive: boolean;
-  totalSteps: string[];
-  completedSteps: string[];
-}
 
 interface AutoSaveStatus {
   title: "idle" | "saving" | "saved";
@@ -92,10 +73,12 @@ interface CreateWorkflowProps {
   editableDescription?: string;
   uploadResult?: UploadResult | null;
   isEditorOpen?: boolean;
-  fetchProgress?: ProgressState | null;
-  imageGenProgress?: ImageGenProgress | null;
-  createListingProgress?: ProgressState | null;
-  uploadProgress?: ProgressState | null;
+  /** Id of the Create workflow Pipeline in the Status Store. */
+  createPipelineId?: number | null;
+  /** Id of the upload-to-eBay Pipeline in the Status Store. */
+  uploadPipelineId?: number | null;
+  /** Retries the failed phase of the Create pipeline. */
+  onRetryCreate?: () => void;
   uploadingSkus?: Set<string>;
   isTrimmingTitle?: boolean;
   autoSaveStatus?: AutoSaveStatus;
@@ -144,7 +127,6 @@ interface CreateWorkflowProps {
   onRemoveBackgroundOriginal?: (urls: string[]) => void;
   autoBackgroundRemovalEnabled?: boolean;
   bgRemovedPhotos?: Record<string, string>;
-  bgRemovalProgress?: BgRemovalProgress | null;
   onError?: (message: string) => void;
   promptModifier?: string;
   customPrompt?: string;
@@ -178,10 +160,9 @@ function CreateWorkflow({
   editableDescription,
   uploadResult,
   isEditorOpen,
-  fetchProgress,
-  imageGenProgress,
-  createListingProgress,
-  uploadProgress,
+  createPipelineId = null,
+  uploadPipelineId = null,
+  onRetryCreate,
   uploadingSkus,
   isTrimmingTitle,
   autoSaveStatus = { title: "idle", description: "idle" },
@@ -230,7 +211,6 @@ function CreateWorkflow({
   onRemoveBackgroundOriginal,
   autoBackgroundRemovalEnabled = false,
   bgRemovedPhotos,
-  bgRemovalProgress,
   onError = () => {},
 }: CreateWorkflowProps) {
   const [descriptionEditMode, setDescriptionEditMode] = useState(false);
@@ -365,19 +345,16 @@ function CreateWorkflow({
         </form>
       </motion.div>
 
-      {loading && (
+      {loading && (photos?.length ?? 0) === 0 && (
         <div className="flex flex-col items-center justify-center gap-4 py-12">
           <div className="h-12 w-12 animate-spin rounded-full border-4 border-border-default border-t-primary" />
           <p className="text-text-muted">Fetching listing data...</p>
-          {fetchProgress?.isActive && fetchProgress.totalSteps.length > 0 && (
-            <ProgressIndicator
-              steps={fetchProgress.totalSteps}
-              currentStep={fetchProgress.currentStep}
-              completedSteps={fetchProgress.completedSteps}
-            />
-          )}
         </div>
       )}
+
+      {/* The whole Create workflow as one Pipeline: fetch → categorize →
+          bg removal → image generation → text generation → create listing. */}
+      <PipelineTracker pipelineId={createPipelineId} onRetry={onRetryCreate} />
 
       {listing && (isGeneratingText || editableTitle !== "") && (
         <div className="mt-8 rounded-xl border border-border-default bg-surface-panel px-4 pb-4 pt-5 shadow-sm sm:px-5 sm:pb-5 sm:pt-6">
@@ -560,18 +537,6 @@ function CreateWorkflow({
             </div>
           </div>
 
-          {isCreatingListing &&
-            createListingProgress?.isActive &&
-            (createListingProgress.totalSteps.length ?? 0) > 0 && (
-              <div className="mt-4">
-                <ProgressIndicator
-                  steps={createListingProgress.totalSteps}
-                  currentStep={createListingProgress.currentStep}
-                  completedSteps={createListingProgress.completedSteps}
-                />
-              </div>
-            )}
-
           {(listing || listingData) && (
             <>
               {/* Listing details disclosure */}
@@ -674,6 +639,21 @@ function CreateWorkflow({
         </div>
       )}
 
+      {/* Skeleton thumbnails while the listing's photos are being fetched. */}
+      {loading && (photos?.length ?? 0) === 0 && (
+        <div className="mt-8 rounded-2xl border border-border-default bg-surface-panel p-6">
+          <div className="mb-4 h-7 w-40 animate-pulse rounded bg-surface-hover" />
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))] sm:gap-5">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div
+                key={i}
+                className="aspect-square animate-pulse rounded-xl bg-surface-hover"
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       {(photos?.length ?? 0) > 0 && (
         <>
           <PhotoGallery
@@ -716,28 +696,6 @@ function CreateWorkflow({
               <h3 className="mb-2.5 text-lg text-text-primary">
                 Background Removed Photos
               </h3>
-              {bgRemovalProgress?.isActive && (
-                <div className="mt-2.5">
-                  <p className="text-text-muted">
-                    {bgRemovalProgress.completedSteps.length} of{" "}
-                    {bgRemovalProgress.totalSteps.length} backgrounds removed
-                  </p>
-                  {bgRemovalProgress.totalSteps.length > 0 && (
-                    <div className="relative mt-2.5 h-5 w-full overflow-hidden rounded bg-surface-hover">
-                      <div
-                        className="h-full rounded bg-green-500 transition-[width] duration-300"
-                        style={{
-                          width: `${
-                            (bgRemovalProgress.completedSteps.length /
-                              bgRemovalProgress.totalSteps.length) *
-                            100
-                          }%`,
-                        }}
-                      />
-                    </div>
-                  )}
-                </div>
-              )}
               {Object.keys(bgRemovedPhotos || {}).length > 0 && (
                 <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-4 sm:grid-cols-[repeat(auto-fill,minmax(180px,1fr))]">
                   {Object.values(bgRemovedPhotos!).map((url, idx) => (
@@ -755,35 +713,11 @@ function CreateWorkflow({
                   ))}
                 </div>
               )}
-              {!bgRemovalProgress?.isActive &&
-                Object.keys(bgRemovedPhotos || {}).length === 0 && (
-                  <p className="mt-2 text-sm text-text-muted">
-                    Waiting for photos to load...
-                  </p>
-                )}
-            </div>
-          )}
-          {isConfirming && imageGenProgress?.isActive && (
-            <div className="my-5 rounded-lg border border-border-default bg-surface-muted p-4">
-              <h3 className="mb-2.5 text-lg text-text-primary">
-                Generating Images
-              </h3>
-              <div className="mt-2.5">
-                <p className="text-text-muted">
-                  Progress: {imageGenProgress.completed} of{" "}
-                  {imageGenProgress.total} images complete
+              {Object.keys(bgRemovedPhotos || {}).length === 0 && (
+                <p className="mt-2 text-sm text-text-muted">
+                  Waiting for photos to load...
                 </p>
-                {imageGenProgress.total > 0 && (
-                  <div className="relative mt-2.5 h-5 w-full overflow-hidden rounded bg-surface-hover">
-                    <div
-                      className="h-full rounded bg-green-500 transition-[width] duration-300"
-                      style={{
-                        width: `${(imageGenProgress.completed / imageGenProgress.total) * 100}%`,
-                      }}
-                    />
-                  </div>
-                )}
-              </div>
+              )}
             </div>
           )}
           {autoBackgroundRemovalEnabled && (
@@ -1016,17 +950,9 @@ function CreateWorkflow({
               </button>
             </div>
           )}
-          {uploadingSkus?.has(listingData?.sku ?? "") &&
-            uploadProgress?.isActive &&
-            (uploadProgress.totalSteps.length ?? 0) > 0 && (
-              <div className="mt-4">
-                <ProgressIndicator
-                  steps={uploadProgress.totalSteps}
-                  currentStep={uploadProgress.currentStep}
-                  completedSteps={uploadProgress.completedSteps}
-                />
-              </div>
-            )}
+          {uploadingSkus?.has(listingData?.sku ?? "") && (
+            <PipelineTracker pipelineId={uploadPipelineId} />
+          )}
           {onAddToGeneratedImages && (
             <ImageUploadModal
               isOpen={showGenUploadModal}

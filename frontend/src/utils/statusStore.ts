@@ -52,6 +52,12 @@ export interface PipelineHandle {
   progress: (current: number, total?: number) => void;
   /** Complete the current step and advance to the next one. */
   advance: () => void;
+  /**
+   * Complete every step up to and including the named one and move the
+   * current index past it. For steps that finish out of order (e.g. work
+   * started earlier completes while the pipeline rests on an earlier step).
+   */
+  advancePast: (stepName: string) => void;
   /** Complete the current step and finish the whole pipeline. */
   succeed: (message?: string) => void;
   /** Fail the current step and the pipeline. */
@@ -211,10 +217,13 @@ export function startTask(name: string, options?: { total?: number }): TaskHandl
 }
 
 /**
- * Start a pipeline: a named, ordered sequence of tasks. The first step begins
- * running immediately. Never throws.
+ * Start a pipeline, returning its id alongside the handle. Used by renderers
+ * (e.g. PipelineTracker) that read the Pipeline from the store by id.
  */
-export function startPipeline(name: string, stepNames: string[]): PipelineHandle {
+export function startPipelineWithId(
+  name: string,
+  stepNames: string[],
+): { id: number; handle: PipelineHandle } {
   const id = nextId();
   try {
     const steps: Task[] = stepNames.map((stepName, i) => ({
@@ -242,7 +251,7 @@ export function startPipeline(name: string, stepNames: string[]): PipelineHandle
     return p ? p.currentIndex : -1;
   }
 
-  return {
+  const handle: PipelineHandle = {
     progress(current, total) {
       if (settled) return;
       try {
@@ -311,7 +320,48 @@ export function startPipeline(name: string, stepNames: string[]): PipelineHandle
         console.warn("[status-store] failed to settle pipeline:", err);
       }
     },
+    advancePast(stepName) {
+      if (settled) return;
+      try {
+        const p = state.pipelines.find((pl) => pl.id === id);
+        if (!p) return;
+        const target = p.steps.findIndex((s) => s.name === stepName);
+        if (target < 0 || target < p.currentIndex) return;
+        const next = target + 1;
+        state = {
+          ...state,
+          pipelines: state.pipelines.map((pl) =>
+            pl.id === id
+              ? {
+                  ...pl,
+                  currentIndex: next,
+                  steps: pl.steps.map((s, i) =>
+                    i <= target ? { ...s, status: "success" } : i === next ? { ...s, status: "running" } : s,
+                  ),
+                }
+              : pl,
+          ),
+        };
+        if (next >= p.steps.length) {
+          settled = true;
+          patchPipeline(id, { status: "success" });
+          setTimeout(() => dismissPipeline(id), SUCCESS_DISMISS_MS);
+        }
+        emit();
+      } catch (err) {
+        console.warn("[status-store] failed to advance pipeline:", err);
+      }
+    },
   };
+  return { id, handle };
+}
+
+/**
+ * Start a pipeline: a named, ordered sequence of tasks. The first step begins
+ * running immediately. Never throws.
+ */
+export function startPipeline(name: string, stepNames: string[]): PipelineHandle {
+  return startPipelineWithId(name, stepNames).handle;
 }
 
 function subscribe(listener: () => void): () => void {
