@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import ReactDOM from "react-dom";
 import {
   __internalPatchTask,
@@ -45,6 +45,7 @@ interface StartupToastItemProps {
 }
 
 function StartupToastItem({ task, onDismiss }: StartupToastItemProps) {
+  const [detailOpen, setDetailOpen] = useState(false);
   const status: StartupToastStatus =
     task.status === "success"
       ? "success"
@@ -81,6 +82,23 @@ function StartupToastItem({ task, onDismiss }: StartupToastItemProps) {
           <p className={`mt-0.5 text-xs ${status === "pending" ? "text-text-muted" : "opacity-80"}`}>
             {task.message}
           </p>
+        )}
+        {task.detail && status !== "pending" && (
+          <>
+            <button
+              type="button"
+              onClick={() => setDetailOpen((o) => !o)}
+              className="mt-0.5 text-xs underline opacity-80 hover:opacity-100"
+              aria-expanded={detailOpen}
+            >
+              {detailOpen ? "Hide details" : "Details"}
+            </button>
+            {detailOpen && (
+              <p className="mt-1 whitespace-pre-line text-xs opacity-80">
+                {task.detail}
+              </p>
+            )}
+          </>
         )}
         {task.progress && status === "pending" && (
           <p className="mt-0.5 text-xs text-text-muted">
