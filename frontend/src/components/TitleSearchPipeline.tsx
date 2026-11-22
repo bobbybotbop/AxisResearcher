@@ -1,9 +1,26 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import MessageBarInput from "./MessageBarInput";
+import PipelineTracker from "./PipelineTracker";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { PIPELINE_TITLE_SEARCH, MATCH_LABEL_CONFIRMED_IMAGE_MATCH, MATCH_LABEL_UNCONFIRMED_TITLE_MATCH, type ThreeDSiteStatus, type Pipeline, type MatchLabel as ForwardedMatchLabel } from "../constants/files3d";
 import { filterOperationalThreeDResults, toastSkippedSites } from "../utils/filterThreeDResults";
+import {
+  dismissPipeline,
+  startPipelineWithId,
+  type PipelineHandle,
+} from "../utils/statusStore";
+
+// Title Search waiting state: one Pipeline in the Status Store per run
+// (ADR 0002), rendered by PipelineTracker. Bespoke step UIs below are unchanged.
+const TITLE_SEARCH_STEP_FETCH = "Fetch eBay listing";
+const TITLE_SEARCH_STEP_SEARCH = "Optimize title & search";
+const TITLE_SEARCH_STEP_CONFIRM = "Confirm match";
+const TITLE_SEARCH_STEPS = [
+  TITLE_SEARCH_STEP_FETCH,
+  TITLE_SEARCH_STEP_SEARCH,
+  TITLE_SEARCH_STEP_CONFIRM,
+];
 
 interface TextSearchResult {
   title: string;
@@ -70,6 +87,10 @@ function TitleSearchPipeline({
   const [siteImages, setSiteImages] = useState<string[]>([]);
   const [matchLabel, setMatchLabel] = useState<MatchLabel | null>(null);
 
+  // Waiting state lives in the Status Store; only the pipeline id is local.
+  const [pipelineId, setPipelineId] = useState<number | null>(null);
+  const pipelineRef = useRef<PipelineHandle | null>(null);
+
   const searchQuery = () => {
     const base = optimizedTitle.trim();
     if (!base) return "";
@@ -91,6 +112,13 @@ function TitleSearchPipeline({
     setTopLink(null);
     setSiteImages([]);
     setMatchLabel(null);
+    if (pipelineId != null) dismissPipeline(pipelineId);
+    const { id: newPipelineId, handle: pipeline } = startPipelineWithId(
+      "Title Search",
+      TITLE_SEARCH_STEPS,
+    );
+    pipelineRef.current = pipeline;
+    setPipelineId(newPipelineId);
     try {
       // /api/photos streams NDJSON progress events; fetchWithProgress parses the
       // stream and returns the final `result` payload (or throws on `error`).
@@ -108,8 +136,10 @@ function TitleSearchPipeline({
       setPhotos(fetchedPhotos);
       const title = data?.listing?.title || "";
       setOriginalTitle(title);
+      pipeline.advance(); // → Optimize title & search
       if (!title) addToast?.("info", "Listing fetched but no title found");
     } catch (err) {
+      pipeline.fail((err as Error).message || "Failed to fetch listing");
       addToast?.("error", (err as Error).message || "Failed to fetch listing");
     } finally {
       setStep1Loading(false);
@@ -184,8 +214,10 @@ function TitleSearchPipeline({
       } else {
         setMatchLabel("unconfirmed");
       }
+      pipelineRef.current?.succeed();
     } catch (err) {
       setMatchLabel(null);
+      pipelineRef.current?.fail((err as Error).message || "Failed to scrape site images");
       addToast?.("error", (err as Error).message || "Failed to scrape site images");
     }
   };
@@ -220,12 +252,15 @@ function TitleSearchPipeline({
       toastSkippedSites(addToast, skippedSites);
       if (filtered.length === 0) {
         if (skippedSites.length === 0) addToast?.("info", "No 3D file results found for this title");
+        pipelineRef.current?.fail("No 3D file results found for this title");
         return;
       }
       const top = filtered[0];
       setTopLink(top);
+      pipelineRef.current?.advancePast(TITLE_SEARCH_STEP_SEARCH); // → Confirm match
       void confirmTopLink(top, photos);
     } catch (err) {
+      pipelineRef.current?.fail((err as Error).message || "Search failed");
       addToast?.("error", (err as Error).message || "Search failed");
     } finally {
       setSearching(false);
@@ -267,6 +302,9 @@ function TitleSearchPipeline({
           <p className="text-sm text-text-muted">
             Search 3D file sites by listing title instead of reverse image search.
           </p>
+
+          {/* Waiting state: one Pipeline in the Status Store (ADR 0002) */}
+          <PipelineTracker pipelineId={pipelineId} />
 
           {/* Step 1 — Fetch eBay title + photos */}
           <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">

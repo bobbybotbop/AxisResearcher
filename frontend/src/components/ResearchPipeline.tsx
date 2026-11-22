@@ -1,11 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
-import ProgressIndicator from "./ProgressIndicator";
+import PipelineTracker from "./PipelineTracker";
 import ProductCandidateRow from "./ProductCandidateRow";
 import NumberInput from "./NumberInput";
 import { btnPill } from "../styles/buttonPill";
 import { rankCandidates } from "../utils/ranking";
 import { estimateApiCallCost } from "../constants/research";
+import {
+  dismissPipeline,
+  startPipelineWithId,
+  type PipelineHandle,
+} from "../utils/statusStore";
 import type {
   CopySellerResult,
   PipelineRun,
@@ -43,8 +48,11 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
   const [weightVelocity, setWeightVelocity] = useState(1);
 
   const [isRunning, setIsRunning] = useState(false);
-  const [currentStep, setCurrentStep] = useState<string | null>(null);
-  const [completedSteps, setCompletedSteps] = useState<string[]>([]);
+  // Waiting state lives in the Status Store as a Pipeline (ADR 0002); only the
+  // pipeline id is local. The metrics sub-progress title stays local as a
+  // bespoke detail rendered below the PipelineTracker.
+  const [pipelineId, setPipelineId] = useState<number | null>(null);
+  const pipelineRef = useRef<PipelineHandle | null>(null);
   const [metricsProgress, setMetricsProgress] = useState<MetricsProgress | null>(null);
   const [candidates, setCandidates] = useState<ProductCandidate[]>([]);
   const [runSummary, setRunSummary] = useState<CopySellerResult | null>(null);
@@ -99,8 +107,6 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
       setSeller(run.seller);
       setRunSummary(null);
       setLoadedRunId(run.run_id);
-      setCompletedSteps([]);
-      setCurrentStep(null);
       addToast?.(
         "success",
         `Loaded run from ${new Date(run.timestamp).toLocaleString()} — ${loadedCandidates.length} Product Candidates`,
@@ -131,12 +137,17 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
       return;
     }
     setIsRunning(true);
-    setCurrentStep(null);
-    setCompletedSteps([]);
     setMetricsProgress(null);
     setCandidates([]);
     setRunSummary(null);
     setLoadedRunId(null);
+    if (pipelineId != null) dismissPipeline(pipelineId);
+    const { id: newPipelineId, handle: pipeline } = startPipelineWithId(
+      "Copy Seller",
+      PIPELINE_STEPS,
+    );
+    pipelineRef.current = pipeline;
+    setPipelineId(newPipelineId);
 
     try {
       const data = (await fetchWithProgress(
@@ -160,27 +171,31 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
           const step = typeof event.step === "string" ? event.step : "";
           const status = event.status;
           // The backend streams "Computing metrics (i/N)" as one step per
-          // listing; ProgressIndicator shows it as a single named step.
+          // listing; the Pipeline shows it as a single named step whose
+          // determinate progress is the (i/N) count.
           const baseStep = step.startsWith(STEP_METRICS) ? STEP_METRICS : step;
 
           if (step.startsWith(STEP_METRICS)) {
             const match = step.match(/\((\d+)\/(\d+)\)/);
             if (match) {
+              const current = Number(match[1]);
+              const total = Number(match[2]);
               setMetricsProgress({
-                current: Number(match[1]),
-                total: Number(match[2]),
+                current,
+                total,
                 title: typeof event.title === "string" ? event.title : "",
               });
+              pipeline.progress(current, total);
             }
           }
 
-          if (status === "in_progress") {
-            setCurrentStep(baseStep);
-          } else if (status === "completed" && baseStep) {
-            setCompletedSteps((prev) =>
-              prev.includes(baseStep) ? prev : [...prev, baseStep],
-            );
-            setCurrentStep((prev) => (prev === baseStep ? null : prev));
+          // Metrics streams one completed event per listing — those only carry
+          // determinate progress; the step itself completes when the run's
+          // result arrives (pipeline.succeed below).
+          if (status === "completed" && baseStep && baseStep !== STEP_METRICS) {
+            // Steps may complete while the pipeline rests on an earlier step —
+            // advancePast marks everything up to it done.
+            pipeline.advancePast(baseStep);
           }
         },
       )) as CopySellerResult;
@@ -190,8 +205,7 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
         Array.isArray(data?.product_candidates) ? data.product_candidates : [],
       );
       setLoadedRunId(data?.run_id ?? null);
-      setCompletedSteps(PIPELINE_STEPS);
-      setCurrentStep(null);
+      pipeline.succeed();
       addToast?.(
         "success",
         `Copy Seller run complete: ${data?.product_candidates?.length ?? 0} Product Candidates`,
@@ -199,6 +213,7 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
       // The run was persisted on the backend; refresh the past-runs list.
       void fetchPastRuns();
     } catch (err) {
+      pipeline.fail((err as Error).message || "Copy Seller run failed");
       addToast?.("error", (err as Error).message || "Copy Seller run failed");
     } finally {
       setIsRunning(false);
@@ -393,22 +408,17 @@ export default function ResearchPipeline({ addToast }: ResearchPipelineProps) {
         </div>
       )}
 
-      {/* Live progress */}
-      {(isRunning || completedSteps.length > 0) && (
-        <div>
-          <ProgressIndicator
-            steps={PIPELINE_STEPS}
-            currentStep={currentStep}
-            completedSteps={completedSteps}
-          />
-          {metricsProgress && isRunning && (
-            <p className="-mt-3 text-sm text-text-muted">
-              Metrics {metricsProgress.current} of {metricsProgress.total}
-              {metricsProgress.title ? ` — ${metricsProgress.title}` : ""}
-            </p>
-          )}
-        </div>
-      )}
+      {/* Waiting state: the run's Pipeline from the Status Store (ADR 0002);
+          the metrics sub-progress title stays as a bespoke detail below it. */}
+      <div>
+        <PipelineTracker pipelineId={pipelineId} />
+        {metricsProgress && isRunning && (
+          <p className="-mt-3 text-sm text-text-muted">
+            Metrics {metricsProgress.current} of {metricsProgress.total}
+            {metricsProgress.title ? ` — ${metricsProgress.title}` : ""}
+          </p>
+        )}
+      </div>
 
       {/* Results */}
       {candidates.length > 0 && (

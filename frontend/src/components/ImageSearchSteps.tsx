@@ -1,9 +1,21 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import MessageBarInput from "./MessageBarInput";
+import PipelineTracker from "./PipelineTracker";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { PIPELINE_IMAGE_SEARCH, MATCH_LABEL_CONFIRMED_IMAGE_MATCH, type ThreeDSiteStatus, type Pipeline, type MatchLabel } from "../constants/files3d";
 import { filterOperationalThreeDResults, toastSkippedSites } from "../utils/filterThreeDResults";
+import {
+  dismissPipeline,
+  startPipelineWithId,
+  type PipelineHandle,
+} from "../utils/statusStore";
+
+// Image Search waiting state: one Pipeline in the Status Store per run
+// (ADR 0002), rendered by PipelineTracker. Bespoke step UIs below are unchanged.
+const IMAGE_SEARCH_STEP_FETCH = "Fetch eBay photos";
+const IMAGE_SEARCH_STEP_SEARCH = "Reverse image search";
+const IMAGE_SEARCH_STEPS = [IMAGE_SEARCH_STEP_FETCH, IMAGE_SEARCH_STEP_SEARCH];
 
 interface SearchResult {
   site_type?: string;
@@ -53,6 +65,10 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
   const [step2Results, setStep2Results] = useState<SearchResult[]>([]);
   const [step2Loading, setStep2Loading] = useState(false);
 
+  // Waiting state lives in the Status Store; only the pipeline id is local.
+  const [pipelineId, setPipelineId] = useState<number | null>(null);
+  const pipelineRef = useRef<PipelineHandle | null>(null);
+
   const handleStep1Submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = step1Link.trim();
@@ -64,6 +80,13 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
     setStep1Photos([]);
     setStep1Title("");
     setStep1Selected(null);
+    if (pipelineId != null) dismissPipeline(pipelineId);
+    const { id: newPipelineId, handle: pipeline } = startPipelineWithId(
+      "Image Search",
+      IMAGE_SEARCH_STEPS,
+    );
+    pipelineRef.current = pipeline;
+    setPipelineId(newPipelineId);
     try {
       // /api/photos streams NDJSON progress events; fetchWithProgress parses the
       // stream and returns the final `result` payload (or throws on `error`).
@@ -82,7 +105,9 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
       setStep1Title(data?.listing?.title || "");
       setFetchedListingUrl(trimmed);
       if (photos.length > 0) setStep1Selected(photos[0]);
+      pipeline.advance(); // → Reverse image search
     } catch (err) {
+      pipeline.fail((err as Error).message || "Failed to fetch listing photos");
       addToast?.("error", (err as Error).message || "Failed to fetch listing photos");
     } finally {
       setStep1Loading(false);
@@ -107,8 +132,14 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
       const { filtered, skippedSites } = filterOperationalThreeDResults(data.results, siteStatus);
       setStep2Results(filtered);
       toastSkippedSites(addToast, skippedSites);
-      if (filtered.length === 0 && skippedSites.length === 0) addToast?.("info", "No 3D file results found for this image");
+      if (filtered.length === 0 && skippedSites.length === 0) {
+        addToast?.("info", "No 3D file results found for this image");
+        pipelineRef.current?.fail("No 3D file results found for this image");
+      } else {
+        pipelineRef.current?.succeed();
+      }
     } catch (err) {
+      pipelineRef.current?.fail((err as Error).message || "Search failed");
       addToast?.("error", (err as Error).message || "Search failed");
     } finally {
       setStep2Loading(false);
@@ -117,6 +148,9 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
 
   return (
     <div className="flex flex-col gap-4">
+      {/* Waiting state: one Pipeline in the Status Store (ADR 0002) */}
+      <PipelineTracker pipelineId={pipelineId} />
+
       {/* Step 1 — Fetch eBay Photos */}
       <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
         <p className="text-sm font-semibold text-text-primary">Step 1 — Fetch eBay Photos</p>
