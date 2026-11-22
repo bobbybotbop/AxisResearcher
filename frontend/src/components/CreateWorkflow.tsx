@@ -79,6 +79,8 @@ interface CreateWorkflowProps {
   uploadPipelineId?: number | null;
   /** Retries the failed phase of the Create pipeline. */
   onRetryCreate?: () => void;
+  /** Retries a failed upload-to-eBay pipeline run. */
+  onRetryUpload?: () => void;
   uploadingSkus?: Set<string>;
   isTrimmingTitle?: boolean;
   autoSaveStatus?: AutoSaveStatus;
@@ -163,6 +165,7 @@ function CreateWorkflow({
   createPipelineId = null,
   uploadPipelineId = null,
   onRetryCreate,
+  onRetryUpload,
   uploadingSkus,
   isTrimmingTitle,
   autoSaveStatus = { title: "idle", description: "idle" },
@@ -950,8 +953,8 @@ function CreateWorkflow({
               </button>
             </div>
           )}
-          {uploadingSkus?.has(listingData?.sku ?? "") && (
-            <PipelineTracker pipelineId={uploadPipelineId} />
+          {(uploadingSkus?.has(listingData?.sku ?? "") || uploadPipelineId != null) && (
+            <PipelineTracker pipelineId={uploadPipelineId} onRetry={onRetryUpload} />
           )}
           {onAddToGeneratedImages && (
             <ImageUploadModal

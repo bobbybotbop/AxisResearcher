@@ -69,9 +69,9 @@ function ImageSearchSteps({ siteStatus = null, enabledSites, sitePriority, onUse
   const [pipelineId, setPipelineId] = useState<number | null>(null);
   const pipelineRef = useRef<PipelineHandle | null>(null);
 
-  const handleStep1Submit = async (e: React.FormEvent) => {
+  const handleStep1Submit = async (e: React.FormEvent, linkOverride?: string) => {
     e.preventDefault();
-    const trimmed = step1Link.trim();
+    const trimmed = (linkOverride ?? step1Link).trim();
     if (!trimmed) {
       toast.error("Please enter an eBay listing ID or URL");
       return;
@@ -146,10 +146,32 @@ function ImageSearchSteps({ siteStatus = null, enabledSites, sitePriority, onUse
     }
   };
 
+  /**
+   * Retry the failed pipeline. The store settles a failed pipeline permanently,
+   * so a retry dismisses it and re-runs against a fresh pipeline: re-run the
+   * reverse image search when photos were already fetched, otherwise re-run
+   * the photo fetch from step 1.
+   */
+  const handleRetry = () => {
+    if (step1Photos.length > 0 && step2ImageUrl.trim()) {
+      if (pipelineId != null) dismissPipeline(pipelineId);
+      const { id: newPipelineId, handle: pipeline } = startPipelineWithId(
+        "Image Search",
+        [IMAGE_SEARCH_STEP_SEARCH],
+      );
+      pipelineRef.current = pipeline;
+      setPipelineId(newPipelineId);
+      void handleStep2Search();
+    } else if (fetchedListingUrl) {
+      // handleStep1Submit dismisses the failed pipeline and starts a fresh one
+      void handleStep1Submit({ preventDefault: () => {} } as React.FormEvent, fetchedListingUrl);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-4">
       {/* Waiting state: one Pipeline in the Status Store (ADR 0002) */}
-      <PipelineTracker pipelineId={pipelineId} />
+      <PipelineTracker pipelineId={pipelineId} onRetry={handleRetry} />
 
       {/* Step 1 — Fetch eBay Photos */}
       <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">

@@ -266,6 +266,27 @@ function TitleSearchPipeline({
     }
   };
 
+  /**
+   * Retry the failed pipeline. The store settles a failed pipeline permanently,
+   * so a retry dismisses it and re-runs against a fresh pipeline: re-run the
+   * search when the fetch step already produced a title (search/confirm
+   * failed), otherwise re-run the fetch from step 1.
+   */
+  const handleRetry = () => {
+    if (originalTitle.trim()) {
+      if (pipelineId != null) dismissPipeline(pipelineId);
+      const { id: newPipelineId, handle: pipeline } = startPipelineWithId(
+        "Title Search",
+        [TITLE_SEARCH_STEP_SEARCH, TITLE_SEARCH_STEP_CONFIRM],
+      );
+      pipelineRef.current = pipeline;
+      setPipelineId(newPipelineId);
+      void handleSearch();
+    } else if (step1Link.trim()) {
+      void handleStep1Submit({ preventDefault: () => {} } as React.FormEvent);
+    }
+  };
+
   const handleUseLink = () => {
     if (!topLink) return;
     onUseLink?.(topLink.link, {
@@ -303,7 +324,7 @@ function TitleSearchPipeline({
           </p>
 
           {/* Waiting state: one Pipeline in the Status Store (ADR 0002) */}
-          <PipelineTracker pipelineId={pipelineId} />
+          <PipelineTracker pipelineId={pipelineId} onRetry={handleRetry} />
 
           {/* Step 1 — Fetch eBay title + photos */}
           <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">

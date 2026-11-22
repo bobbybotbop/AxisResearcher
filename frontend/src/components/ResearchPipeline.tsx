@@ -404,7 +404,7 @@ export default function ResearchPipeline() {
       {/* Waiting state: the run's Pipeline from the Status Store (ADR 0002);
           the metrics sub-progress title stays as a bespoke detail below it. */}
       <div>
-        <PipelineTracker pipelineId={pipelineId} />
+        <PipelineTracker pipelineId={pipelineId} onRetry={() => void handleRun()} />
         {metricsProgress && isRunning && (
           <p className="-mt-3 text-sm text-text-muted">
             Metrics {metricsProgress.current} of {metricsProgress.total}
