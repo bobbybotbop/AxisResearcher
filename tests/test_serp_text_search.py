@@ -36,20 +36,30 @@ SERPAPI_TEXT_RESPONSE = {
             "link": "https://www.reddit.com/r/3Dprinting/comments/abc/benchy",
             "snippet": "Discussion about benchy.",
         },
+        {
+            "title": "Dillon tag on Printables",
+            "link": "https://www.printables.com/tag/dillon",
+            "snippet": "Models tagged dillon.",
+        },
+        {
+            "title": "Benchy model on Printables",
+            "link": "https://www.printables.com/model/68734",
+            "snippet": "A specific benchy model.",
+        },
     ]
 }
 
 
-def test_search_by_text_uses_google_light_engine_with_query():
+def test_search_by_text_uses_google_engine_with_query():
     with patch.dict(os.environ, {"serp_api_token": "test-key"}):
         with patch.object(serp_module, "GoogleSearch") as mock_gs:
             mock_gs.return_value = _mock_google_search({"organic_results": []})
             search_by_text("benchy 3d file")
             params = mock_gs.call_args[0][0]
-            assert params["engine"] == "google_light"
+            assert params["engine"] == "google"
             assert params["q"].startswith("benchy 3d file")
             assert params["api_key"] == "test-key"
-            assert "num" not in params
+            assert params["num"] == 35
 
 
 def test_search_by_text_appends_site_exclusions_for_every_blacklisted_domain():
@@ -62,9 +72,12 @@ def test_search_by_text_appends_site_exclusions_for_every_blacklisted_domain():
                 assert f"-site:{domain}" in q
 
 
-def test_search_by_text_does_not_accept_max_results():
-    import inspect
-    assert "max_results" not in inspect.signature(search_by_text).parameters
+def test_search_by_text_sends_num_from_max_results():
+    with patch.dict(os.environ, {"serp_api_token": "test-key"}):
+        with patch.object(serp_module, "GoogleSearch") as mock_gs:
+            mock_gs.return_value = _mock_google_search({"organic_results": []})
+            search_by_text("benchy 3d file", max_results=10)
+            assert mock_gs.call_args[0][0]["num"] == 10
 
 
 def test_search_by_text_raises_when_api_key_missing():
@@ -83,7 +96,7 @@ def test_search_by_text_extracts_and_classifies_organic_results():
             mock_gs.return_value = _mock_google_search(SERPAPI_TEXT_RESPONSE)
             results = search_by_text("benchy 3d file")
 
-    assert len(results) == 4
+    assert len(results) == 6
     first = results[0]
     assert first["title"] == "Benchy - 3D model"
     assert first["link"] == "https://www.thingiverse.com/thing:763622"
@@ -92,6 +105,24 @@ def test_search_by_text_extracts_and_classifies_organic_results():
     assert results[1]["site_type"] == "blacklisted"
     assert results[2]["site_type"] == "neutral"
     assert results[3]["site_type"] == "blacklisted"  # reddit.com
+    assert results[4]["site_type"] == "blacklisted"  # printables tag page, not a product
+    assert results[5]["site_type"] == SITE_TYPE_WHITELISTED  # printables /model/ page
+
+
+def test_classify_site_product_route_validation():
+    from backend.serp import _classify_site
+    # Valid product pages stay whitelisted
+    assert _classify_site("https://www.thingiverse.com/thing:763622") == SITE_TYPE_WHITELISTED
+    assert _classify_site("https://www.printables.com/model/68734") == SITE_TYPE_WHITELISTED
+    assert _classify_site("https://thangs.com/designer/foo/3d-model/Foo-1412046") == SITE_TYPE_WHITELISTED
+    assert _classify_site("https://makerworld.com/en/models/2462393") == SITE_TYPE_WHITELISTED
+    assert _classify_site("https://cults3d.com/en/3d-model/tool/benchy") == SITE_TYPE_WHITELISTED
+    # Yeggi has no downloader — always accepted
+    assert _classify_site("https://www.yeggi.com/q/benchy/") == SITE_TYPE_WHITELISTED
+    # Whitelisted domains on non-product routes become blacklisted
+    assert _classify_site("https://www.printables.com/tag/dillon") == "blacklisted"
+    assert _classify_site("https://www.thingiverse.com/tag:benchy") == "blacklisted"
+    assert _classify_site("https://makerworld.com/en/search?q=benchy") == "blacklisted"
 
 
 PRIORITY_LINKS = [

@@ -9,6 +9,22 @@ from backend.constants.serp import (
     SITE_TYPE_BLACKLISTED,
     SITE_TYPE_NEUTRAL,
 )
+from backend.downloaders.thingiverse import extract_thing_id
+from backend.downloaders.printables import extract_model_id as printables_model_id
+from backend.downloaders.thangs import extract_model_id as thangs_model_id
+from backend.downloaders.makerworld import extract_model_info as mw_model_info
+from backend.downloaders.cults3d import extract_slug as cults3d_slug
+
+# Per-site validators for whether a whitelisted link points to a specific
+# product page (parseable by the site's downloader) rather than a tag/search/
+# listing page. Yeggi is an aggregator with no downloader — always accepted.
+_PRODUCT_ROUTE_VALIDATORS = {
+    "thingiverse.com": extract_thing_id,
+    "printables.com": printables_model_id,
+    "thangs.com": thangs_model_id,
+    "makerworld.com": mw_model_info,
+    "cults3d.com": cults3d_slug,
+}
 
 
 def _extract_host(url: str) -> str:
@@ -18,27 +34,43 @@ def _extract_host(url: str) -> str:
         return ""
 
 
+def _matches_site(host: str, site: str) -> bool:
+    return host == site or host.endswith("." + site)
+
+
 def _classify_site(link: str) -> str:
     try:
         host = _extract_host(link)
-        if any(host == s or host.endswith("." + s) for s in WHITELISTED_SITES):
-            return SITE_TYPE_WHITELISTED
-        if any(host == s or host.endswith("." + s) for s in BLACKLISTED_SITES):
+        for site in WHITELISTED_SITES:
+            if _matches_site(host, site):
+                validator = _PRODUCT_ROUTE_VALIDATORS.get(site)
+                if validator is None:
+                    return SITE_TYPE_WHITELISTED
+                try:
+                    validator(link)
+                    return SITE_TYPE_WHITELISTED
+                except ValueError:
+                    # Whitelisted domain but not a specific product page
+                    # (tag/search/listing) — treat as blacklisted so it is
+                    # excluded from results.
+                    return SITE_TYPE_BLACKLISTED
+        if any(_matches_site(host, s) for s in BLACKLISTED_SITES):
             return SITE_TYPE_BLACKLISTED
     except Exception:
         pass
     return SITE_TYPE_NEUTRAL
 
 
-def search_by_text(query: str) -> list[dict]:
+def search_by_text(query: str, max_results: int = 35) -> list[dict]:
     api_key = os.getenv("serp_api_token")
     if not api_key:
         raise ValueError("serp_api_token is not set in .env")
 
     exclusions = " ".join(f"-site:{domain}" for domain in BLACKLISTED_SITES)
     search = GoogleSearch({
-        "engine": "google_light",
+        "engine": "google",
         "q": f"{query} {exclusions}",
+        "num": max_results,
         "api_key": api_key,
     })
     raw = search.get_dict()
@@ -56,6 +88,8 @@ def search_by_text(query: str) -> list[dict]:
             "snippet": item.get("snippet", ""),
             "site_type": _classify_site(link),
         })
+        if len(results) >= max_results:
+            break
 
     print(f"[serp-text-search] query={query!r} — all {len(results)} results (pre-filter):")
     print(json.dumps(results, indent=2))

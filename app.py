@@ -3314,8 +3314,10 @@ def optimize_title():
 @app.route('/api/serp-text-search', methods=['POST'])
 def serp_text_search():
     """
-    Google text search via SerpAPI, classified against whitelisted/blacklisted
-    3D-print file hosting sites, filtered by enabled sites, ordered by site priority.
+    Google text search via SerpAPI (full google engine), classified against
+    whitelisted/blacklisted 3D-print file hosting sites, filtered by enabled
+    sites, ordered by site priority. Whitelisted links that don't point to a
+    specific product page (e.g. tag/search pages) are classified blacklisted.
 
     Expects JSON: {
         "query": "benchy 3d file",
