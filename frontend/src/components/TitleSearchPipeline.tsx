@@ -134,7 +134,11 @@ function TitleSearchPipeline({
       const title = data?.listing?.title || "";
       setOriginalTitle(title);
       pipeline.advance(); // → Optimize title & search
-      if (!title) toast.info("Listing fetched but no title found");
+      if (!title) {
+        toast.info("Listing fetched but no title found");
+      } else {
+        void optimizeTitle(title);
+      }
     } catch (err) {
       pipeline.fail((err as Error).message || "Failed to fetch listing");
       toast.error((err as Error).message || "Failed to fetch listing");
@@ -157,15 +161,16 @@ function TitleSearchPipeline({
     }
   };
 
-  const handleOptimize = async () => {
-    if (!originalTitle.trim()) return;
+  const optimizeTitle = async (title: string) => {
+    if (!title.trim()) return;
     setOptimizing(true);
+    setOptimizedTitle("");
     try {
       const res = await fetch("/api/optimize-title", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: originalTitle,
+          title,
           ...(promptTemplate.trim() ? { prompt: promptTemplate } : {}),
           ...(textModel ? { text_model: textModel } : {}),
         }),
@@ -222,7 +227,7 @@ function TitleSearchPipeline({
   const handleSearch = async () => {
     const query = searchQuery();
     if (!query) {
-      toast.error("Optimized title is empty — optimize or type a title first");
+      toast.error("Optimized title is empty — wait for optimization to finish");
       return;
     }
     setSearching(true);
@@ -386,29 +391,13 @@ function TitleSearchPipeline({
                   />
                 )}
               </div>
-              <div className="flex items-end gap-3">
-                <div className="flex flex-1 flex-col gap-1">
-                  <label htmlFor="title-search-optimized" className="text-xs font-semibold text-text-muted">
-                    Optimized title (editable) — " 3d file" is appended on search
-                  </label>
-                  <input
-                    id="title-search-optimized"
-                    type="text"
-                    className="rounded-lg border-2 border-border-default bg-surface-panel px-4 py-2 text-text-primary transition-colors focus:border-primary focus:outline-none disabled:bg-surface-hover"
-                    value={optimizedTitle}
-                    onChange={(e) => setOptimizedTitle(e.target.value)}
-                    placeholder="Optimize the title or type a search title..."
-                    disabled={optimizing}
-                  />
-                </div>
-                <button
-                  type="button"
-                  className={btnPillSm}
-                  onClick={handleOptimize}
-                  disabled={optimizing || !originalTitle.trim()}
-                >
-                  {optimizing ? "Optimizing..." : "Optimize"}
-                </button>
+              <div className="flex flex-col gap-1">
+                <p className="text-xs font-semibold text-text-muted">
+                  Optimized title (by Haiku) — " 3d file" is appended on search
+                </p>
+                <p className="text-sm text-text-primary">
+                  {optimizing ? "Optimizing..." : optimizedTitle || "—"}
+                </p>
               </div>
               <div className="flex items-center gap-3">
                 <button
