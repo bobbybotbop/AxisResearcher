@@ -4,10 +4,13 @@
 The multi-step wizard (in the Testing tab: `ImageSearchSteps.tsx` + `TitleSearchPipeline.tsx` + the shared `SharedDownloadRender.tsx`) that goes from an eBay listing to a downloaded 3D printable model. It contains two selectable pipelines — Image Search and Title Search — that share a common download (Step 3) and Studio Render (Step 4) stage.
 
 ## Image Search Pipeline
-The original 3D File Finder flow: Step 1 fetch eBay photos, Step 2 reverse image search via SerpAPI, then shared Steps 3–4.
+The original 3D File Finder flow: Step 1 fetch eBay photos, Step 2 reverse image search via SerpAPI with Blacklisted Sites filtered server-side, then shared Steps 3–4.
 
 ## Title Search Pipeline
-The newer 3D File Finder flow: paste an eBay link → fetch the listing title → optimize the title via Claude Haiku (strip sales terms like quantity, color, condition) → append " 3d file" → Google text search via SerpAPI → pick the best link by site priority → Image Confirmation → shared Steps 3–4.
+The newer 3D File Finder flow: paste an eBay link → fetch the listing title → optimize the title via Claude Haiku (strip sales terms like quantity, color, condition) → append " 3d file" → Google text search via SerpAPI's Google Light engine, excluding Blacklisted Sites in the query itself → pick the best link by site priority → Image Confirmation → shared Steps 3–4.
+
+## Blacklisted Site
+A domain that search results must never come from: marketplaces (eBay, Amazon, Walmart, Etsy, AliExpress, Temu, Mercari, Poshmark) and Reddit. Blacklisted Sites are excluded from Title Search Pipeline queries and filtered out of both pipelines' results server-side. Counterpart to the whitelisted 3D file sites ranked by Site Priority.
 
 ## Image Confirmation
 A non-blocking step in the Title Search Pipeline after a candidate link is chosen. All eBay listing photos and all main model images from the candidate 3D file site page are downloaded and compared using perceptual hash (pHash) on the backend. The result labels the saved 3D file as either "Confirmed image match" or "Unconfirmed title match" — it does not block the download.
