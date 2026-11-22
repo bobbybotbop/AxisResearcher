@@ -1,4 +1,4 @@
-import type { Listing, ProgressState, ImageGenProgress } from "./listing";
+import type { Listing } from "./listing";
 
 export interface TestWorkflowState {
   listingId: string;
@@ -30,13 +30,8 @@ export interface TestWorkflowState {
   textGenComplete: boolean;
   lightboxOpen: boolean;
   lightboxIndex: number;
-  fetchProgress: ProgressState;
-  imageGenProgress: ImageGenProgress;
-  createListingProgress: ProgressState;
-  uploadProgress: ProgressState;
   uploadingSkus: Set<string>;
   bgRemovedPhotos: Record<string, string>;
-  bgRemovalProgress: ProgressState;
   customPrompt: string;
   selectedImagesForRegen: number[];
   isTrimming: boolean;

@@ -28,18 +28,3 @@ export interface ModelOption {
   outputCostPer1M?: number;
   costPerImage?: number;
 }
-
-export interface ProgressState {
-  isActive: boolean;
-  currentStep: string | null;
-  completedSteps: string[];
-  totalSteps: string[];
-}
-
-export interface ImageGenProgress {
-  isActive: boolean;
-  taskId: string | null;
-  total: number;
-  completed: number;
-  currentGenerating: string[];
-}
