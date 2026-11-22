@@ -11,6 +11,8 @@
  * so snapshots stay referentially stable between emissions.
  */
 
+import { useSyncExternalStore } from "react";
+
 export type TaskStatus = "pending" | "running" | "success" | "error";
 
 export interface TaskProgress {
@@ -327,3 +329,16 @@ function getSnapshot(): StoreState {
 
 /** React binding: subscribe a component to the full store snapshot. */
 export const statusStore = { subscribe, getSnapshot };
+
+/**
+ * React binding: derive a feature's waiting state from a task id held in a
+ * ref/state. Returns true while that task is still pending/running in the
+ * store, false once it settles (or if the id is null). Lets features drop
+ * their local `is*` waiting booleans and read waiting state from the store.
+ */
+export function useTaskRunning(id: number | null): boolean {
+  const { tasks } = useSyncExternalStore(subscribe, getSnapshot);
+  if (id === null) return false;
+  const task = tasks.find((t) => t.id === id);
+  return task !== undefined && (task.status === "pending" || task.status === "running");
+}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { btnPillSm } from "../styles/buttonPill";
+import { startTaskWithId, useTaskRunning } from "../utils/statusStore";
 import type { ModelOption } from "../types/listing";
 
 const DEFAULT_TEXT_PROMPT = "Reply with exactly: OK";
@@ -48,7 +49,8 @@ export default function TestAiModelSection({
   const [model, setModel] = useState(textModel);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [testTaskId, setTestTaskId] = useState<number | null>(null);
+  const isLoading = useTaskRunning(testTaskId);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -78,7 +80,8 @@ export default function TestAiModelSection({
     const userMessage: ChatMessage = { role: "user", content: prompt };
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
-    setIsLoading(true);
+    const { id, handle: task } = startTaskWithId(`Testing ${kind} model`);
+    setTestTaskId(id);
 
     try {
       const res = await fetch("/api/test-ai-model", {
@@ -93,17 +96,20 @@ export default function TestAiModelSection({
         image_url?: string;
       };
       if (!res.ok || data.error) {
+        const message = data.error || "Model test failed";
+        task.fail(message);
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            content: data.error || "Model test failed",
+            content: message,
             serverLog: data.server_log || null,
             ok: false,
           },
         ]);
         return;
       }
+      task.succeed("Model responded");
       setMessages((prev) => [
         ...prev,
         {
@@ -114,17 +120,17 @@ export default function TestAiModelSection({
         },
       ]);
     } catch (err) {
+      const message = (err as Error).message || "Model test failed";
+      task.fail(message);
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: (err as Error).message || "Model test failed",
+          content: message,
           serverLog: null,
           ok: false,
         },
       ]);
-    } finally {
-      setIsLoading(false);
     }
   };
 
