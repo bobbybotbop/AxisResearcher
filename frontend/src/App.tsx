@@ -2,6 +2,7 @@
 import {
   FilePlus,
   History,
+  Box,
   Database,
   Route,
   FlaskConical,
@@ -22,6 +23,7 @@ import ApiKeyManagementSection from "./components/ApiKeyManagementSection";
 import TestAiModelSection from "./components/TestAiModelSection";
 import LogsTab from "./components/LogsTab";
 import DataBrowser from "./components/DataBrowser";
+import Saved3DFiles from "./components/Saved3DFiles";
 import ImageSearchSteps from "./components/ImageSearchSteps";
 import SharedDownloadRender from "./components/SharedDownloadRender";
 import TitleSearchPipeline from "./components/TitleSearchPipeline";
@@ -169,6 +171,7 @@ function App() {
     const p = normalizePathname(location.pathname);
     if (p === "/" || p === TAB_PATHS.create) return "create";
     if (p === TAB_PATHS.upload) return "upload";
+    if (p === TAB_PATHS["saved-3d-files"]) return "saved-3d-files";
     if (p === TAB_PATHS["data-browser"]) return "data-browser";
     if (p === TAB_PATHS.logs) return "logs";
     if (p === TAB_PATHS["test-workflow"]) return "test-workflow";
@@ -3945,6 +3948,15 @@ function App() {
             </button>
             <button
               type="button"
+              className={navItemClass("saved-3d-files", sidebarCollapsed)}
+              onClick={() => handleTabChange("saved-3d-files")}
+              title={sidebarCollapsed ? "Saved 3D Files" : undefined}
+            >
+              <Box size={20} strokeWidth={1.75} className="shrink-0" />
+              {!sidebarCollapsed && <span>Saved 3D Files</span>}
+            </button>
+            <button
+              type="button"
               className={navItemClass("data-browser", sidebarCollapsed)}
               onClick={() => handleTabChange("data-browser")}
               title={sidebarCollapsed ? "Data Browser" : undefined}
@@ -4013,7 +4025,7 @@ function App() {
       <main className="min-h-screen flex-1 overflow-auto bg-surface-app">
         <div
           className={`mx-auto flex w-full h-full flex-col px-6 md:px-8 ${
-            activeTab === "upload" ? "max-w-7xl" : "max-w-[1200px]"
+            activeTab === "upload" || activeTab === "saved-3d-files" ? "max-w-7xl" : "max-w-[1200px]"
           } ${
             (activeTab === "create" && listingLinkSubmitted) ||
             (activeTab === "test-workflow" && testListingLinkSubmitted)
@@ -4194,6 +4206,8 @@ function App() {
               onError={(msg) => addToast("error", msg)}
             />
           )}
+          {activeTab === "saved-3d-files" && <Saved3DFiles />}
+
           {activeTab === "data-browser" && <DataBrowser />}
 
           {activeTab === "logs" && (
