@@ -103,6 +103,7 @@ from backend.render.validate import validate_fov, validate_resolution, validate_
 import re
 import shutil
 import tempfile
+import mimetypes
 import requests
 from dotenv import load_dotenv
 
@@ -3685,6 +3686,19 @@ def _source_site_from_link(link):
     return ""
 
 
+def _list_saved_3d_file_images(images_dir):
+    """Sorted image filenames inside a Saved 3D File's images_dir, or []."""
+    if not images_dir or not os.path.isdir(images_dir):
+        return []
+    try:
+        return sorted(
+            name for name in os.listdir(images_dir)
+            if os.path.isfile(os.path.join(images_dir, name))
+        )
+    except OSError:
+        return []
+
+
 def _autosave_saved_3d_file(data, link, out_filename, out_bytes):
     """Persist a Saved 3D File (GLOSSARY) after a successful download, when the
     pipeline sent the metadata. Best-effort: any failure is logged, never raised,
@@ -3873,7 +3887,10 @@ def list_saved_3d_files():
     except (TypeError, ValueError):
         return jsonify({"error": "page and page_size must be integers"}), 400
     _db.ensure_db()
-    return jsonify(_db.list_saved_3d_files(page=page, page_size=page_size)), 200
+    result = _db.list_saved_3d_files(page=page, page_size=page_size)
+    for item in result["items"]:
+        item["images"] = _list_saved_3d_file_images(item.get("images_dir"))
+    return jsonify(result), 200
 
 
 @app.route('/api/saved-3d-files/<int:entry_id>', methods=['GET'])
@@ -3883,6 +3900,7 @@ def get_saved_3d_file(entry_id):
     row = _db.get_saved_3d_file(entry_id)
     if row is None:
         return jsonify({"error": "Saved 3D file not found"}), 404
+    row["images"] = _list_saved_3d_file_images(row.get("images_dir"))
     return jsonify(row), 200
 
 
@@ -3906,6 +3924,51 @@ def delete_saved_3d_file(entry_id):
             print(f"[API] saved-3d-files delete: could not remove {path}: {e}")
     _db.delete_saved_3d_file(entry_id)
     return jsonify({"success": True}), 200
+
+
+@app.route('/api/saved-3d-files/<int:entry_id>/images/<path:filename>', methods=['GET'])
+def serve_saved_3d_file_image(entry_id, filename):
+    """Serve one locally stored site image of a Saved 3D File.
+
+    The filename must be a plain basename (no path separators) that exists in
+    the record's images_dir — this rejects path traversal by construction.
+    """
+    _db.ensure_db()
+    row = _db.get_saved_3d_file(entry_id)
+    if row is None:
+        return jsonify({"error": "Saved 3D file not found"}), 404
+    if not filename or os.path.basename(filename) != filename:
+        return jsonify({"error": "Invalid filename"}), 400
+    images_dir = row.get("images_dir") or ""
+    if not images_dir:
+        return jsonify({"error": "Image not found"}), 404
+    filepath = os.path.join(images_dir, filename)
+    if not os.path.isfile(filepath):
+        return jsonify({"error": "Image not found"}), 404
+    mimetype = mimetypes.guess_type(filepath)[0] or "application/octet-stream"
+    with open(filepath, 'rb') as f:
+        return Response(f.read(), mimetype=mimetype)
+
+
+@app.route('/api/saved-3d-files/<int:entry_id>/download', methods=['GET'])
+def download_saved_3d_file(entry_id):
+    """Re-download the stored 3D file of a Saved 3D File as an attachment."""
+    _db.ensure_db()
+    row = _db.get_saved_3d_file(entry_id)
+    if row is None:
+        return jsonify({"error": "Saved 3D file not found"}), 404
+    file_path = row.get("file_path") or ""
+    if not file_path or not os.path.isfile(file_path):
+        return jsonify({"error": "3D file not found on disk"}), 404
+    filename = os.path.basename(file_path)
+    with open(file_path, 'rb') as f:
+        data = f.read()
+    return Response(
+        data,
+        status=200,
+        mimetype="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.route('/api/remove-background', methods=['POST'])

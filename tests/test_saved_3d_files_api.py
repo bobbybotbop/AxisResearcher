@@ -90,6 +90,29 @@ def test_get_saved_3d_file_detail_missing_returns_404(client):
     assert res.status_code == 404
 
 
+def test_list_saved_3d_files_includes_image_filenames(client, tmp_path):
+    saved_dir = tmp_path / "Saved_3D_Files"
+    images_dir = saved_dir / "1_images"
+    images_dir.mkdir(parents=True)
+    (images_dir / "b.jpg").write_bytes(b"b")
+    (images_dir / "a.jpg").write_bytes(b"a")
+    db.save_saved_3d_file(_record(
+        file_path=str(saved_dir / "1.zip"),
+        images_dir=str(images_dir),
+    ))
+    res = client.get("/api/saved-3d-files")
+    assert res.status_code == 200
+    item = res.get_json()["items"][0]
+    assert item["images"] == ["a.jpg", "b.jpg"]
+
+
+def test_get_saved_3d_file_detail_includes_image_filenames(client, tmp_path):
+    entry_id = _saved_record_with_image(tmp_path)
+    res = client.get(f"/api/saved-3d-files/{entry_id}")
+    assert res.status_code == 200
+    assert res.get_json()["images"] == ["photo.jpg"]
+
+
 # --- DELETE /api/saved-3d-files/<id> ---
 
 def test_delete_saved_3d_file_removes_record_and_files(client, tmp_path):
@@ -115,4 +138,76 @@ def test_delete_saved_3d_file_removes_record_and_files(client, tmp_path):
 
 def test_delete_saved_3d_file_missing_returns_404(client):
     res = client.delete("/api/saved-3d-files/9999")
+    assert res.status_code == 404
+
+
+# --- GET /api/saved-3d-files/<id>/images/<filename> ---
+
+def _saved_record_with_image(tmp_path):
+    """Create a record whose images_dir holds one real image file."""
+    saved_dir = tmp_path / "Saved_3D_Files"
+    images_dir = saved_dir / "1_images"
+    images_dir.mkdir(parents=True)
+    (images_dir / "photo.jpg").write_bytes(b"jpg-bytes")
+    entry_id = db.save_saved_3d_file(_record(
+        file_path=str(saved_dir / "1.zip"),
+        images_dir=str(images_dir),
+    ))
+    return entry_id
+
+
+def test_serve_saved_3d_file_image(client, tmp_path):
+    entry_id = _saved_record_with_image(tmp_path)
+    res = client.get(f"/api/saved-3d-files/{entry_id}/images/photo.jpg")
+    assert res.status_code == 200
+    assert res.data == b"jpg-bytes"
+    assert res.mimetype == "image/jpeg"
+
+
+def test_serve_saved_3d_file_image_missing_record_returns_404(client):
+    res = client.get("/api/saved-3d-files/9999/images/photo.jpg")
+    assert res.status_code == 404
+
+
+def test_serve_saved_3d_file_image_missing_file_returns_404(client, tmp_path):
+    entry_id = _saved_record_with_image(tmp_path)
+    res = client.get(f"/api/saved-3d-files/{entry_id}/images/nope.jpg")
+    assert res.status_code == 404
+
+
+def test_serve_saved_3d_file_image_rejects_path_traversal(client, tmp_path):
+    entry_id = _saved_record_with_image(tmp_path)
+    res = client.get(f"/api/saved-3d-files/{entry_id}/images/..%2F..%2Faxis.db")
+    assert res.status_code in (400, 404)
+
+
+# --- GET /api/saved-3d-files/<id>/download ---
+
+def test_download_saved_3d_file(client, tmp_path):
+    saved_dir = tmp_path / "Saved_3D_Files"
+    saved_dir.mkdir()
+    file_path = saved_dir / "1.zip"
+    file_path.write_bytes(b"zip-bytes")
+    entry_id = db.save_saved_3d_file(_record(
+        file_path=str(file_path),
+        images_dir="",
+    ))
+    res = client.get(f"/api/saved-3d-files/{entry_id}/download")
+    assert res.status_code == 200
+    assert res.data == b"zip-bytes"
+    assert "attachment" in res.headers.get("Content-Disposition", "")
+    assert "1.zip" in res.headers.get("Content-Disposition", "")
+
+
+def test_download_saved_3d_file_missing_record_returns_404(client):
+    res = client.get("/api/saved-3d-files/9999/download")
+    assert res.status_code == 404
+
+
+def test_download_saved_3d_file_missing_on_disk_returns_404(client, tmp_path):
+    entry_id = db.save_saved_3d_file(_record(
+        file_path=str(tmp_path / "Saved_3D_Files" / "gone.zip"),
+        images_dir="",
+    ))
+    res = client.get(f"/api/saved-3d-files/{entry_id}/download")
     assert res.status_code == 404
