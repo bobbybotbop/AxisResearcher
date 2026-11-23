@@ -55,6 +55,35 @@ const EMPTY_RANGES: MetricRangeFilters = {
   velocity: { ...EMPTY_RANGE },
 };
 
+/** One-line summary of a past run's configuration for the past-runs list. */
+function summarizeRunConfig(run: PipelineRunSummary): string {
+  const inputs = run.inputs ?? {};
+  const parts: string[] = [];
+  if (inputs.sort_metric) {
+    const label = METRIC_INFO[inputs.sort_metric]?.label ?? inputs.sort_metric;
+    parts.push(`sorted by ${label}`);
+  }
+  if (inputs.collect_demand === false) {
+    parts.push("Demand off");
+  }
+  if (inputs.date_posted_start || inputs.date_posted_end) {
+    parts.push(
+      `posted ${inputs.date_posted_start ?? "…"} → ${inputs.date_posted_end ?? "…"}`,
+    );
+  }
+  const ranges = inputs.ranges;
+  if (ranges) {
+    const active = (Object.keys(METRIC_INFO) as SortMetric[]).filter((key) => {
+      const range = ranges[key];
+      return range && (range.min != null || range.max != null);
+    }).length;
+    if (active > 0) {
+      parts.push(`${active} range filter${active !== 1 ? "s" : ""}`);
+    }
+  }
+  return parts.join(" · ");
+}
+
 export default function ResearchPipeline() {
   const [seller, setSeller] = useState("");
   const [topN, setTopN] = useState(25);
@@ -132,6 +161,18 @@ export default function ResearchPipeline() {
       // pipeline re-run. Legacy runs may carry a weights field; it is ignored.
       setCandidates(loadedCandidates);
       setSeller(run.seller);
+      // Restore the run's exact configuration into the form so the run is
+      // reproducible: ranges, sort metric, date-posted range, Demand toggle,
+      // and the collection knobs. Missing fields (older runs) keep defaults.
+      const inputs = run.inputs ?? {};
+      if (typeof inputs.top_n === "number") setTopN(inputs.top_n);
+      if (typeof inputs.k === "number") setK(inputs.k);
+      if (typeof inputs.min_sold === "number") setMinSold(inputs.min_sold);
+      if (typeof inputs.collect_demand === "boolean") setCollectDemand(inputs.collect_demand);
+      if (inputs.date_posted_start) setDatePostedStart(inputs.date_posted_start);
+      if (inputs.date_posted_end) setDatePostedEnd(inputs.date_posted_end);
+      if (inputs.ranges) setRanges(inputs.ranges);
+      if (inputs.sort_metric) setSortBy(inputs.sort_metric);
       setRunSummary(null);
       setLoadedRunId(run.run_id);
       toast.success(`Loaded run from ${new Date(run.timestamp).toLocaleString()} — ${loadedCandidates.length} Product Candidates`,
@@ -195,6 +236,8 @@ export default function ResearchPipeline() {
             collect_demand: collectDemand,
             date_posted_start: datePostedStart || null,
             date_posted_end: datePostedEnd || null,
+            ranges,
+            sort_metric: sortBy,
           }),
         },
         (event) => {
@@ -401,15 +444,16 @@ export default function ResearchPipeline() {
         </div>
       </div>
 
-      {/* Past runs — reload one to re-sort its cached candidates live */}
+      {/* Past runs — reload one to restore its exact configuration and
+          re-sort its cached candidates live */}
       {pastRuns.length > 0 && (
         <div className="flex flex-col gap-2 rounded-xl border border-border-default bg-surface-panel p-4">
           <h4 className="text-sm font-semibold text-text-primary">
             Past Pipeline Runs
           </h4>
           <p className="text-xs text-text-muted">
-            Reload a run to restore its cached metrics, then re-sort live — no
-            re-run.
+            Reload a run to restore its exact configuration and cached metrics,
+            then re-sort live — no re-run.
           </p>
           <ul className="flex flex-col divide-y divide-border-default">
             {pastRuns.map((run) => (
@@ -431,6 +475,9 @@ export default function ResearchPipeline() {
                   <span className="text-text-muted">
                     {run.candidate_count} candidate
                     {run.candidate_count !== 1 ? "s" : ""}
+                  </span>
+                  <span className="text-xs text-text-muted">
+                    {summarizeRunConfig(run)}
                   </span>
                   {loadedRunId === run.run_id && (
                     <span className="text-xs text-primary">(loaded)</span>

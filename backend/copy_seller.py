@@ -322,8 +322,10 @@ def _run_summaries(root):
 def list_pipeline_runs(storage_root=None):
     """List past Pipeline Runs as summaries (newest first).
 
-    Summary shape: run_id, seller, timestamp, candidate_count. Legacy runs
-    carrying a `weights` field still load; the weights are ignored.
+    Summary shape: run_id, seller, timestamp, candidate_count, inputs — the
+    run's full configuration (sort metric, metric range filters, date-posted
+    range, Demand toggle) so past configurations can be compared at a glance.
+    Legacy runs carrying a `weights` field still load; the weights are ignored.
     """
     root = storage_root or _COLLECTED_DATA_DIR
     if not os.path.isdir(root):
@@ -334,6 +336,7 @@ def list_pipeline_runs(storage_root=None):
             "seller": run.get("seller", ""),
             "timestamp": run.get("timestamp", ""),
             "candidate_count": len(run.get("product_candidates") or []),
+            "inputs": run.get("inputs") or {},
         }
         for run in _run_summaries(root)
         if "product_candidates" in run
@@ -397,7 +400,8 @@ def single_search_by_query(query, limit=50):
 
 def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1,
                     date_posted_start=None, date_posted_end=None,
-                    storage_root=None, collect_demand=True):
+                    storage_root=None, collect_demand=True,
+                    ranges=None, sort_metric=None):
     """Run the Copy Seller pipeline, yielding progress/result/error event dicts.
 
     Emits raw Product Candidates with their collected metrics; ordering happens
@@ -412,6 +416,10 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1,
     date_posted_start / date_posted_end (YYYY-MM-DD) bound the seller's own
     listings by itemCreationDate — a collection-time filter applied before the
     top-N cut and before any metric is computed.
+
+    ranges / sort_metric are the client-side filter + sort configuration at run
+    time. They don't change collection — they're recorded into the run's inputs
+    so loading the run restores the exact configuration the user saw.
     """
     tracker = ApiUsageTracker()
     estimated_cost = estimate_api_call_cost(top_n, k, collect_demand=collect_demand)
@@ -547,15 +555,18 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1,
             "copy_seller_run", "completed",
             seller=seller_username, candidates=len(candidates), api_calls=calls_made,
         )
+        run_inputs = {
+            "top_n": top_n, "k": k, "min_sold": min_sold,
+            "collect_demand": collect_demand,
+            "date_posted_start": date_posted_start,
+            "date_posted_end": date_posted_end,
+            "ranges": ranges,
+            "sort_metric": sort_metric,
+        }
         saved_run = save_pipeline_run(
             {
                 "seller": seller_username,
-                "inputs": {
-                    "top_n": top_n, "k": k, "min_sold": min_sold,
-                    "collect_demand": collect_demand,
-                    "date_posted_start": date_posted_start,
-                    "date_posted_end": date_posted_end,
-                },
+                "inputs": run_inputs,
                 "product_candidates": candidates,
             },
             storage_root=storage_root,
@@ -570,12 +581,7 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1,
                 "seller": seller_username,
                 "run_id": saved_run["run_id"],
                 "timestamp": saved_run["timestamp"],
-                "inputs": {
-                    "top_n": top_n, "k": k, "min_sold": min_sold,
-                    "collect_demand": collect_demand,
-                    "date_posted_start": date_posted_start,
-                    "date_posted_end": date_posted_end,
-                },
+                "inputs": run_inputs,
                 "api_calls_made": calls_made,
                 "api_calls_used_today": tracker.used_today,
                 "product_candidates": candidates,

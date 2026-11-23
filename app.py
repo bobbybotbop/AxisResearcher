@@ -261,9 +261,12 @@ def research_copy_seller():
     """
     Run the Copy Seller research pipeline for an eBay seller.
     Streams progress events and the final raw (unranked) Product Candidates as NDJSON.
-    Body: { seller, top_n?, k?, min_sold?, collect_demand?, date_posted_start?, date_posted_end? }
+    Body: { seller, top_n?, k?, min_sold?, collect_demand?, date_posted_start?, date_posted_end?, ranges?, sort_metric? }
     date_posted_start / date_posted_end are YYYY-MM-DD calendar dates bounding
     the seller's listings by itemCreationDate (collection-time filter).
+    ranges / sort_metric are the client-side filter + sort configuration; they
+    don't change collection — they're persisted into the run's inputs so loading
+    the run restores the exact configuration the user saw.
     """
     data = request.get_json()
 
@@ -295,10 +298,20 @@ def research_copy_seller():
                     yield error_event(f"{name} must be a YYYY-MM-DD date")
                     return
 
-        print(f"[API] /api/research/copy-seller: seller={seller} top_n={top_n} k={k} min_sold={min_sold} collect_demand={collect_demand} date_posted={date_posted_start}→{date_posted_end}")
+        ranges = data.get("ranges")
+        if ranges is not None and not isinstance(ranges, dict):
+            yield error_event("ranges must be an object")
+            return
+        sort_metric = data.get("sort_metric")
+        if sort_metric is not None and sort_metric not in ("demand", "competition", "velocity"):
+            yield error_event("sort_metric must be one of: demand, competition, velocity")
+            return
+
+        print(f"[API] /api/research/copy-seller: seller={seller} top_n={top_n} k={k} min_sold={min_sold} collect_demand={collect_demand} date_posted={date_posted_start}→{date_posted_end} sort_metric={sort_metric}")
         for event in run_copy_seller(
             seller, top_n=top_n, k=k, min_sold=min_sold, collect_demand=collect_demand,
             date_posted_start=date_posted_start, date_posted_end=date_posted_end,
+            ranges=ranges, sort_metric=sort_metric,
         ):
             event_type = event.get("type")
             if event_type == "progress":

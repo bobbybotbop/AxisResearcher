@@ -43,6 +43,24 @@ def _run(seller="someseller", candidates=None):
     }
 
 
+def _full_inputs():
+    """A run's inputs carrying the full ticket-14 config shape."""
+    return {
+        "top_n": 25,
+        "k": 20,
+        "min_sold": 1,
+        "collect_demand": False,
+        "date_posted_start": "2026-11-01",
+        "date_posted_end": "2026-11-15",
+        "sort_metric": "competition",
+        "ranges": {
+            "demand": {"min": 0.5, "max": None},
+            "competition": {"min": None, "max": 100},
+            "velocity": {"min": 1.0, "max": 5.0},
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # save_pipeline_run
 # ---------------------------------------------------------------------------
@@ -150,6 +168,36 @@ def test_load_pipeline_run_unknown_id_returns_none(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Ticket 14: persist + restore the full filter/sort/date config
+# ---------------------------------------------------------------------------
+
+def test_save_and_load_pipeline_run_round_trips_full_config(tmp_path):
+    """A saved run's inputs carry ranges, sort metric, date-posted range, and
+    the Demand toggle; loading the run returns exactly that configuration."""
+    run = _run()
+    run["inputs"] = _full_inputs()
+    saved = copy_seller.save_pipeline_run(run, storage_root=str(tmp_path))
+
+    loaded = copy_seller.load_pipeline_run(saved["run_id"], storage_root=str(tmp_path))
+    assert loaded is not None
+    assert loaded["inputs"] == _full_inputs()
+
+
+def test_list_pipeline_runs_summary_reflects_new_config_shape(tmp_path):
+    """The past-runs summary surfaces the new config (sort metric, ranges,
+    date-posted range, Demand toggle) so runs can be compared at a glance."""
+    run = _run()
+    run["inputs"] = _full_inputs()
+    saved = copy_seller.save_pipeline_run(run, storage_root=str(tmp_path))
+
+    summaries = copy_seller.list_pipeline_runs(storage_root=str(tmp_path))
+    assert len(summaries) == 1
+    top = summaries[0]
+    assert top["run_id"] == saved["run_id"]
+    assert top["inputs"] == _full_inputs()
+
+
+# ---------------------------------------------------------------------------
 # run_copy_seller persists the completed run + logs the milestone
 # ---------------------------------------------------------------------------
 
@@ -203,6 +251,7 @@ def test_run_copy_seller_saves_run_and_logs_milestone(monkeypatch, tmp_path):
     assert full["inputs"] == {
         "top_n": 5, "k": 3, "min_sold": 1, "collect_demand": True,
         "date_posted_start": None, "date_posted_end": None,
+        "ranges": None, "sort_metric": None,
     }
     assert "weights" not in full
     assert full["product_candidates"][0]["listing_url"] == "https://www.ebay.com/itm/1"
@@ -212,6 +261,35 @@ def test_run_copy_seller_saves_run_and_logs_milestone(monkeypatch, tmp_path):
     assert len(saved_events) == 1
     assert saved_events[0]["seller"] == "someseller"
     assert saved_events[0]["run_id"] == runs[0]["run_id"]
+
+
+def test_run_copy_seller_persists_ranges_and_sort_metric(monkeypatch, tmp_path):
+    """Ticket 14: run_copy_seller accepts the metric range filters and the
+    chosen sort metric, echoes them in the result event's inputs, and persists
+    them into the saved Pipeline Run."""
+    _stub_ebay_boundary(monkeypatch, tmp_path)
+    ranges = {
+        "demand": {"min": 0.5, "max": None},
+        "competition": {"min": None, "max": 100},
+        "velocity": {"min": 1.0, "max": 5.0},
+    }
+
+    events = list(copy_seller.run_copy_seller(
+        "someseller", top_n=5, k=3, min_sold=1,
+        ranges=ranges, sort_metric="competition",
+        storage_root=str(tmp_path),
+    ))
+    assert events[-1]["type"] == "result"
+
+    result_inputs = events[-1]["data"]["inputs"]
+    assert result_inputs["ranges"] == ranges
+    assert result_inputs["sort_metric"] == "competition"
+
+    runs = copy_seller.list_pipeline_runs(storage_root=str(tmp_path))
+    assert len(runs) == 1
+    full = copy_seller.load_pipeline_run(runs[0]["run_id"], storage_root=str(tmp_path))
+    assert full["inputs"]["ranges"] == ranges
+    assert full["inputs"]["sort_metric"] == "competition"
 
 
 # ---------------------------------------------------------------------------
@@ -304,3 +382,38 @@ def test_post_copy_seller_collect_demand_defaults_true(client, monkeypatch):
     )
     assert res.status_code == 200
     assert _stub_run_result.captured["collect_demand"] is True
+
+
+# ---------------------------------------------------------------------------
+# POST /api/research/copy-seller — ranges + sort_metric inputs (ticket 14)
+# ---------------------------------------------------------------------------
+
+def test_post_copy_seller_passes_ranges_and_sort_metric(client, monkeypatch):
+    monkeypatch.setattr(app_module, "run_copy_seller", _stub_run_result)
+    ranges = {
+        "demand": {"min": 0.5, "max": None},
+        "competition": {"min": None, "max": 100},
+        "velocity": {"min": 1.0, "max": 5.0},
+    }
+    res = client.post(
+        "/api/research/copy-seller",
+        json={
+            "seller": "someseller",
+            "ranges": ranges,
+            "sort_metric": "competition",
+        },
+    )
+    assert res.status_code == 200
+    assert _stub_run_result.captured["ranges"] == ranges
+    assert _stub_run_result.captured["sort_metric"] == "competition"
+
+
+def test_post_copy_seller_ranges_and_sort_metric_default_none(client, monkeypatch):
+    monkeypatch.setattr(app_module, "run_copy_seller", _stub_run_result)
+    res = client.post(
+        "/api/research/copy-seller",
+        json={"seller": "someseller"},
+    )
+    assert res.status_code == 200
+    assert _stub_run_result.captured["ranges"] is None
+    assert _stub_run_result.captured["sort_metric"] is None
