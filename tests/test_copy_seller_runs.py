@@ -200,7 +200,7 @@ def test_run_copy_seller_saves_run_and_logs_milestone(monkeypatch, tmp_path):
     assert runs[0]["seller"] == "someseller"
     assert runs[0]["candidate_count"] == 1
     full = copy_seller.load_pipeline_run(runs[0]["run_id"], storage_root=str(tmp_path))
-    assert full["inputs"] == {"top_n": 5, "k": 3, "min_sold": 1}
+    assert full["inputs"] == {"top_n": 5, "k": 3, "min_sold": 1, "collect_demand": True}
     assert "weights" not in full
     assert full["product_candidates"][0]["listing_url"] == "https://www.ebay.com/itm/1"
 
@@ -271,3 +271,33 @@ def test_get_run_endpoint_unknown_id_404(client, runs_dir):
     res = client.get("/api/research/copy-seller/runs/nope")
     assert res.status_code == 404
     assert res.get_json()["error"]
+
+
+# ---------------------------------------------------------------------------
+# POST /api/research/copy-seller — collect_demand input (ticket 10)
+# ---------------------------------------------------------------------------
+
+def _stub_run_result(seller, **kwargs):
+    """Minimal run_copy_seller stand-in: records kwargs, emits one result."""
+    _stub_run_result.captured = {"seller": seller, **kwargs}
+    yield {"type": "result", "data": {"seller": seller, "inputs": kwargs, "product_candidates": []}}
+
+
+def test_post_copy_seller_passes_collect_demand_false(client, monkeypatch):
+    monkeypatch.setattr(app_module, "run_copy_seller", _stub_run_result)
+    res = client.post(
+        "/api/research/copy-seller",
+        json={"seller": "someseller", "top_n": 5, "k": 3, "min_sold": 1, "collect_demand": False},
+    )
+    assert res.status_code == 200
+    assert _stub_run_result.captured["collect_demand"] is False
+
+
+def test_post_copy_seller_collect_demand_defaults_true(client, monkeypatch):
+    monkeypatch.setattr(app_module, "run_copy_seller", _stub_run_result)
+    res = client.post(
+        "/api/research/copy-seller",
+        json={"seller": "someseller"},
+    )
+    assert res.status_code == 200
+    assert _stub_run_result.captured["collect_demand"] is True

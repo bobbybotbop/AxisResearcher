@@ -158,9 +158,13 @@ def simplify_title_to_phrase(title, config=None):
     return _deterministic_trim(title, config)
 
 
-def estimate_api_call_cost(top_n, k):
-    """≈ N×(1+K) + seller setup (one getItem per listing + one search per phrase)."""
-    return top_n * (1 + k) + SELLER_SETUP_CALLS
+def estimate_api_call_cost(top_n, k, collect_demand=True):
+    """≈ N×(1 + K·[demand on]) + seller setup.
+
+    One search per phrase (Competition Count) always runs; the K sold-sum
+    getItem lookups per phrase only run when Demand collection is on.
+    """
+    return top_n * (1 + (k if collect_demand else 0)) + SELLER_SETUP_CALLS
 
 
 # ---------------------------------------------------------------------------
@@ -343,16 +347,20 @@ def single_search_by_query(query, limit=50):
 # Pipeline orchestration
 # ---------------------------------------------------------------------------
 
-def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, storage_root=None):
+def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, storage_root=None, collect_demand=True):
     """Run the Copy Seller pipeline, yielding progress/result/error event dicts.
 
     Emits raw Product Candidates with their collected metrics; ordering happens
     client-side by one user-picked metric. On completion the Pipeline Run
     (input + candidates) is persisted under Collected-Data/<seller>/runs/ and
     the milestone is logged.
+
+    When collect_demand is False, the K per-product sold-sum getItem lookups
+    are skipped (the one search per product still runs, so Competition Count
+    is still collected) and each candidate's demand_coefficient is None.
     """
     tracker = ApiUsageTracker()
-    estimated_cost = estimate_api_call_cost(top_n, k)
+    estimated_cost = estimate_api_call_cost(top_n, k, collect_demand=collect_demand)
 
     yield {
         "type": "progress",
@@ -373,7 +381,7 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, storage_root=No
         return
     yield {"type": "progress", "step": "Checking API budget", "status": "completed"}
 
-    log_event("copy_seller_run", "started", seller=seller_username, top_n=top_n, k=k, min_sold=min_sold)
+    log_event("copy_seller_run", "started", seller=seller_username, top_n=top_n, k=k, min_sold=min_sold, collect_demand=collect_demand)
     calls_made = 0
     try:
         yield {"type": "progress", "step": "Collecting seller listings", "status": "in_progress"}
@@ -425,15 +433,20 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, storage_root=No
             active_total = search["total_items"]
             # itemSummaries carry no sold data; fetch each top-K result's getItem
             # detail and sum estimatedSoldQuantity (the N×(1+K) cost model).
-            top_k_sold_sum = 0
-            for result in search["items"][:k]:
-                legacy_id = _extract_listing_id(result.get("itemId"))
-                if not legacy_id:
-                    continue
-                detail = single_get_detailed_item_data(f"v1|{legacy_id}|0", verbose=False)
-                calls_made += 1
-                if detail:
-                    top_k_sold_sum += _extract_sold_quantity(detail) or 0
+            # Skipped when Demand collection is off — the candidate's
+            # demand_coefficient is then None (not collected).
+            demand_coefficient = None
+            if collect_demand:
+                top_k_sold_sum = 0
+                for result in search["items"][:k]:
+                    legacy_id = _extract_listing_id(result.get("itemId"))
+                    if not legacy_id:
+                        continue
+                    detail = single_get_detailed_item_data(f"v1|{legacy_id}|0", verbose=False)
+                    calls_made += 1
+                    if detail:
+                        top_k_sold_sum += _extract_sold_quantity(detail) or 0
+                demand_coefficient = compute_demand_coefficient(top_k_sold_sum, active_total)
 
             candidates.append({
                 "listing_url": item.get("itemWebUrl", ""),
@@ -444,7 +457,7 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, storage_root=No
                 "price": item.get("price", {}).get("value"),
                 "currency": item.get("price", {}).get("currency"),
                 "image_url": (item.get("image") or {}).get("imageUrl"),
-                "demand_coefficient": compute_demand_coefficient(top_k_sold_sum, active_total),
+                "demand_coefficient": demand_coefficient,
                 "competition_count": active_total,
                 "sold_velocity": compute_sold_velocity(
                     _extract_sold_quantity(item) or 0, item.get("itemCreationDate")
@@ -465,7 +478,7 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, storage_root=No
         saved_run = save_pipeline_run(
             {
                 "seller": seller_username,
-                "inputs": {"top_n": top_n, "k": k, "min_sold": min_sold},
+                "inputs": {"top_n": top_n, "k": k, "min_sold": min_sold, "collect_demand": collect_demand},
                 "product_candidates": candidates,
             },
             storage_root=storage_root,
@@ -480,7 +493,7 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, storage_root=No
                 "seller": seller_username,
                 "run_id": saved_run["run_id"],
                 "timestamp": saved_run["timestamp"],
-                "inputs": {"top_n": top_n, "k": k, "min_sold": min_sold},
+                "inputs": {"top_n": top_n, "k": k, "min_sold": min_sold, "collect_demand": collect_demand},
                 "api_calls_made": calls_made,
                 "api_calls_used_today": tracker.used_today,
                 "product_candidates": candidates,

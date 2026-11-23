@@ -261,7 +261,7 @@ def research_copy_seller():
     """
     Run the Copy Seller research pipeline for an eBay seller.
     Streams progress events and the final raw (unranked) Product Candidates as NDJSON.
-    Body: { seller, top_n?, k?, min_sold? }
+    Body: { seller, top_n?, k?, min_sold?, collect_demand? }
     """
     data = request.get_json()
 
@@ -280,9 +280,10 @@ def research_copy_seller():
         except (TypeError, ValueError):
             yield error_event("top_n, k, and min_sold must be integers")
             return
+        collect_demand = bool(data.get("collect_demand", True))
 
-        print(f"[API] /api/research/copy-seller: seller={seller} top_n={top_n} k={k} min_sold={min_sold}")
-        for event in run_copy_seller(seller, top_n=top_n, k=k, min_sold=min_sold):
+        print(f"[API] /api/research/copy-seller: seller={seller} top_n={top_n} k={k} min_sold={min_sold} collect_demand={collect_demand}")
+        for event in run_copy_seller(seller, top_n=top_n, k=k, min_sold=min_sold, collect_demand=collect_demand):
             event_type = event.get("type")
             if event_type == "progress":
                 extra = {k: v for k, v in event.items() if k not in ("type", "step", "status")}

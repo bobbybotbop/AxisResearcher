@@ -125,6 +125,16 @@ def test_estimate_api_call_cost_matches_spec_formula():
     assert copy_seller.estimate_api_call_cost(25, 20) == 525 + copy_seller.SELLER_SETUP_CALLS
 
 
+def test_estimate_api_call_cost_demand_off_drops_k_term():
+    # Demand off: N×(1 + K·0) + setup = N + setup — the K sold-sum getItem
+    # lookups are skipped; only the one search per product remains.
+    assert copy_seller.estimate_api_call_cost(25, 20, collect_demand=False) == 25 + copy_seller.SELLER_SETUP_CALLS
+
+
+def test_estimate_api_call_cost_demand_on_keeps_k_term():
+    assert copy_seller.estimate_api_call_cost(25, 20, collect_demand=True) == 525 + copy_seller.SELLER_SETUP_CALLS
+
+
 def test_api_usage_tracker_blocks_run_that_would_exceed_daily_budget(tmp_path):
     tracker = copy_seller.ApiUsageTracker(
         storage_path=str(tmp_path / "usage.json"), daily_budget=5000
@@ -262,6 +272,120 @@ def test_run_copy_seller_result_has_no_weights(monkeypatch, tmp_path):
 
     saved = copy_seller.load_pipeline_run(result["run_id"], storage_root=str(tmp_path))
     assert "weights" not in saved
+
+
+def test_run_copy_seller_demand_off_skips_topk_getitem_calls(monkeypatch, tmp_path):
+    """Ticket 10: with collect_demand=False the pipeline still runs the one
+    search per product (Competition Count is collected) but skips the K
+    sold-sum getItem lookups; the Demand value is not collected (None)."""
+    seller_items = [_listing("1", 100), _listing("2", 50)]
+    details = {"1": _details_for("1", 100), "2": _details_for("2", 50)}
+
+    monkeypatch.setattr(copy_seller, "getItemIds", lambda seller: [i["itemId"] for i in seller_items])
+
+    detail_calls = []
+
+    def fake_detail(item_id, verbose=False):
+        detail_calls.append(item_id)
+        return details.get(item_id)
+
+    monkeypatch.setattr(copy_seller, "single_get_detailed_item_data", fake_detail)
+
+    search_calls = []
+
+    def fake_search(query, limit=50):
+        search_calls.append(query)
+        items = [{"itemId": f"c{i}"} for i in range(1, limit + 1)]
+        return {"total_items": 40, "items": items}
+
+    monkeypatch.setattr(copy_seller, "single_search_by_query", fake_search)
+    real_tracker_cls = copy_seller.ApiUsageTracker
+    monkeypatch.setattr(
+        copy_seller, "ApiUsageTracker",
+        lambda: real_tracker_cls(storage_path=str(tmp_path / "u.json")),
+    )
+
+    events = list(copy_seller.run_copy_seller(
+        "someseller", top_n=5, k=3, min_sold=1, collect_demand=False,
+    ))
+
+    assert events[-1]["type"] == "result"
+    candidates = events[-1]["data"]["product_candidates"]
+    assert len(candidates) == 2
+    # Competition Count still collected from the one search per product.
+    assert candidates[0]["competition_count"] == 40
+    # Demand not collected.
+    assert candidates[0]["demand_coefficient"] is None
+    assert candidates[1]["demand_coefficient"] is None
+    # One search per product still ran.
+    assert len(search_calls) == 2
+    # No top-K competitor getItem calls — only the seller's own listing details.
+    competitor_calls = [c for c in detail_calls if c.startswith("v1|")]
+    assert competitor_calls == []
+
+
+def test_run_copy_seller_demand_off_estimated_cost_excludes_k(monkeypatch, tmp_path):
+    """Ticket 10: the budget-check estimate follows N×(1 + K·[demand on]) + setup."""
+    tracker = copy_seller.ApiUsageTracker(storage_path=str(tmp_path / "u.json"), daily_budget=5000)
+    monkeypatch.setattr(copy_seller, "ApiUsageTracker", lambda: tracker)
+    monkeypatch.setattr(copy_seller, "getItemIds", lambda seller: ["1"])
+    monkeypatch.setattr(
+        copy_seller,
+        "single_get_detailed_item_data",
+        lambda item_id, verbose=False: _details_for("1", 100),
+    )
+    monkeypatch.setattr(
+        copy_seller,
+        "single_search_by_query",
+        lambda query, limit=50: {"total_items": 40, "items": []},
+    )
+
+    events = list(copy_seller.run_copy_seller(
+        "someseller", top_n=5, k=20, min_sold=1, collect_demand=False,
+    ))
+    budget_progress = next(e for e in events if e.get("step") == "Checking API budget")
+    assert budget_progress["estimated_cost"] == 5 + copy_seller.SELLER_SETUP_CALLS
+
+
+def test_run_copy_seller_demand_on_collects_demand_and_topk_calls(monkeypatch, tmp_path):
+    """Ticket 10: collect_demand=True preserves today's behavior (K getItem calls)."""
+    seller_items = [_listing("1", 100)]
+    details = {"1": _details_for("1", 100)}
+    competitor_details = {
+        "v1|c1|0": _details_for("c1", 10),
+        "v1|c2|0": _details_for("c2", 10),
+        "v1|c3|0": _details_for("c3", 10),
+    }
+
+    monkeypatch.setattr(copy_seller, "getItemIds", lambda seller: [i["itemId"] for i in seller_items])
+
+    detail_calls = []
+
+    def fake_detail(item_id, verbose=False):
+        detail_calls.append(item_id)
+        if item_id in details:
+            return details[item_id]
+        return competitor_details.get(item_id)
+
+    monkeypatch.setattr(copy_seller, "single_get_detailed_item_data", fake_detail)
+    monkeypatch.setattr(
+        copy_seller,
+        "single_search_by_query",
+        lambda query, limit=50: {"total_items": 40, "items": [{"itemId": f"c{i}"} for i in range(1, limit + 1)]},
+    )
+    real_tracker_cls = copy_seller.ApiUsageTracker
+    monkeypatch.setattr(
+        copy_seller, "ApiUsageTracker",
+        lambda: real_tracker_cls(storage_path=str(tmp_path / "u.json")),
+    )
+
+    events = list(copy_seller.run_copy_seller(
+        "someseller", top_n=5, k=3, min_sold=1, collect_demand=True,
+    ))
+    candidates = events[-1]["data"]["product_candidates"]
+    assert candidates[0]["demand_coefficient"] == pytest.approx(30 / 40)
+    competitor_calls = [c for c in detail_calls if c.startswith("v1|")]
+    assert competitor_calls == ["v1|c1|0", "v1|c2|0", "v1|c3|0"]
 
 
 def test_run_copy_seller_emits_error_when_budget_exceeded(monkeypatch, tmp_path):

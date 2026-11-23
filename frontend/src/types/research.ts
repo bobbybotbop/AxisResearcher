@@ -15,7 +15,8 @@ export interface ProductCandidate {
   price: number | null;
   currency: string | null;
   image_url: string | null;
-  demand_coefficient: number;
+  /** Null when Demand collection was off for the run (not collected). */
+  demand_coefficient: number | null;
   competition_count: number;
   sold_velocity: number | null;
 }
@@ -24,7 +25,7 @@ export interface CopySellerResult {
   seller: string;
   run_id?: string;
   timestamp?: string;
-  inputs: { top_n: number; k: number; min_sold: number };
+  inputs: { top_n: number; k: number; min_sold: number; collect_demand?: boolean };
   api_calls_made: number;
   api_calls_used_today: number;
   product_candidates: ProductCandidate[];
@@ -43,6 +44,6 @@ export interface PipelineRun {
   run_id: string;
   seller: string;
   timestamp: string;
-  inputs: { top_n: number; k: number; min_sold: number };
+  inputs: { top_n: number; k: number; min_sold: number; collect_demand?: boolean };
   product_candidates: ProductCandidate[];
 }

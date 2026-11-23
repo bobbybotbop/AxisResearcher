@@ -87,9 +87,16 @@ export default function ProductCandidateRow({
             <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0 text-sm text-text-muted">
               <span
                 className="whitespace-nowrap"
-                title="Demand Coefficient: top-K sold sum ÷ active listings (higher is better)"
+                title={
+                  candidate.demand_coefficient === null
+                    ? "Demand Coefficient was not collected for this run (Demand score toggle off)"
+                    : "Demand Coefficient: top-K sold sum ÷ active listings (higher is better)"
+                }
               >
-                Demand {formatMetric(candidate.demand_coefficient)}
+                Demand{" "}
+                {candidate.demand_coefficient === null
+                  ? "not collected"
+                  : formatMetric(candidate.demand_coefficient)}
               </span>
               <span className="text-text-muted">·</span>
               <span

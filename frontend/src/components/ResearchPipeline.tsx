@@ -45,6 +45,7 @@ export default function ResearchPipeline() {
   const [topN, setTopN] = useState(25);
   const [k, setK] = useState(20);
   const [minSold, setMinSold] = useState(1);
+  const [collectDemand, setCollectDemand] = useState(true);
   const [sortBy, setSortBy] = useState<SortMetric>("demand");
 
   const [isRunning, setIsRunning] = useState(false);
@@ -61,7 +62,10 @@ export default function ResearchPipeline() {
   const [loadedRunId, setLoadedRunId] = useState<string | null>(null);
   const [isLoadingRun, setIsLoadingRun] = useState(false);
 
-  const estimatedCost = useMemo(() => estimateApiCallCost(topN, k), [topN, k]);
+  const estimatedCost = useMemo(
+    () => estimateApiCallCost(topN, k, collectDemand),
+    [topN, k, collectDemand],
+  );
 
   const fetchPastRuns = async (): Promise<void> => {
     try {
@@ -112,12 +116,13 @@ export default function ResearchPipeline() {
   };
 
   // Live sorting: order the cached candidates greatest-to-least by the chosen
-  // metric — no pipeline re-run. A null Sold Velocity sorts last.
+  // metric — no pipeline re-run. A null metric (Sold Velocity missing, or
+  // Demand not collected) sorts last.
   const sortedCandidates = useMemo(() => {
     const metricValue = (c: ProductCandidate): number => {
       switch (sortBy) {
         case "demand":
-          return c.demand_coefficient;
+          return c.demand_coefficient ?? Number.NEGATIVE_INFINITY;
         case "competition":
           return c.competition_count;
         case "velocity":
@@ -157,6 +162,7 @@ export default function ResearchPipeline() {
             top_n: topN,
             k,
             min_sold: minSold,
+            collect_demand: collectDemand,
           }),
         },
         (event) => {
@@ -268,6 +274,24 @@ export default function ResearchPipeline() {
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs font-semibold text-text-primary">
+              Demand score
+            </span>
+            <span className="flex h-full items-center gap-2 px-1">
+              <input
+                type="checkbox"
+                aria-label="Collect Demand score"
+                checked={collectDemand}
+                onChange={(e) => setCollectDemand(e.target.checked)}
+                disabled={isRunning}
+                className="h-4 w-4 accent-primary"
+              />
+              <span className="text-sm text-text-muted">
+                {collectDemand ? "Collected" : "Not collected"}
+              </span>
+            </span>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-semibold text-text-primary">
               Min sold threshold
             </span>
             <NumberInput
@@ -291,7 +315,7 @@ export default function ResearchPipeline() {
           </button>
           <span
             className="text-sm text-text-muted"
-            title="Estimated eBay API calls: N×(1+K) + seller setup"
+            title="Estimated eBay API calls: N×(1 + K·[demand on]) + seller setup"
           >
             Estimated cost: ~{estimatedCost.toLocaleString()} API calls
           </span>
