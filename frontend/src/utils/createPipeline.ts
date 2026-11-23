@@ -169,8 +169,3 @@ export function createRetryPhaseForStep(id: CreateStepId): CreateRetryPhase {
   if (FETCH_PHASE_STEPS.includes(id)) return "fetch";
   return "images";
 }
-
-/** Step names for the Upload-to-eBay Pipeline (migrates in ticket 05). */
-export const UPLOAD_STEP_PREPARE = "Preparing listing data";
-export const UPLOAD_STEP_UPLOAD = "Uploading to eBay";
-export const UPLOAD_PIPELINE_STEPS = [UPLOAD_STEP_PREPARE, UPLOAD_STEP_UPLOAD];

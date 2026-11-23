@@ -10,6 +10,13 @@ import {
   type CreateStepId,
   type CreateStepsState,
 } from "../utils/createPipeline";
+import {
+  UPLOAD_STEP_TITLES,
+  failUploadStep,
+  startUploadRun,
+  succeedUploadRun,
+  type UploadStepsState,
+} from "../utils/uploadPipeline";
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -30,6 +37,8 @@ afterEach(() => {
 interface RenderOptions {
   createSteps?: CreateStepsState;
   onRetryCreateStep?: (id: CreateStepId) => void;
+  uploadSteps?: UploadStepsState | null;
+  onRetryUpload?: () => void;
   listingLinkSubmitted?: boolean;
   loading?: boolean;
   classifyImagesEnabled?: boolean;
@@ -38,6 +47,8 @@ interface RenderOptions {
   textGenStatus?: string;
   listing?: { title?: string };
   editableTitle?: string;
+  listingData?: { sku?: string };
+  generatedImages?: string[];
 }
 
 function renderWorkflow(options: RenderOptions = {}) {
@@ -134,5 +145,58 @@ describe("CreateWorkflow step cards", () => {
     // numbered titles. A tracker would duplicate the step list.
     const matches = container.textContent!.match(/Step 1 — Fetch listing from eBay/g);
     expect(matches).toHaveLength(1);
+  });
+});
+
+describe("CreateWorkflow upload step cards", () => {
+  it("renders both upload steps as StepCards once an upload run starts", () => {
+    renderWorkflow({
+      listingLinkSubmitted: true,
+      generatedImages: ["img1"],
+      listingData: { sku: "SKU1" },
+      uploadSteps: startUploadRun(),
+    });
+    expect(container.textContent).toContain(UPLOAD_STEP_TITLES.prepare);
+    expect(container.textContent).toContain(UPLOAD_STEP_TITLES.upload);
+  });
+
+  it("renders no upload step cards before the first upload run", () => {
+    renderWorkflow({
+      listingLinkSubmitted: true,
+      generatedImages: ["img1"],
+      listingData: { sku: "SKU1" },
+      uploadSteps: null,
+    });
+    expect(container.textContent).not.toContain(UPLOAD_STEP_TITLES.prepare);
+  });
+
+  it("a failed upload step shows its error inline with a Retry button that re-runs the upload", () => {
+    const onRetryUpload = vi.fn();
+    const uploadSteps = failUploadStep(startUploadRun(), "eBay rejected the offer");
+    renderWorkflow({
+      listingLinkSubmitted: true,
+      generatedImages: ["img1"],
+      listingData: { sku: "SKU1" },
+      uploadSteps,
+      onRetryUpload,
+    });
+    expect(container.textContent).toContain("eBay rejected the offer");
+    const retryButtons = Array.from(container.querySelectorAll("button")).filter(
+      (b) => b.textContent === "Retry",
+    );
+    expect(retryButtons).toHaveLength(1);
+    act(() => retryButtons[0].click());
+    expect(onRetryUpload).toHaveBeenCalledTimes(1);
+  });
+
+  it("a successful upload run keeps its success status line visible", () => {
+    const uploadSteps = succeedUploadRun(startUploadRun(), "Listing is now live on eBay");
+    renderWorkflow({
+      listingLinkSubmitted: true,
+      generatedImages: ["img1"],
+      listingData: { sku: "SKU1" },
+      uploadSteps,
+    });
+    expect(container.textContent).toContain("Listing is now live on eBay");
   });
 });

@@ -99,6 +99,15 @@ describe("startTaskToast handle API", () => {
     expect(toastStore.getSnapshot().toasts).toHaveLength(0);
   });
 
+  it("fail can carry long-form detail the toast reveals on click", () => {
+    const handle = startTaskToast("Upload summary");
+    handle.fail("1 succeeded, 2 failed", "SKU_A: timeout\nSKU_B: rejected");
+    const t = toastStore.getSnapshot().toasts[0];
+    expect(t.status).toBe("error");
+    expect(t.message).toBe("1 succeeded, 2 failed");
+    expect(t.detail).toBe("SKU_A: timeout\nSKU_B: rejected");
+  });
+
   it("settled handles ignore further updates", () => {
     const handle = startTaskToast("Task");
     handle.fail("boom");

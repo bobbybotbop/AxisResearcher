@@ -32,7 +32,7 @@ export interface TaskToastHandle {
   /** Mark the task done; toast auto-dismisses after ~5s. */
   succeed: (message?: string) => void;
   /** Mark the task failed; toast persists until manually dismissed. */
-  fail: (message: string) => void;
+  fail: (message: string, detail?: string) => void;
 }
 
 const SUCCESS_DISMISS_MS = 5000;
@@ -113,11 +113,11 @@ export function startTaskToast(label: string): TaskToastHandle {
         console.warn("[toasts] failed to settle toast:", err);
       }
     },
-    fail(message) {
+    fail(message, detail) {
       if (settled) return;
       settled = true;
       try {
-        patchToast(id, { status: "error", message });
+        patchToast(id, { status: "error", message, detail });
       } catch (err) {
         console.warn("[toasts] failed to settle toast:", err);
       }

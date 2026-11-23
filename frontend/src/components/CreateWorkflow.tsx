@@ -5,7 +5,6 @@ import ImageUploadModal from "./ImageUploadModal";
 import type { PendingImage } from "./ImageUploadModal";
 import MessageBarInput from "./MessageBarInput";
 import Lightbox from "./Lightbox";
-import PipelineTracker from "./PipelineTracker";
 import StepCard from "./StepCard";
 import ImageCanvas from "./ImageCanvas";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
@@ -26,6 +25,10 @@ import {
   type CreateStepId,
   type CreateStepsState,
 } from "../utils/createPipeline";
+import {
+  UPLOAD_STEP_TITLES,
+  type UploadStepsState,
+} from "../utils/uploadPipeline";
 
 interface AutoSaveStatus {
   title: "idle" | "saving" | "saved";
@@ -84,9 +87,9 @@ interface CreateWorkflowProps {
   createSteps?: CreateStepsState;
   /** Retries the failed Create step (re-runs its phase without restarting completed steps). */
   onRetryCreateStep?: (id: CreateStepId) => void;
-  /** Id of the upload-to-eBay Pipeline in the Status Store. */
-  uploadPipelineId?: number | null;
-  /** Retries a failed upload-to-eBay pipeline run. */
+  /** Per-step waiting state for the Upload-to-eBay flow (ADR 0003), owned by the parent. Null until the first upload run. */
+  uploadSteps?: UploadStepsState | null;
+  /** Retries a failed upload-to-eBay run (re-runs the whole upload request). */
   onRetryUpload?: () => void;
   uploadingSkus?: Set<string>;
   isTrimmingTitle?: boolean;
@@ -173,7 +176,7 @@ function CreateWorkflow({
   isEditorOpen,
   createSteps,
   onRetryCreateStep,
-  uploadPipelineId = null,
+  uploadSteps = null,
   onRetryUpload,
   uploadingSkus,
   isTrimmingTitle,
@@ -1039,9 +1042,6 @@ function CreateWorkflow({
               </button>
             </div>
           )}
-          {(uploadingSkus?.has(listingData?.sku ?? "") || uploadPipelineId != null) && (
-            <PipelineTracker pipelineId={uploadPipelineId} onRetry={onRetryUpload} />
-          )}
           {onAddToGeneratedImages && (
             <ImageUploadModal
               isOpen={showGenUploadModal}
@@ -1059,6 +1059,28 @@ function CreateWorkflow({
         </div>
       )}
         </StepCard>
+      )}
+
+      {/* Upload to eBay — kicked off by the button in the images card above;
+          both steps run inside one /api/upload-listing request and report
+          the stream's step messages in their own cards (ADR 0003). */}
+      {uploadSteps && (
+        <div className="mt-4 flex flex-col gap-3">
+          <StepCard
+            title={UPLOAD_STEP_TITLES.prepare}
+            status={uploadSteps.prepare.status}
+            statusText={uploadSteps.prepare.statusText}
+            error={uploadSteps.prepare.error}
+            onRetry={onRetryUpload}
+          />
+          <StepCard
+            title={UPLOAD_STEP_TITLES.upload}
+            status={uploadSteps.upload.status}
+            statusText={uploadSteps.upload.statusText}
+            error={uploadSteps.upload.error}
+            onRetry={onRetryUpload}
+          />
+        </div>
       )}
 
       {/* Step 7 — create listing. Runs automatically once images and text

@@ -13,11 +13,11 @@ import {
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import CreateWorkflow from "./components/CreateWorkflow";
-import StartupToasts, { startTaskToast } from "./components/StartupToasts";
+import StartupToasts from "./components/StartupToasts";
+import { startTaskToast, toast } from "./utils/toasts";
 import {
   startTask,
   startTaskWithId,
-  toast,
   useTaskRunning,
   useTaskRunningByName,
 } from "./utils/statusStore";
@@ -45,14 +45,8 @@ import TitleSimplificationSettings from "./components/TitleSimplificationSetting
 import { btnPill, btnPillSm } from "./styles/buttonPill";
 import { fetchWithProgress } from "./utils/fetchWithProgress";
 import {
-  dismissPipeline,
-  startPipelineWithId,
-  type PipelineHandle,
-} from "./utils/statusStore";
-import {
   CREATE_FETCH_PHASE_STEPS,
   FETCH_STREAM_STEP_IDS,
-  UPLOAD_PIPELINE_STEPS,
   createRetryPhaseForStep,
   failCreatePhaseStep,
   initialCreateSteps,
@@ -63,6 +57,13 @@ import {
   type CreateStepId,
   type CreateStepsState,
 } from "./utils/createPipeline";
+import {
+  applyUploadStreamEvent,
+  failUploadStep,
+  startUploadRun,
+  succeedUploadRun,
+  type UploadStepsState,
+} from "./utils/uploadPipeline";
 import { DEFAULT_TEXT_MODEL_OPTIONS, IMAGE_MODEL_OPTIONS, CLASSIFIER_MODEL_OPTIONS, PROVIDER_LABELS } from "./constants/models";
 import type { ImageModelOption } from "./constants/models";
 import { TAB_PATHS } from "./constants/routes";
@@ -487,19 +488,17 @@ function App() {
   const [isAddingNewVersions, setIsAddingNewVersions] = useState(false);
   const [promptModifier, setPromptModifier] = useState("");
 
-  // Create-workflow waiting state is parent-owned local state (ADR 0003):
-  // each step's StepCard is driven from this record, no Status Store. The
-  // eBay upload still runs as a Status Store Pipeline (migrates in ticket 05).
+  // Create- and upload-workflow waiting state is parent-owned local state
+  // (ADR 0003): each step's StepCard is driven from these records, no Status
+  // Store. uploadSteps is null until the first upload run.
   const [createSteps, setCreateSteps] = useState<CreateStepsState>(() =>
     initialCreateSteps(),
   );
-  const [uploadPipelineId, setUploadPipelineId] = useState<number | null>(null);
-  const uploadPipelineRef = useRef<PipelineHandle | null>(null);
+  const [uploadSteps, setUploadSteps] = useState<UploadStepsState | null>(null);
   const [testCreateSteps, setTestCreateSteps] = useState<CreateStepsState>(() =>
     initialCreateSteps(),
   );
-  const [testUploadPipelineId, setTestUploadPipelineId] = useState<number | null>(null);
-  const testUploadPipelineRef = useRef<PipelineHandle | null>(null);
+  const [testUploadSteps, setTestUploadSteps] = useState<UploadStepsState | null>(null);
 
   // Token refresh panel state
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -2930,19 +2929,14 @@ function App() {
     }
     uploadBatchRef.current.total += 1;
 
-    if (uploadPipelineId != null) dismissPipeline(uploadPipelineId);
-    const { id: pipelineId, handle: pipeline } = startPipelineWithId(
-      "Upload to eBay",
-      UPLOAD_PIPELINE_STEPS,
-    );
-    uploadPipelineRef.current = pipeline;
-    setUploadPipelineId(pipelineId);
+    // Every run starts the upload StepCards fresh (ADR 0003); a retry's
+    // failed state is replaced, not dismissed.
+    setUploadSteps(startUploadRun());
 
     try {
       console.log("Uploading listing to eBay with SKU:", sku);
       console.log("Listing data:", listingData);
 
-      const completedUploadSteps = new Set<string>();
       const data = await fetchWithProgress(
         "/api/upload-listing",
         {
@@ -2958,11 +2952,14 @@ function App() {
           }),
         },
         (event) => {
-          const step = event.step as string | undefined;
-          if (event.status === "completed" && step && !completedUploadSteps.has(step)) {
-            completedUploadSteps.add(step);
-            pipeline.advancePast(step);
-          }
+          setUploadSteps((prev) =>
+            prev
+              ? applyUploadStreamEvent(prev, {
+                  step: event.step as string | undefined,
+                  status: event.status as string | undefined,
+                })
+              : prev,
+          );
         },
       ) as { upload_result?: UploadResult };
 
@@ -2973,7 +2970,9 @@ function App() {
         throw new Error("Upload completed but no result returned");
       }
 
-      pipeline.succeed("Listing is now live on eBay");
+      setUploadSteps((prev) =>
+        prev ? succeedUploadRun(prev, "Listing is now live on eBay") : prev,
+      );
 
       setUploadResults((prev) => ({
         ...prev,
@@ -2991,7 +2990,10 @@ function App() {
     } catch (err) {
       console.error("Error uploading listing:", err);
       const message = (err as Error).message || "An error occurred while uploading listing";
-      pipeline.fail(message);
+      // Inline error + Retry on the failed step's card, plus an error toast
+      // as the scroll-away safety net (ADR 0003).
+      setUploadSteps((prev) => (prev ? failUploadStep(prev, message) : prev));
+      toast.error(message);
       setUploadStatuses((prev) => ({ ...prev, [sku]: "error" }));
       if (uploadBatchRef.current) {
         uploadBatchRef.current.failures.push(
@@ -3014,11 +3016,11 @@ function App() {
               ? `${succeeded} upload${succeeded === 1 ? "" : "s"} succeeded`
               : `${succeeded} succeeded, ${batch.failures.length} failed`;
           const detail = batch.failures.length ? batch.failures.join("\n") : undefined;
-          const toast = startTask("Upload summary");
+          const summaryToast = startTaskToast("Upload summary");
           if (batch.failures.length === 0) {
-            toast.succeed(summary);
+            summaryToast.succeed(summary);
           } else {
-            toast.fail(summary, detail);
+            summaryToast.fail(summary, detail);
           }
           uploadBatchRef.current = null;
         }
@@ -3032,9 +3034,9 @@ function App() {
   };
 
   /**
-   * Retry a failed upload-to-eBay pipeline run. handleUploadToEbay dismisses
-   * the failed pipeline and starts a fresh one, so retry just re-invokes it
-   * with the current listing's sku/data.
+   * Retry a failed upload-to-eBay run. handleUploadToEbay starts the upload
+   * StepCards fresh on every run, so retry just re-invokes it with the
+   * current listing's sku/data.
    */
   const handleRetryUpload = (): void => {
     const sku = listingData?.sku;
@@ -3795,25 +3797,21 @@ function App() {
     if (testRealUploadEnabled) {
       setTestUploadingSkus((prev) => new Set(prev).add(sku));
       setTestError(null);
-      if (testUploadPipelineId != null) dismissPipeline(testUploadPipelineId);
-      const { id: pipelineId, handle: pipeline } = startPipelineWithId(
-        "Upload to eBay",
-        UPLOAD_PIPELINE_STEPS,
-      );
-      testUploadPipelineRef.current = pipeline;
-      setTestUploadPipelineId(pipelineId);
+      setTestUploadSteps(startUploadRun());
       try {
         console.log("[TEST-UPLOAD] Calling real /api/upload-test-listing");
-        const completedSteps = new Set<string>();
         const data = await fetchWithProgress(
           "/api/upload-test-listing",
           { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
           (event) => {
-            const step = event.step as string | undefined;
-            if (event.status === "completed" && step && !completedSteps.has(step)) {
-              completedSteps.add(step);
-              pipeline.advancePast(step);
-            }
+            setTestUploadSteps((prev) =>
+              prev
+                ? applyUploadStreamEvent(prev, {
+                    step: event.step as string | undefined,
+                    status: event.status as string | undefined,
+                  })
+                : prev,
+            );
           }
         ) as { upload_result?: UploadResult };
         console.log("[TEST-UPLOAD] Response:", data);
@@ -3822,12 +3820,12 @@ function App() {
         }
         setTestUploadResult(data.upload_result);
         console.log("[TEST-UPLOAD] setTestUploadResult called with", data.upload_result);
-        pipeline.succeed();
+        setTestUploadSteps((prev) => (prev ? succeedUploadRun(prev) : prev));
       } catch (err) {
         console.error("[TEST-UPLOAD] Error:", err);
         const message = (err as Error).message || "Real upload failed";
         setTestError(message);
-        pipeline.fail(message);
+        setTestUploadSteps((prev) => (prev ? failUploadStep(prev, message) : prev));
       } finally {
         setTestUploadingSkus((prev) => {
           const s = new Set(prev);
@@ -3841,19 +3839,20 @@ function App() {
     console.log("[TEST-UPLOAD] Running in mock mode");
     setTestUploadingSkus((prev) => new Set(prev).add(sku));
     setTestError(null);
-    if (testUploadPipelineId != null) dismissPipeline(testUploadPipelineId);
-    const { id: mockPipelineId, handle: mockPipeline } = startPipelineWithId(
-      "Upload to eBay",
-      UPLOAD_PIPELINE_STEPS,
-    );
-    testUploadPipelineRef.current = mockPipeline;
-    setTestUploadPipelineId(mockPipelineId);
+    setTestUploadSteps(startUploadRun());
     setTimeout(() => {
-      mockPipeline.advance();
+      setTestUploadSteps((prev) =>
+        prev
+          ? applyUploadStreamEvent(prev, {
+              step: "Preparing listing data",
+              status: "completed",
+            })
+          : prev,
+      );
     }, 400);
     setTimeout(() => {
       setTestUploadResult(MOCK_DATA.uploadResult);
-      mockPipeline.succeed();
+      setTestUploadSteps((prev) => (prev ? succeedUploadRun(prev) : prev));
       setTestUploadingSkus((prev) => {
         const s = new Set(prev);
         s.delete(sku);
@@ -4183,7 +4182,7 @@ function App() {
               uploadResult={testUploadResult as UploadResult | null}
               isEditorOpen={testIsEditorOpen}
               createSteps={testCreateSteps}
-              uploadPipelineId={testUploadPipelineId}
+              uploadSteps={testUploadSteps}
               uploadingSkus={testUploadingSkus}
               isTrimmingTitle={testIsTrimmingTitle}
               onListingIdChange={setTestListingId}
@@ -5498,7 +5497,7 @@ function App() {
               isEditorOpen={isEditorOpen}
               createSteps={createSteps}
               onRetryCreateStep={handleRetryCreateStep}
-              uploadPipelineId={uploadPipelineId}
+              uploadSteps={uploadSteps}
               onRetryUpload={handleRetryUpload}
               uploadingSkus={uploadingSkus}
               isTrimmingTitle={isTrimmingTitle}
