@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { RefreshCw, CheckCircle, XCircle, ChevronRight, ChevronDown, ExternalLink } from "lucide-react";
 import { LOG_EVENT_LABELS, LOG_FILTER_CHIPS, LOG_SECTION_LABELS } from "../constants/logs";
 import type { FilterOption } from "../constants/logs";
-import { startTask } from "../utils/statusStore";
+import { startTaskToast } from "../utils/toasts";
 import LoadingBar from "./LoadingBar";
 
 interface LogEntry {
@@ -303,7 +303,7 @@ export default function LogsTab({ onNavigateToSku, onOpenListing }: LogsTabProps
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     setFetchError(null);
-    const task = startTask("Load activity log");
+    const task = startTaskToast("Load activity log");
     try {
       const res = await fetch("/api/logs");
       if (!res.ok) throw new Error(`Failed to load logs (${res.status})`);

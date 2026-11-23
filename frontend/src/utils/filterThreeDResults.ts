@@ -1,5 +1,5 @@
 import { threeDSiteKeyFromLink, type ThreeDSiteStatus } from "../constants/files3d";
-import { toast } from "./statusStore";
+import { toast } from "./toasts";
 
 interface SiteTypedResult {
   link: string;

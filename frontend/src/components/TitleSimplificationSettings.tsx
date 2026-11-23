@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { btnPillSm } from "../styles/buttonPill";
 import NumberInput from "./NumberInput";
-import { toast } from "../utils/statusStore";
+import { toast } from "../utils/toasts";
 
 interface TitleSimplificationConfig {
   stopwords: string[];

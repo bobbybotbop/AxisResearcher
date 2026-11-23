@@ -15,12 +15,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import CreateWorkflow from "./components/CreateWorkflow";
 import StartupToasts from "./components/StartupToasts";
 import { startTaskToast, toast } from "./utils/toasts";
-import {
-  startTask,
-  startTaskWithId,
-  useTaskRunning,
-  useTaskRunningByName,
-} from "./utils/statusStore";
 import GeneratedListingCard from "./components/GeneratedListingCard";
 import type { CardUploadStatus } from "./components/GeneratedListingCard";
 import CompactListingRow from "./components/CompactListingRow";
@@ -160,9 +154,8 @@ interface ListingData {
 }
 type AutoSaveStatus = { title: "idle" | "saving" | "saved"; description: "idle" | "saving" | "saved" }
 
-// Status Store task names for the History/Upload operations (ADR 0002). The
-// `is*` waiting-state booleans for these operations are derived from running
-// store tasks via useTaskRunning, not held in useState.
+// Toast labels for the History/Upload background operations. The `is*`
+// waiting-state booleans for these operations live in local useState.
 const SYNC_TASK_NAME = "Syncing with eBay";
 const RESTOCK_TASK_NAME = "Restocking listings";
 const BULK_DELETE_TASK_NAME = "Deleting listings";
@@ -412,11 +405,9 @@ function App() {
   const [isTesting, setIsTesting] = useState(false);
   const [testingId, setTestingId] = useState("");
   const [appTokenResult, setAppTokenResult] = useState<TokenResult | null>(null);
-  const [appTokenTaskId, setAppTokenTaskId] = useState<number | null>(null);
-  const isTestingAppToken = useTaskRunning(appTokenTaskId);
+  const [isTestingAppToken, setIsTestingAppToken] = useState(false);
   const [userTokenResult, setUserTokenResult] = useState<TokenResult | null>(null);
-  const [userTokenTaskId, setUserTokenTaskId] = useState<number | null>(null);
-  const isTestingUserToken = useTaskRunning(userTokenTaskId);
+  const [isTestingUserToken, setIsTestingUserToken] = useState(false);
   const [allListings, setAllListings] = useState<Listing[]>([]);
   const [uploadListingsSearch, setUploadListingsSearch] = useState("");
   const [uploadListingsShowDrafts, setUploadListingsShowDrafts] =
@@ -427,7 +418,7 @@ function App() {
   const [uploadingSkus, setUploadingSkus] = useState<Set<string>>(new Set());
   const [uploadResults, setUploadResults] = useState<Record<string, UploadResult>>({});
   // Per-card upload badge state (spinner → check/error). Waiting-state UI only;
-  // the summary toast is emitted through the Status Store.
+  // the summary toast is emitted through the toast module.
   const [uploadStatuses, setUploadStatuses] = useState<Record<string, CardUploadStatus>>({});
   const uploadBatchRef = useRef<{ total: number; settled: number; failures: string[] } | null>(null);
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
@@ -449,14 +440,14 @@ function App() {
   const [autoRestockQuantity, setAutoRestockQuantity] = useState(15);
   const [minimumImagesPerListing, setMinimumImagesPerListing] = useState(10);
   const [autoRestockConfirm, setAutoRestockConfirm] = useState<{ nextEnabled: boolean; nextQuantity: number } | null>(null);
-  // Waiting state for sync/restock/bulk-delete lives in the Status Store (ADR
-  // 0002) — these booleans are derived from running store tasks, not useState.
-  const isRestocking = useTaskRunningByName(RESTOCK_TASK_NAME);
-  const isSyncing = useTaskRunningByName(SYNC_TASK_NAME);
+  // Waiting state for sync/restock/bulk-delete is local (ADR 0003) — the
+  // toast module carries the async notification, these booleans gate the UI.
+  const [isRestocking, setIsRestocking] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [syncLastRefreshed, setSyncLastRefreshed] = useState<string | null>(null);
   const [historySelectMode, setHistorySelectMode] = useState<boolean>(false);
   const [historySelectedSkus, setHistorySelectedSkus] = useState<Set<string>>(new Set());
-  const isBulkDeleting = useTaskRunningByName(BULK_DELETE_TASK_NAME);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const autoRestockRanRef = useRef<boolean>(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
@@ -1883,7 +1874,8 @@ function App() {
   const handleBulkDeleteListings = async (): Promise<void> => {
     const skus = Array.from(historySelectedSkus);
     if (skus.length === 0) return;
-    const task = startTask(BULK_DELETE_TASK_NAME, { total: skus.length });
+    setIsBulkDeleting(true);
+    const task = startTaskToast(BULK_DELETE_TASK_NAME);
     try {
       const res = await fetch('/api/listings/bulk-delete', {
         method: 'POST',
@@ -1892,7 +1884,6 @@ function App() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      task.progress(skus.length);
       const failed: number = data.errors?.length ?? 0;
       const succeeded = skus.length - failed;
       setHistorySelectMode(false);
@@ -1909,6 +1900,8 @@ function App() {
     } catch (err) {
       console.error('[History] bulk delete failed:', err);
       task.fail((err as Error).message || 'Bulk delete failed');
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
@@ -2538,7 +2531,8 @@ function App() {
       .map((l) => l.sku);
     if (!skus.length) return;
 
-    const task = startTask(RESTOCK_TASK_NAME, { total: skus.length });
+    setIsRestocking(true);
+    const task = startTaskToast(RESTOCK_TASK_NAME);
     try {
       const res = await fetch("/api/listings/restock", {
         method: "POST",
@@ -2547,7 +2541,6 @@ function App() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to restock listings");
-      task.progress(skus.length);
 
       const skuToListing = (data.failed?.length || data.not_found?.length)
         ? Object.fromEntries(allListings.map((l) => [l.sku, l]))
@@ -2606,11 +2599,14 @@ function App() {
     } catch (err) {
       console.error("Error restocking listings:", err);
       task.fail((err as Error).message || "Failed to restock listings");
+    } finally {
+      setIsRestocking(false);
     }
   };
 
   const handleSyncWithEbay = async (): Promise<void> => {
-    const task = startTask(SYNC_TASK_NAME);
+    setIsSyncing(true);
+    const task = startTaskToast(SYNC_TASK_NAME);
     try {
       const res = await fetch('/api/listings/sync-active', {
         method: 'POST',
@@ -2630,11 +2626,14 @@ function App() {
       task.succeed(`Sync complete: ${data.active} active, ${data.newly_inactive} marked inactive, ${data.updated} updated`);
     } catch (err) {
       task.fail((err as Error).message || 'Sync failed');
+    } finally {
+      setIsSyncing(false);
     }
   };
 
   const handleSyncEbayListings = async (): Promise<void> => {
-    const task = startTask(SYNC_TASK_NAME);
+    setIsSyncing(true);
+    const task = startTaskToast(SYNC_TASK_NAME);
     try {
       const res = await fetch('/api/import-listings', { method: 'POST' });
       const data = await res.json();
@@ -2647,6 +2646,8 @@ function App() {
       task.succeed(`Sync complete: ${imported} imported, ${updated} updated, ${skipped} skipped`);
     } catch (err) {
       task.fail((err as Error).message || 'Sync failed');
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -3445,8 +3446,8 @@ function App() {
 
   const handleTestAppToken = async (): Promise<void> => {
     setAppTokenResult(null);
-    const { id, handle: task } = startTaskWithId("Testing application token");
-    setAppTokenTaskId(id);
+    setIsTestingAppToken(true);
+    const task = startTaskToast("Testing application token");
     try {
       const response = await fetch("/api/test-application-token", {
         method: "POST",
@@ -3464,13 +3465,15 @@ function App() {
       const message = (err as Error).message;
       setAppTokenResult({ ok: false, message });
       task.fail(message);
+    } finally {
+      setIsTestingAppToken(false);
     }
   };
 
   const handleTestUserToken = async (): Promise<void> => {
     setUserTokenResult(null);
-    const { id, handle: task } = startTaskWithId("Testing user token");
-    setUserTokenTaskId(id);
+    setIsTestingUserToken(true);
+    const task = startTaskToast("Testing user token");
     try {
       const response = await fetch("/api/test-user-token", { method: "POST" });
       const data = await response.json();
@@ -3486,6 +3489,8 @@ function App() {
       const message = (err as Error).message;
       setUserTokenResult({ ok: false, message });
       task.fail(message);
+    } finally {
+      setIsTestingUserToken(false);
     }
   };
 

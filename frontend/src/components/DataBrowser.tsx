@@ -8,7 +8,7 @@ import {
   Table2,
 } from "lucide-react";
 import { DATA_BROWSER_TABLES, type DataBrowserTableName } from "../constants/dataBrowser";
-import { startTask } from "../utils/statusStore";
+import { startTaskToast } from "../utils/toasts";
 import LoadingBar from "./LoadingBar";
 
 const TABLES = DATA_BROWSER_TABLES;
@@ -261,7 +261,7 @@ export default function DataBrowser() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     setFetchError(null);
-    const task = startTask(`Load ${selectedTable} table`);
+    const task = startTaskToast(`Load ${selectedTable} table`);
     try {
       const res = await fetch(
         `/api/data-browser/${selectedTable}?page=${page}&page_size=${pageSize}`,

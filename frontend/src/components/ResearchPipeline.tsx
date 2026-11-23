@@ -12,6 +12,7 @@ import {
   createResearchSteps,
   failRunningResearchStep,
   RESEARCH_STEP_TITLES,
+  type ResearchProgressEvent,
   type ResearchStepState,
 } from "../utils/researchSteps";
 import type {
@@ -147,7 +148,9 @@ export default function ResearchPipeline() {
         // per-listing "Computing metrics (i/N)" sub-progress); the reducer
         // turns them into each StepCard's status line and header counts.
         (event) => {
-          setSteps((prev) => applyResearchProgressEvent(prev, event));
+          setSteps((prev) =>
+            applyResearchProgressEvent(prev, event as ResearchProgressEvent),
+          );
         },
       )) as CopySellerResult;
 

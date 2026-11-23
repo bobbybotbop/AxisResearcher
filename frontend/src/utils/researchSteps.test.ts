@@ -4,6 +4,7 @@ import {
   createResearchSteps,
   failRunningResearchStep,
   RESEARCH_STEP_TITLES,
+  type ResearchStepState,
 } from "./researchSteps";
 
 describe("createResearchSteps", () => {
@@ -187,7 +188,7 @@ describe("failRunningResearchStep", () => {
   });
 
   it("is a no-op when every step already succeeded", () => {
-    let steps = createResearchSteps().map(() => ({ status: "success" as const }));
+    let steps: ResearchStepState[] = createResearchSteps().map(() => ({ status: "success" as const }));
     const before = steps;
     steps = failRunningResearchStep(steps, "late failure");
     expect(steps).toBe(before);
