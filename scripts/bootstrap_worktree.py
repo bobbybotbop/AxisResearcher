@@ -9,8 +9,10 @@ Does the following:
      AXIS_FRONTEND_PORT / AXIS_BACKEND_PORT into the worktree's .env.
   3. Junctions the main checkout's .venv into the worktree (Windows mklink /J;
      safe to share, it's read-only at runtime).
-  4. Runs `npm install` in the worktree's frontend/ (skip with --skip-install).
-  5. Optionally copies axis.db* so the worktree starts with real data (--with-db).
+  4. Syncs backend dependencies: pip install -r requirements.txt into the
+     (shared) venv, so a venv that drifted from the spec can't crash app.py.
+  5. Runs `npm install` in the worktree's frontend/ (skip with --skip-install).
+  6. Optionally copies axis.db* so the worktree starts with real data (--with-db).
 
 Usage:
     python scripts/bootstrap_worktree.py <worktree-path> [--name NAME]
@@ -116,6 +118,21 @@ def _junction_venv(main: str, worktree: str) -> None:
         os.symlink(src, dst)
 
 
+def _sync_requirements(worktree: str) -> None:
+    reqs = os.path.join(worktree, "requirements.txt")
+    venv_python = os.path.join(
+        worktree, ".venv", "Scripts" if sys.platform == "win32" else "bin", "python"
+    )
+    if not os.path.isfile(reqs) or not os.path.exists(venv_python):
+        return
+    print("Syncing backend dependencies (pip install -r requirements.txt) ...")
+    subprocess.run(
+        [venv_python, "-m", "pip", "install", "-q", "-r", "requirements.txt"],
+        cwd=worktree,
+        check=True,
+    )
+
+
 def bootstrap(worktree: str, name: str, skip_install: bool, with_db: bool) -> None:
     worktree = os.path.normpath(os.path.abspath(worktree))
     if not os.path.isfile(os.path.join(worktree, ".git")) and not os.path.isdir(os.path.join(worktree, ".git")):
@@ -145,6 +162,8 @@ def bootstrap(worktree: str, name: str, skip_install: bool, with_db: bool) -> No
 
     _junction_venv(main, worktree)
     print(f".venv linked from {main}")
+
+    _sync_requirements(worktree)
 
     if with_db:
         for suffix in ("", "-wal", "-shm"):
