@@ -7,6 +7,7 @@ import {
   statusStore,
   type Task,
 } from "../utils/statusStore";
+import { dismissToast, toastStore, type ToastItem } from "../utils/toasts";
 
 export type StartupToastStatus = "pending" | "success" | "error";
 
@@ -121,14 +122,20 @@ function StartupToastItem({ task, onDismiss }: StartupToastItemProps) {
 }
 
 /**
- * The Status Store's toast module. Renders standalone tasks as stacked,
- * non-blocking toasts fixed to the bottom-right corner; the container ignores
- * pointer events so the app stays usable while tasks run. Success toasts
- * auto-dismiss; error toasts persist until manually dismissed.
+ * The app's toast module. Renders stacked, non-blocking toasts fixed to the
+ * bottom-right corner; the container ignores pointer events so the app stays
+ * usable while tasks run. Success toasts auto-dismiss; error toasts persist
+ * until manually dismissed.
+ *
+ * Renders two channels during the expand phase of the distributed-step-status
+ * migration: standalone tasks from the legacy Status Store (unmigrated
+ * workflows) and toasts from the standalone toast module (`utils/toasts`),
+ * which new code calls directly via `toast.error(...)` / `startTaskToast(...)`.
  */
 export default function StartupToasts() {
   const { tasks } = useSyncExternalStore(statusStore.subscribe, statusStore.getSnapshot);
-  if (tasks.length === 0) return null;
+  const { toasts } = useSyncExternalStore(toastStore.subscribe, toastStore.getSnapshot);
+  if (tasks.length === 0 && toasts.length === 0) return null;
   return ReactDOM.createPortal(
     <div
       className="pointer-events-none fixed bottom-4 right-4 z-[9999] flex flex-col items-end gap-2"
@@ -139,6 +146,13 @@ export default function StartupToasts() {
     >
       {tasks.map((task) => (
         <StartupToastItem key={task.id} task={task} onDismiss={dismissTaskToast} />
+      ))}
+      {toasts.map((t: ToastItem) => (
+        <StartupToastItem
+          key={t.id}
+          task={{ id: t.id, name: t.title, status: t.status, message: t.message, detail: t.detail }}
+          onDismiss={dismissToast}
+        />
       ))}
     </div>,
     document.body,
