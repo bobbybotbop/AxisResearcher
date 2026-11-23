@@ -1,22 +1,22 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import MessageBarInput from "./MessageBarInput";
-import PipelineTracker from "./PipelineTracker";
+import StepCard, { type StepStatus } from "./StepCard";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { PIPELINE_IMAGE_SEARCH, MATCH_LABEL_CONFIRMED_IMAGE_MATCH, type ThreeDSiteStatus, type Pipeline, type MatchLabel } from "../constants/files3d";
 import { filterOperationalThreeDResults, toastSkippedSites } from "../utils/filterThreeDResults";
-import {
-  dismissPipeline,
-  startPipelineWithId,
-  toast,
-  type PipelineHandle,
-} from "../utils/statusStore";
+import { toast } from "../utils/toasts";
 
-// Image Search waiting state: one Pipeline in the Status Store per run
-// (ADR 0002), rendered by PipelineTracker. Bespoke step UIs below are unchanged.
-const IMAGE_SEARCH_STEP_FETCH = "Fetch eBay photos";
-const IMAGE_SEARCH_STEP_SEARCH = "Reverse image search";
-const IMAGE_SEARCH_STEPS = [IMAGE_SEARCH_STEP_FETCH, IMAGE_SEARCH_STEP_SEARCH];
+// Image Search waiting state: each StepCard owns its status display (ADR
+// 0003). The workflow orchestrates — step state lives here in local useState
+// and is passed down; no Status Store, no PipelineTracker.
+interface StepState {
+  status: StepStatus;
+  statusText?: string;
+  error?: string;
+}
+
+const IDLE_STEP: StepState = { status: "pending" };
 
 interface SearchResult {
   site_type?: string;
@@ -54,7 +54,7 @@ function ImageSearchSteps({ siteStatus = null, enabledSites, sitePriority, onUse
   const [step1Link, setStep1Link] = useState("");
   const [step1Photos, setStep1Photos] = useState<string[]>([]);
   const [step1Title, setStep1Title] = useState("");
-  const [step1Loading, setStep1Loading] = useState(false);
+  const [step1, setStep1] = useState<StepState>(IDLE_STEP);
   const [step1Selected, setStep1Selected] = useState<string | null>(null);
   // The eBay listing URL/photo set the current results came from — kept after
   // the input clears so a forwarded link can be tied back to the listing
@@ -63,11 +63,10 @@ function ImageSearchSteps({ siteStatus = null, enabledSites, sitePriority, onUse
   // Step 2 — Reverse Image Search
   const [step2ImageUrl, setStep2ImageUrl] = useState("");
   const [step2Results, setStep2Results] = useState<SearchResult[]>([]);
-  const [step2Loading, setStep2Loading] = useState(false);
+  const [step2, setStep2] = useState<StepState>(IDLE_STEP);
 
-  // Waiting state lives in the Status Store; only the pipeline id is local.
-  const [pipelineId, setPipelineId] = useState<number | null>(null);
-  const pipelineRef = useRef<PipelineHandle | null>(null);
+  const step1Loading = step1.status === "running";
+  const step2Loading = step2.status === "running";
 
   const handleStep1Submit = async (e: React.FormEvent, linkOverride?: string) => {
     e.preventDefault();
@@ -76,24 +75,25 @@ function ImageSearchSteps({ siteStatus = null, enabledSites, sitePriority, onUse
       toast.error("Please enter an eBay listing ID or URL");
       return;
     }
-    setStep1Loading(true);
+    setStep1({ status: "running", statusText: "Fetching photos…" });
     setStep1Photos([]);
     setStep1Title("");
     setStep1Selected(null);
-    if (pipelineId != null) dismissPipeline(pipelineId);
-    const { id: newPipelineId, handle: pipeline } = startPipelineWithId(
-      "Image Search",
-      IMAGE_SEARCH_STEPS,
-    );
-    pipelineRef.current = pipeline;
-    setPipelineId(newPipelineId);
+    // A new listing restarts the workflow — step 2 is no longer done.
+    setStep2(IDLE_STEP);
     try {
       // /api/photos streams NDJSON progress events; fetchWithProgress parses the
       // stream and returns the final `result` payload (or throws on `error`).
+      // The stream's friendly step messages feed the card's status line.
       const data = await fetchWithProgress(
         `/api/photos/${encodeURIComponent(trimmed)}?classify=false`,
         {},
-        () => {},
+        (event) => {
+          const step = event.step as string | undefined;
+          if (event.status === "in_progress" && step) {
+            setStep1({ status: "running", statusText: `${step}…` });
+          }
+        },
       ) as {
         photos?: string[];
         listing?: { title?: string };
@@ -105,12 +105,15 @@ function ImageSearchSteps({ siteStatus = null, enabledSites, sitePriority, onUse
       setStep1Title(data?.listing?.title || "");
       setFetchedListingUrl(trimmed);
       if (photos.length > 0) setStep1Selected(photos[0]);
-      pipeline.advance(); // → Reverse image search
+      setStep1({
+        status: "success",
+        statusText: `${photos.length} photo${photos.length !== 1 ? "s" : ""} found`,
+      });
     } catch (err) {
-      pipeline.fail((err as Error).message || "Failed to fetch listing photos");
-      toast.error((err as Error).message || "Failed to fetch listing photos");
+      const message = (err as Error).message || "Failed to fetch listing photos";
+      setStep1({ status: "error", error: message });
+      toast.error(message);
     } finally {
-      setStep1Loading(false);
       setStep1Link("");
     }
   };
@@ -118,7 +121,7 @@ function ImageSearchSteps({ siteStatus = null, enabledSites, sitePriority, onUse
   const handleStep2Search = async () => {
     const url = step2ImageUrl.trim();
     if (!url) return;
-    setStep2Loading(true);
+    setStep2({ status: "running", statusText: "Searching 3D sites…" });
     setStep2Results([]);
     try {
       const res = await fetch("/api/serp-lens", {
@@ -132,50 +135,34 @@ function ImageSearchSteps({ siteStatus = null, enabledSites, sitePriority, onUse
       const { filtered, skippedSites } = filterOperationalThreeDResults(data.results, siteStatus);
       setStep2Results(filtered);
       toastSkippedSites(skippedSites);
-      if (filtered.length === 0 && skippedSites.length === 0) {
-        toast.info("No 3D file results found for this image");
-        pipelineRef.current?.fail("No 3D file results found for this image");
-      } else {
-        pipelineRef.current?.succeed();
-      }
+      // A completed search with zero matches is a success, not a failure —
+      // reported inline only (no toast), per ADR 0003.
+      setStep2({
+        status: "success",
+        statusText:
+          filtered.length === 0 && skippedSites.length === 0
+            ? "No 3D file results found for this image"
+            : `${filtered.length} result${filtered.length !== 1 ? "s" : ""} found`,
+      });
     } catch (err) {
-      pipelineRef.current?.fail((err as Error).message || "Search failed");
-      toast.error((err as Error).message || "Search failed");
-    } finally {
-      setStep2Loading(false);
-    }
-  };
-
-  /**
-   * Retry the failed pipeline. The store settles a failed pipeline permanently,
-   * so a retry dismisses it and re-runs against a fresh pipeline: re-run the
-   * reverse image search when photos were already fetched, otherwise re-run
-   * the photo fetch from step 1.
-   */
-  const handleRetry = () => {
-    if (step1Photos.length > 0 && step2ImageUrl.trim()) {
-      if (pipelineId != null) dismissPipeline(pipelineId);
-      const { id: newPipelineId, handle: pipeline } = startPipelineWithId(
-        "Image Search",
-        [IMAGE_SEARCH_STEP_SEARCH],
-      );
-      pipelineRef.current = pipeline;
-      setPipelineId(newPipelineId);
-      void handleStep2Search();
-    } else if (fetchedListingUrl) {
-      // handleStep1Submit dismisses the failed pipeline and starts a fresh one
-      void handleStep1Submit({ preventDefault: () => {} } as React.FormEvent, fetchedListingUrl);
+      const message = (err as Error).message || "Search failed";
+      setStep2({ status: "error", error: message });
+      toast.error(message);
     }
   };
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Waiting state: one Pipeline in the Status Store (ADR 0002) */}
-      <PipelineTracker pipelineId={pipelineId} onRetry={handleRetry} />
-
       {/* Step 1 — Fetch eBay Photos */}
-      <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
-        <p className="text-sm font-semibold text-text-primary">Step 1 — Fetch eBay Photos</p>
+      <StepCard
+        title="Step 1 — Fetch eBay Photos"
+        status={step1.status}
+        statusText={step1.statusText}
+        error={step1.error}
+        onRetry={fetchedListingUrl ? () => {
+          void handleStep1Submit({ preventDefault: () => {} } as React.FormEvent, fetchedListingUrl);
+        } : undefined}
+      >
         <form onSubmit={handleStep1Submit} className="flex">
           <div className="flex-1">
             <MessageBarInput
@@ -225,10 +212,16 @@ function ImageSearchSteps({ siteStatus = null, enabledSites, sitePriority, onUse
             )}
           </div>
         )}
-      </div>
+      </StepCard>
+
       {/* Step 2 — Reverse Image Search */}
-      <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
-        <p className="text-sm font-semibold text-text-primary">Step 2 — Reverse Image Search</p>
+      <StepCard
+        title="Step 2 — Reverse Image Search"
+        status={step2.status}
+        statusText={step2.statusText}
+        error={step2.error}
+        onRetry={() => { void handleStep2Search(); }}
+      >
         <form
           onSubmit={(e) => { e.preventDefault(); handleStep2Search(); }}
           className="flex items-center gap-3"
@@ -323,7 +316,7 @@ function ImageSearchSteps({ siteStatus = null, enabledSites, sitePriority, onUse
             </ol>
           </div>
         )}
-      </div>
+      </StepCard>
     </div>
   );
 }
