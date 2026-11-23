@@ -1,5 +1,7 @@
 # Unified status handling: Task/Pipeline model + single Status Store
 
+> **Superseded in part by [ADR 0003](0003-distributed-step-status.md).** Decisions 1–3 and 6 below (Task/Pipeline model, single Status Store, PipelineTracker, store-mediated inline errors) are reversed: status is distributed to per-step `StepCard`s with parent-orchestrated local state. Decision 4's toast system survives but is decoupled from the store; Decision 5 (determinate progress when counts are known) still stands; Decision 8's revisit trigger has fired (background success toasts dropped).
+
 The frontend's status handling was fragmented: three overlapping toast mechanisms (`ToastContainer` top-center, `StartupToasts` bottom-right, inline messages), four parallel `ProgressState` objects, and ~30 independent `is*` boolean flags concentrated in `App.tsx`. Each feature wired its own loading, progress, and error UI. This ADR records the decision to replace all of it with one model and one store.
 
 ## Decisions
