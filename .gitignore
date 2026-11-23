@@ -47,8 +47,6 @@ backend_stdout.txt
 /backend_stdout.txt
 
 # Scratch/working files
-/.scratch/
-.scratch/
 .worktrees/
 
 # SQLite database (runtime artifact; migrated from JSON on first run)

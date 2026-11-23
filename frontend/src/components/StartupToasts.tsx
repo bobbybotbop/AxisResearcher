@@ -1,14 +1,14 @@
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import ReactDOM from "react-dom";
+import {
+  __internalPatchTask,
+  dismissTask,
+  startTaskWithId,
+  statusStore,
+  type Task,
+} from "../utils/statusStore";
 
 export type StartupToastStatus = "pending" | "success" | "error";
-
-interface StartupToast {
-  id: number;
-  status: StartupToastStatus;
-  label: string;
-  message?: string;
-}
 
 export interface TaskToastHandle {
   /** Update the pending toast's label (and optional message) in place. */
@@ -19,100 +19,44 @@ export interface TaskToastHandle {
   fail: (message: string) => void;
 }
 
-const SUCCESS_DISMISS_MS = 5000;
-
-// Module-level store so startup tasks can raise toasts from anywhere without
-// prop drilling. Every mutation replaces the array so useSyncExternalStore
-// snapshots stay referentially stable between emissions.
-let toasts: StartupToast[] = [];
-const listeners = new Set<() => void>();
-
-function emit(): void {
-  listeners.forEach((listener) => {
-    try {
-      listener();
-    } catch (err) {
-      console.warn("[startup-toasts] listener threw:", err);
-    }
-  });
-}
-
-function updateToast(id: number, patch: Partial<StartupToast>): void {
-  toasts = toasts.map((t) => (t.id === id ? { ...t, ...patch } : t));
-  emit();
+/**
+ * Backwards-compatible wrapper over the Status Store's startTask. Existing
+ * callers (eBay quantity refresh, token refresh) keep working unchanged.
+ * Never throws — a broken toast must never break the app.
+ */
+export function startTaskToast(label: string): TaskToastHandle {
+  const { id, handle } = startTaskWithId(label);
+  return {
+    update(nextLabel, message) {
+      __internalPatchTask(id, { name: nextLabel, message });
+    },
+    succeed: handle.succeed,
+    fail: handle.fail,
+  };
 }
 
 export function dismissTaskToast(id: number): void {
-  toasts = toasts.filter((t) => t.id !== id);
-  emit();
-}
-
-/**
- * Raise a pending toast for a background task. Never throws — a broken toast
- * must never break the app. Concurrent calls stack independently.
- */
-export function startTaskToast(label: string): TaskToastHandle {
-  const id = Date.now() + Math.random();
-  try {
-    toasts = [...toasts, { id, status: "pending", label }];
-    emit();
-  } catch (err) {
-    console.warn("[startup-toasts] failed to start toast:", err);
-  }
-
-  let settled = false;
-  return {
-    update(label, message) {
-      if (settled) return;
-      try {
-        updateToast(id, { label, message });
-      } catch (err) {
-        console.warn("[startup-toasts] failed to update toast:", err);
-      }
-    },
-    succeed(message) {
-      if (settled) return;
-      settled = true;
-      try {
-        updateToast(id, { status: "success", message });
-        setTimeout(() => dismissTaskToast(id), SUCCESS_DISMISS_MS);
-      } catch (err) {
-        console.warn("[startup-toasts] failed to settle toast:", err);
-      }
-    },
-    fail(message) {
-      if (settled) return;
-      settled = true;
-      try {
-        updateToast(id, { status: "error", message });
-      } catch (err) {
-        console.warn("[startup-toasts] failed to settle toast:", err);
-      }
-    },
-  };
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-}
-
-function getSnapshot(): StartupToast[] {
-  return toasts;
+  dismissTask(id);
 }
 
 interface StartupToastItemProps {
-  toast: StartupToast;
+  task: Task;
   onDismiss: (id: number) => void;
 }
 
-function StartupToastItem({ toast, onDismiss }: StartupToastItemProps) {
+function StartupToastItem({ task, onDismiss }: StartupToastItemProps) {
+  const [detailOpen, setDetailOpen] = useState(false);
+  const status: StartupToastStatus =
+    task.status === "success"
+      ? "success"
+      : task.status === "error"
+        ? "error"
+        : "pending";
+
   const palette =
-    toast.status === "success"
+    status === "success"
       ? "bg-success text-white"
-      : toast.status === "error"
+      : status === "error"
         ? "bg-danger text-white"
         : "border border-border-default bg-surface-panel text-text-primary";
 
@@ -120,30 +64,52 @@ function StartupToastItem({ toast, onDismiss }: StartupToastItemProps) {
     <div
       className={`pointer-events-auto flex items-start gap-3 rounded-lg px-4 py-3 shadow-lg ${palette}`}
       style={{ minWidth: "280px", maxWidth: "480px" }}
-      role={toast.status === "error" ? "alert" : "status"}
+      role={status === "error" ? "alert" : "status"}
     >
-      {toast.status === "pending" ? (
+      {status === "pending" ? (
         <span
           className="mt-0.5 h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-text-muted/40 border-t-primary"
           aria-hidden="true"
         />
       ) : (
         <span className="mt-0.5 shrink-0 text-sm font-bold" aria-hidden="true">
-          {toast.status === "success" ? "✓" : "✕"}
+          {status === "success" ? "✓" : "✕"}
         </span>
       )}
       <div className="flex-1">
-        <p className="text-sm font-medium leading-snug">{toast.label}</p>
-        {toast.message && (
-          <p className={`mt-0.5 text-xs ${toast.status === "pending" ? "text-text-muted" : "opacity-80"}`}>
-            {toast.message}
+        <p className="text-sm font-medium leading-snug">{task.name}</p>
+        {task.message && (
+          <p className={`mt-0.5 text-xs ${status === "pending" ? "text-text-muted" : "opacity-80"}`}>
+            {task.message}
+          </p>
+        )}
+        {task.detail && status !== "pending" && (
+          <>
+            <button
+              type="button"
+              onClick={() => setDetailOpen((o) => !o)}
+              className="mt-0.5 text-xs underline opacity-80 hover:opacity-100"
+              aria-expanded={detailOpen}
+            >
+              {detailOpen ? "Hide details" : "Details"}
+            </button>
+            {detailOpen && (
+              <p className="mt-1 whitespace-pre-line text-xs opacity-80">
+                {task.detail}
+              </p>
+            )}
+          </>
+        )}
+        {task.progress && status === "pending" && (
+          <p className="mt-0.5 text-xs text-text-muted">
+            {task.progress.current} of {task.progress.total}
           </p>
         )}
       </div>
-      {toast.status !== "pending" && (
+      {status !== "pending" && (
         <button
           type="button"
-          onClick={() => onDismiss(toast.id)}
+          onClick={() => onDismiss(task.id)}
           className="ml-1 shrink-0 text-sm opacity-60 hover:opacity-100"
           aria-label="Dismiss"
         >
@@ -155,13 +121,14 @@ function StartupToastItem({ toast, onDismiss }: StartupToastItemProps) {
 }
 
 /**
- * Stacked, non-blocking toasts for background startup tasks (eBay startup
- * sync, quantity refresh). Fixed to the bottom-right corner; the container
- * ignores pointer events so the app stays usable while tasks run.
+ * The Status Store's toast module. Renders standalone tasks as stacked,
+ * non-blocking toasts fixed to the bottom-right corner; the container ignores
+ * pointer events so the app stays usable while tasks run. Success toasts
+ * auto-dismiss; error toasts persist until manually dismissed.
  */
 export default function StartupToasts() {
-  const items = useSyncExternalStore(subscribe, getSnapshot);
-  if (items.length === 0) return null;
+  const { tasks } = useSyncExternalStore(statusStore.subscribe, statusStore.getSnapshot);
+  if (tasks.length === 0) return null;
   return ReactDOM.createPortal(
     <div
       className="pointer-events-none fixed bottom-4 right-4 z-[9999] flex flex-col items-end gap-2"
@@ -170,8 +137,8 @@ export default function StartupToasts() {
       aria-live="polite"
       aria-atomic="false"
     >
-      {items.map((toast) => (
-        <StartupToastItem key={toast.id} toast={toast} onDismiss={dismissTaskToast} />
+      {tasks.map((task) => (
+        <StartupToastItem key={task.id} task={task} onDismiss={dismissTaskToast} />
       ))}
     </div>,
     document.body,

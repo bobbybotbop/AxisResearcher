@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, RefreshCw, Search, X } from "lucide-react";
 import Lightbox from "./Lightbox";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { formatListingDateTime } from "../utils/listingDisplay";
+import { startTask, startTaskWithId, useTaskRunning } from "../utils/statusStore";
 import {
   PIPELINE_IMAGE_SEARCH,
   PIPELINE_TITLE_SEARCH,
@@ -97,6 +98,62 @@ function Badges({ entry }: { entry: Saved3DFile }) {
       <SiteBadge site={entry.source_site} />
       <MatchLabelBadge label={entry.match_label} />
       <PipelineBadge pipeline={entry.pipeline} />
+    </div>
+  );
+}
+
+function SkeletonBar({ className }: { className: string }) {
+  return <div className={`animate-pulse rounded bg-surface-hover ${className}`} />;
+}
+
+function CompactSaved3DFileRowSkeleton() {
+  return (
+    <div
+      aria-hidden="true"
+      className="flex w-full overflow-hidden rounded-xl border border-border-default bg-surface-panel shadow-sm"
+    >
+      <SkeletonBar className="h-20 w-24 shrink-0 rounded-none" />
+      <div className="flex min-w-0 flex-1 flex-col justify-center gap-2 px-3 py-2">
+        <SkeletonBar className="h-4 w-2/3" />
+        <SkeletonBar className="h-3 w-1/3" />
+      </div>
+    </div>
+  );
+}
+
+function DetailedSaved3DFileCardSkeleton() {
+  return (
+    <div
+      aria-hidden="true"
+      className="flex w-full flex-col overflow-hidden rounded-xl border border-border-default bg-surface-panel shadow-sm md:flex-row md:items-stretch"
+    >
+      <div className="w-full shrink-0 border-b border-border-default md:w-[30%] md:max-w-md md:border-b-0 md:border-r">
+        <SkeletonBar className="aspect-square w-full rounded-none" />
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col gap-3 p-4 sm:p-5">
+        <SkeletonBar className="h-5 w-3/4" />
+        <div className="flex gap-1.5">
+          <SkeletonBar className="h-5 w-16 rounded-full" />
+          <SkeletonBar className="h-5 w-24 rounded-full" />
+          <SkeletonBar className="h-5 w-20 rounded-full" />
+        </div>
+        <SkeletonBar className="h-3 w-1/3" />
+        <SkeletonBar className="h-3 w-1/2" />
+      </div>
+    </div>
+  );
+}
+
+function Saved3DFileSkeletons({ viewMode }: { viewMode: "compact" | "detailed" }) {
+  return (
+    <div className="flex flex-col gap-4" role="status" aria-label="Loading saved 3D files">
+      {Array.from({ length: 4 }, (_, i) =>
+        viewMode === "compact" ? (
+          <CompactSaved3DFileRowSkeleton key={i} />
+        ) : (
+          <DetailedSaved3DFileCardSkeleton key={i} />
+        ),
+      )}
     </div>
   );
 }
@@ -303,27 +360,31 @@ function Saved3DFileDetailModal({
   const [heroIndex, setHeroIndex] = useState(0);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteTaskId, setDeleteTaskId] = useState<number | null>(null);
+  const deletePending = useTaskRunning(deleteTaskId);
 
   const urls = entry.images.map((name) => imageUrl(entry, name));
   const safeHero = urls.length ? heroIndex % urls.length : 0;
   const title = entry.ebay_listing_title || "No title";
 
   const handleDelete = async () => {
-    setDeleting(true);
     setDeleteError(null);
+    const { id, handle: task } = startTaskWithId(`Deleting saved 3D file #${entry.id}`);
+    setDeleteTaskId(id);
     try {
       const res = await fetch(`/api/saved-3d-files/${entry.id}`, { method: "DELETE" });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         throw new Error(err.error || `HTTP ${res.status}`);
       }
+      task.succeed("Saved 3D file deleted");
       onDeleted(entry.id);
       onClose();
     } catch (err) {
-      setDeleteError((err as Error).message);
-      setDeleting(false);
+      const message = (err as Error).message;
+      task.fail(message);
+      setDeleteError(message);
       setConfirmDelete(false);
     }
   };
@@ -430,15 +491,15 @@ function Saved3DFileDetailModal({
                   <>
                     <button
                       type="button"
-                      disabled={deleting}
+                      disabled={deletePending}
                       className="rounded-full border border-danger/30 bg-danger px-6 py-2.5 text-base font-light leading-snug tracking-tight text-white transition-colors hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
                       onClick={handleDelete}
                     >
-                      {deleting ? "Deleting..." : "Confirm delete"}
+                      {deletePending ? "Deleting..." : "Confirm delete"}
                     </button>
                     <button
                       type="button"
-                      disabled={deleting}
+                      disabled={deletePending}
                       className={btnPill}
                       onClick={() => setConfirmDelete(false)}
                     >
@@ -529,6 +590,9 @@ export default function Saved3DFiles() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     setFetchError(null);
+    // Report the load through the Status Store (ADR 0002); the skeleton cards
+    // stay gated on the local loading flag as their local trigger.
+    const task = startTask("Load saved 3D files");
     try {
       const res = await fetch(`/api/saved-3d-files?page=${page}&page_size=${pageSize}`);
       if (!res.ok) {
@@ -536,8 +600,11 @@ export default function Saved3DFiles() {
         throw new Error(err.error || `HTTP ${res.status}`);
       }
       setData((await res.json()) as Saved3DFilesResponse);
+      task.succeed();
     } catch (err) {
-      setFetchError((err as Error).message);
+      const message = (err as Error).message;
+      setFetchError(message);
+      task.fail(message);
     } finally {
       setLoading(false);
     }
@@ -633,10 +700,7 @@ export default function Saved3DFiles() {
 
       {/* List */}
       {loading && !data ? (
-        <div className="flex flex-col items-center justify-center gap-4 py-12">
-          <div className="h-12 w-12 animate-spin rounded-full border-4 border-border-default border-t-primary" />
-          <p className="text-text-muted">Loading saved 3D files...</p>
-        </div>
+        <Saved3DFileSkeletons viewMode={viewMode} />
       ) : (data?.items.length ?? 0) === 0 ? (
         <div className="rounded-xl border border-border-default bg-surface-muted p-8 text-center">
           <p className="text-text-muted">

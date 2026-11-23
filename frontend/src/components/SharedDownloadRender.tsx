@@ -1,11 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
 import MessageBarInput from "./MessageBarInput";
+import PipelineTracker from "./PipelineTracker";
 import RenderProfileDropdown from "./RenderProfileDropdown";
 import RenderProfileEditor from "./RenderProfileEditor";
 import StudioRenderPreview, { type StudioRenderPreviewHandle } from "./StudioRenderPreview";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
+import {
+  dismissPipeline,
+  startPipelineWithId,
+  toast,
+  type PipelineHandle,
+} from "../utils/statusStore";
 import { DOWNLOAD_MODE_FILES, DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, type DownloadMode, type Pipeline, type MatchLabel } from "../constants/files3d";
 import {
   DEFAULT_RENDER_SHOT_MODE,
@@ -145,14 +152,18 @@ interface DownloadMeta {
 }
 
 interface SharedDownloadRenderProps {
-  addToast?: (type: string, message: string) => void;
   fileDownloadDelay?: number;
   externalUrl?: string;
   externalMeta?: DownloadMeta | null;
   onExternalUrlConsumed?: () => void;
 }
 
-function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, externalMeta, onExternalUrlConsumed }: SharedDownloadRenderProps) {
+// Download + Render waiting state: one Pipeline in the Status Store per
+// download (ADR 0002), rendered by PipelineTracker. The bespoke detail UIs
+// (render progress text, preview, results) below are unchanged.
+const DOWNLOAD_RENDER_STEPS = ["Download 3D file", "Studio render"];
+
+function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta, onExternalUrlConsumed }: SharedDownloadRenderProps) {
   // Step 3 — Download 3D File
   const [step3Url, setStep3Url] = useState("");
   const [step3LoadingMode, setStep3LoadingMode] = useState<DownloadMode | null>(null);
@@ -205,6 +216,13 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, ex
   // Step 4 — view switching: the profile dropdown or the Profile Editor
   const [step4View, setStep4View] = useState<"dropdown" | "editor">("dropdown");
   const [editingProfile, setEditingProfile] = useState<string | null | "create">(null);
+
+  // Waiting state lives in the Status Store; only the pipeline id is local.
+  const [pipelineId, setPipelineId] = useState<number | null>(null);
+  const pipelineRef = useRef<PipelineHandle | null>(null);
+  // Last download mode attempted — lets Retry re-run a failed download with the
+  // same mode after the failed pipeline is dismissed.
+  const lastDownloadModeRef = useRef<DownloadMode>(DOWNLOAD_MODE_FULL_ZIP);
 
   // Accept an external URL (from either pipeline) into the Step 3 input,
   // along with the listing/pipeline metadata for the download auto-save
@@ -382,10 +400,18 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, ex
   const handleStep3Download = async (mode: DownloadMode) => {
     const link = step3Url.trim();
     if (!link || !step3Supported) return;
+    lastDownloadModeRef.current = mode;
     setStep3LoadingMode(mode);
     setStep3Result(null);
     setStep3Error(null);
     resetStep4();
+    if (pipelineId != null) dismissPipeline(pipelineId);
+    const { id: newPipelineId, handle: pipeline } = startPipelineWithId(
+      "Download + Render",
+      DOWNLOAD_RENDER_STEPS,
+    );
+    pipelineRef.current = pipeline;
+    setPipelineId(newPipelineId);
     try {
       // "files" mode reuses the full-zip response; unzipping happens client-side
       const wireMode = mode === DOWNLOAD_MODE_FILES ? DOWNLOAD_MODE_FULL_ZIP : mode;
@@ -422,12 +448,16 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, ex
         setDownloadHasAmf(entries.some((e) => modelExtensionOf(e.path[e.path.length - 1]) === ".amf"));
         applyRenderCandidates(pickRenderCandidates(entries));
         const savedToFolder = await saveEntriesToFolder(entries);
-        if (savedToFolder === null) return; // user cancelled the folder picker
+        if (savedToFolder === null) {
+          pipeline.fail("Download cancelled");
+          return; // user cancelled the folder picker
+        }
         if (!savedToFolder) {
           downloadEntriesIndividually(entries);
-          addToast?.("info", `Downloading ${entries.length} files individually — browser may ask to allow multiple downloads`);
+          toast.info(`Downloading ${entries.length} files individually — browser may ask to allow multiple downloads`);
         }
         setStep3Result({ filename: filename.replace(/\.zip$/i, ""), bytes: blob.size, fileCount: entries.length });
+        pipeline.advance(); // → Studio render
         return;
       }
       const downloadUrl = URL.createObjectURL(blob);
@@ -440,8 +470,10 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, ex
       setDownloadHasAmf(entries.some((e) => modelExtensionOf(e.path[e.path.length - 1]) === ".amf"));
       applyRenderCandidates(pickRenderCandidates(entries));
       setStep3Result({ filename, bytes: blob.size });
-      if (step3Meta) addToast?.("success", "Saved to Saved 3D Files");
+      pipeline.advance(); // → Studio render
+      if (step3Meta) toast.success("Saved to Saved 3D Files");
     } catch (err) {
+      pipeline.fail((err as Error).message || "Download failed");
       setStep3Error((err as Error).message || "Download failed");
     } finally {
       setStep3LoadingMode(null);
@@ -502,6 +534,7 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, ex
               shot,
               shots,
             });
+            pipelineRef.current?.progress(event.current, event.total);
           } else if (shot !== null) {
             // "shot i of N" marker: a new camera is starting (reset the sample bar)
             setRenderProgress({ current: 0, total: 0, remainingSeconds: null, shot, shots });
@@ -515,7 +548,9 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, ex
       } else {
         setStep4Image({ url: images[0], filename: data.filename });
       }
+      pipelineRef.current?.succeed();
     } catch (err) {
+      pipelineRef.current?.fail((err as Error).message || "Render failed");
       setStep4Error((err as Error).message || "Render failed");
     } finally {
       setStep4Loading(false);
@@ -523,8 +558,33 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, ex
     }
   };
 
+  /**
+   * Retry the failed pipeline. The store settles a failed pipeline permanently,
+   * so a retry dismisses it and re-runs against a fresh pipeline: re-run the
+   * render when the download already produced a render file, otherwise re-run
+   * the download with the last mode.
+   */
+  const handleRetry = () => {
+    if (renderFile) {
+      if (pipelineId != null) dismissPipeline(pipelineId);
+      const { id: newPipelineId, handle: pipeline } = startPipelineWithId(
+        "Download + Render",
+        [DOWNLOAD_RENDER_STEPS[1]],
+      );
+      pipelineRef.current = pipeline;
+      setPipelineId(newPipelineId);
+      void handleStep4Render();
+    } else {
+      // handleStep3Download dismisses the failed pipeline and starts a fresh one
+      void handleStep3Download(lastDownloadModeRef.current);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-4">
+      {/* Waiting state: one Pipeline in the Status Store (ADR 0002) */}
+      <PipelineTracker pipelineId={pipelineId} onRetry={handleRetry} />
+
       {/* Step 3 — Download 3D File */}
       <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
         <p className="text-sm font-semibold text-text-primary">Step 3 — Download 3D File</p>
@@ -598,7 +658,6 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, ex
             editingProfile={editingProfile}
             onBack={() => setStep4View("dropdown")}
             onSavedCurrentSettings={reloadRenderSettings}
-            addToast={addToast}
           />
         ) : (
           /* Render Profile — selecting one copies its values into Current
@@ -610,7 +669,6 @@ function SharedDownloadRender({ addToast, fileDownloadDelay = 0, externalUrl, ex
                 setEditingProfile(mode === "create" ? "create" : name);
                 setStep4View("editor");
               }}
-              addToast={addToast}
             />
           </div>
         )}

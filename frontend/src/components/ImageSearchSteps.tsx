@@ -1,9 +1,22 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import MessageBarInput from "./MessageBarInput";
+import PipelineTracker from "./PipelineTracker";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { PIPELINE_IMAGE_SEARCH, MATCH_LABEL_CONFIRMED_IMAGE_MATCH, type ThreeDSiteStatus, type Pipeline, type MatchLabel } from "../constants/files3d";
 import { filterOperationalThreeDResults, toastSkippedSites } from "../utils/filterThreeDResults";
+import {
+  dismissPipeline,
+  startPipelineWithId,
+  toast,
+  type PipelineHandle,
+} from "../utils/statusStore";
+
+// Image Search waiting state: one Pipeline in the Status Store per run
+// (ADR 0002), rendered by PipelineTracker. Bespoke step UIs below are unchanged.
+const IMAGE_SEARCH_STEP_FETCH = "Fetch eBay photos";
+const IMAGE_SEARCH_STEP_SEARCH = "Reverse image search";
+const IMAGE_SEARCH_STEPS = [IMAGE_SEARCH_STEP_FETCH, IMAGE_SEARCH_STEP_SEARCH];
 
 interface SearchResult {
   site_type?: string;
@@ -30,14 +43,13 @@ interface ForwardedLinkMeta {
 }
 
 interface ImageSearchStepsProps {
-  addToast?: (type: string, message: string) => void;
   siteStatus?: ThreeDSiteStatus | null;
   enabledSites?: string[];
   sitePriority?: string[];
   onUseLink?: (link: string, meta: ForwardedLinkMeta) => void;
 }
 
-function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePriority, onUseLink }: ImageSearchStepsProps) {
+function ImageSearchSteps({ siteStatus = null, enabledSites, sitePriority, onUseLink }: ImageSearchStepsProps) {
   // Step 1 — Fetch eBay Photos
   const [step1Link, setStep1Link] = useState("");
   const [step1Photos, setStep1Photos] = useState<string[]>([]);
@@ -53,17 +65,28 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
   const [step2Results, setStep2Results] = useState<SearchResult[]>([]);
   const [step2Loading, setStep2Loading] = useState(false);
 
-  const handleStep1Submit = async (e: React.FormEvent) => {
+  // Waiting state lives in the Status Store; only the pipeline id is local.
+  const [pipelineId, setPipelineId] = useState<number | null>(null);
+  const pipelineRef = useRef<PipelineHandle | null>(null);
+
+  const handleStep1Submit = async (e: React.FormEvent, linkOverride?: string) => {
     e.preventDefault();
-    const trimmed = step1Link.trim();
+    const trimmed = (linkOverride ?? step1Link).trim();
     if (!trimmed) {
-      addToast?.("error", "Please enter an eBay listing ID or URL");
+      toast.error("Please enter an eBay listing ID or URL");
       return;
     }
     setStep1Loading(true);
     setStep1Photos([]);
     setStep1Title("");
     setStep1Selected(null);
+    if (pipelineId != null) dismissPipeline(pipelineId);
+    const { id: newPipelineId, handle: pipeline } = startPipelineWithId(
+      "Image Search",
+      IMAGE_SEARCH_STEPS,
+    );
+    pipelineRef.current = pipeline;
+    setPipelineId(newPipelineId);
     try {
       // /api/photos streams NDJSON progress events; fetchWithProgress parses the
       // stream and returns the final `result` payload (or throws on `error`).
@@ -82,8 +105,10 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
       setStep1Title(data?.listing?.title || "");
       setFetchedListingUrl(trimmed);
       if (photos.length > 0) setStep1Selected(photos[0]);
+      pipeline.advance(); // → Reverse image search
     } catch (err) {
-      addToast?.("error", (err as Error).message || "Failed to fetch listing photos");
+      pipeline.fail((err as Error).message || "Failed to fetch listing photos");
+      toast.error((err as Error).message || "Failed to fetch listing photos");
     } finally {
       setStep1Loading(false);
       setStep1Link("");
@@ -106,17 +131,48 @@ function ImageSearchSteps({ addToast, siteStatus = null, enabledSites, sitePrior
       // Skip results from 3D sites whose scraper failed the operational test
       const { filtered, skippedSites } = filterOperationalThreeDResults(data.results, siteStatus);
       setStep2Results(filtered);
-      toastSkippedSites(addToast, skippedSites);
-      if (filtered.length === 0 && skippedSites.length === 0) addToast?.("info", "No 3D file results found for this image");
+      toastSkippedSites(skippedSites);
+      if (filtered.length === 0 && skippedSites.length === 0) {
+        toast.info("No 3D file results found for this image");
+        pipelineRef.current?.fail("No 3D file results found for this image");
+      } else {
+        pipelineRef.current?.succeed();
+      }
     } catch (err) {
-      addToast?.("error", (err as Error).message || "Search failed");
+      pipelineRef.current?.fail((err as Error).message || "Search failed");
+      toast.error((err as Error).message || "Search failed");
     } finally {
       setStep2Loading(false);
     }
   };
 
+  /**
+   * Retry the failed pipeline. The store settles a failed pipeline permanently,
+   * so a retry dismisses it and re-runs against a fresh pipeline: re-run the
+   * reverse image search when photos were already fetched, otherwise re-run
+   * the photo fetch from step 1.
+   */
+  const handleRetry = () => {
+    if (step1Photos.length > 0 && step2ImageUrl.trim()) {
+      if (pipelineId != null) dismissPipeline(pipelineId);
+      const { id: newPipelineId, handle: pipeline } = startPipelineWithId(
+        "Image Search",
+        [IMAGE_SEARCH_STEP_SEARCH],
+      );
+      pipelineRef.current = pipeline;
+      setPipelineId(newPipelineId);
+      void handleStep2Search();
+    } else if (fetchedListingUrl) {
+      // handleStep1Submit dismisses the failed pipeline and starts a fresh one
+      void handleStep1Submit({ preventDefault: () => {} } as React.FormEvent, fetchedListingUrl);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-4">
+      {/* Waiting state: one Pipeline in the Status Store (ADR 0002) */}
+      <PipelineTracker pipelineId={pipelineId} onRetry={handleRetry} />
+
       {/* Step 1 — Fetch eBay Photos */}
       <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
         <p className="text-sm font-semibold text-text-primary">Step 1 — Fetch eBay Photos</p>

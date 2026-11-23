@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { btnPillSm } from "../styles/buttonPill";
 import NumberInput from "./NumberInput";
+import { toast } from "../utils/statusStore";
 
 interface TitleSimplificationConfig {
   stopwords: string[];
@@ -8,7 +9,6 @@ interface TitleSimplificationConfig {
 }
 
 interface TitleSimplificationSettingsProps {
-  addToast: (type: string, message: string) => void;
 }
 
 /**
@@ -17,8 +17,7 @@ interface TitleSimplificationSettingsProps {
  * trim. Reads/writes /api/research/title-simplification.
  */
 export default function TitleSimplificationSettings({
-  addToast,
-}: TitleSimplificationSettingsProps) {
+  }: TitleSimplificationSettingsProps) {
   const [stopwords, setStopwords] = useState("");
   const [maxWords, setMaxWords] = useState(6);
   const [loading, setLoading] = useState(true);
@@ -33,7 +32,7 @@ export default function TitleSimplificationSettings({
         setStopwords(data.stopwords.join(", "));
         setMaxWords(data.max_words);
       } catch (err) {
-        addToast("error", (err as Error).message);
+        toast.error((err as Error).message);
       } finally {
         setLoading(false);
       }
@@ -57,9 +56,9 @@ export default function TitleSimplificationSettings({
       if (!res.ok) throw new Error(data.error || "Failed to save config");
       setStopwords(data.stopwords.join(", "));
       setMaxWords(data.max_words);
-      addToast("success", "Title simplification settings saved");
+      toast.success("Title simplification settings saved");
     } catch (err) {
-      addToast("error", (err as Error).message);
+      toast.error((err as Error).message);
     } finally {
       setSaving(false);
     }

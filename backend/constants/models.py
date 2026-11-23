@@ -1,4 +1,4 @@
-DEFAULT_TEXT_MODEL = "deepseek/deepseek-v4-flash"
+DEFAULT_TEXT_MODEL = "anthropic/claude-haiku-4.5"
 DEFAULT_IMAGE_MODEL = "bytedance-seed/seedream-5-0-lite"
 DEFAULT_CLASSIFIER_MODEL = "bytedance-seed/seed-1.6-flash"
 DEFAULT_TITLE_SEARCH_MODEL = "anthropic/claude-haiku-4.5"

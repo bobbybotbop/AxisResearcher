@@ -12,6 +12,8 @@ Strip all sales and listing terms, including:
 
 Keep: product type, character/model names, brand or designer names, distinctive features (articulated, flexi, keychain, vase mode).
 
+Be brief: aim for a compact query, around 30 characters or fewer when the product can still be identified. Prefer the single most distinctive model name or code over listing every variant.
+
 Output a single line with only the optimized title — no quotes, no explanation, no punctuation at the end.
 
 eBay listing title: {title}

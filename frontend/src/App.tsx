@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+﻿import { useState, useEffect, useCallback, useRef, useMemo, useSyncExternalStore } from "react";
 import {
   FilePlus,
   History,
@@ -13,10 +13,18 @@ import {
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import CreateWorkflow from "./components/CreateWorkflow";
-import ToastContainer from "./components/ToastContainer";
 import StartupToasts, { startTaskToast } from "./components/StartupToasts";
+import {
+  startTask,
+  startTaskWithId,
+  toast,
+  useTaskRunning,
+  useTaskRunningByName,
+} from "./utils/statusStore";
 import GeneratedListingCard from "./components/GeneratedListingCard";
+import type { CardUploadStatus } from "./components/GeneratedListingCard";
 import CompactListingRow from "./components/CompactListingRow";
+import ListingCardSkeleton from "./components/ListingCardSkeleton";
 import ListingDetailModal from "./components/ListingDetailModal";
 import UploadListingsToolbar from "./components/UploadListingsToolbar";
 import ApiKeyManagementSection from "./components/ApiKeyManagementSection";
@@ -36,6 +44,24 @@ import { isDraft, isReadyToUpload, isUploaded } from "./utils/listingStatus";
 import TitleSimplificationSettings from "./components/TitleSimplificationSettings";
 import { btnPill, btnPillSm } from "./styles/buttonPill";
 import { fetchWithProgress } from "./utils/fetchWithProgress";
+import {
+  dismissPipeline,
+  startPipelineWithId,
+  statusStore,
+  type PipelineHandle,
+} from "./utils/statusStore";
+import {
+  CREATE_STEP_BG_REMOVAL,
+  CREATE_STEP_CATEGORIZE,
+  CREATE_STEP_CREATE_LISTING,
+  CREATE_STEP_FETCH,
+  CREATE_STEP_IMAGE_GEN,
+  CREATE_STEP_JSON,
+  CREATE_STEP_TEXT_GEN,
+  UPLOAD_PIPELINE_STEPS,
+  createPipelineSteps,
+  deriveCreatePhase,
+} from "./utils/createPipeline";
 import { DEFAULT_TEXT_MODEL_OPTIONS, IMAGE_MODEL_OPTIONS, CLASSIFIER_MODEL_OPTIONS, PROVIDER_LABELS } from "./constants/models";
 import type { ImageModelOption } from "./constants/models";
 import { TAB_PATHS } from "./constants/routes";
@@ -47,7 +73,7 @@ import type { EbayStartupSyncSummary } from "./constants/cooldown";
 import type { ThreeDSiteStatus, Pipeline, MatchLabel } from "./constants/files3d";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import type { DropResult } from "@hello-pangea/dnd";
-import type { Listing, ModelOption, ProgressState, ImageGenProgress } from "./types/listing";
+import type { Listing, ModelOption } from "./types/listing";
 import type { TestWorkflowState } from "./types/workflow";
 function modelCostLabel(m: ModelOption): string | null {
   if (m.costPerImage != null) return `$${m.costPerImage}/img`;
@@ -121,7 +147,6 @@ function mergeGeneratedImages(
   );
 }
 
-interface Toast { id: number; type: "success" | "error"; message: string; detail?: string }
 interface TokenInfo { user_token_set: boolean; application_token_set: boolean; user_token: string; application_token: string }
 interface TokenResult { ok: boolean; message: string }
 interface UploadResult { listingId?: string; href?: string; ebayId?: string }
@@ -133,33 +158,30 @@ interface ListingData {
 }
 type AutoSaveStatus = { title: "idle" | "saving" | "saved"; description: "idle" | "saving" | "saved" }
 
+// Status Store task names for the History/Upload operations (ADR 0002). The
+// `is*` waiting-state booleans for these operations are derived from running
+// store tasks via useTaskRunning, not held in useState.
+const SYNC_TASK_NAME = "Syncing with eBay";
+const RESTOCK_TASK_NAME = "Restocking listings";
+const BULK_DELETE_TASK_NAME = "Deleting listings";
+
 function App() {
   const [photos, setPhotos] = useState<string[]>([]);
   const [categories, setCategories] = useState<Record<string, string>>({});
   const [editableCategories, setEditableCategories] = useState<Record<string, string>>({});
   const [listing, setListing] = useState<Listing | null>(null);
   const [loading, setLoading] = useState(false);
-  const [isConfirming, setIsConfirming] = useState(false);
   const [generatedImages, setGeneratedImages] = useState<string[]>([]);
   const [isRegenerating, setIsRegenerating] = useState(false);
-  const [isCreatingListing, setIsCreatingListing] = useState(false);
   const [isGeneratingText, setIsGeneratingText] = useState(false);
   const [textGenStatus, setTextGenStatus] = useState("writing");
   const [textGenComplete, setTextGenComplete] = useState(false);
   const textGenControllerRef = useRef<AbortController | null>(null);
+  const textGenCompleteRef = useRef(false);
   const testTextGenTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const bgRemovalAbortControllerRef = useRef<AbortController | null>(null);
   const [listingData, setListingData] = useState<ListingData | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null);
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const addToast = (type: "success" | "error", message: string, detail?: string): void => {
-    const id = Date.now() + Math.random();
-    setToasts((prev) => [...prev, { id, type, message, detail }]);
-  };
-  const removeToast = useCallback((id: number): void => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
-  }, []);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -198,12 +220,15 @@ function App() {
     }
   });
   const [textModel, setTextModel] = useState(() => {
+    const DEFAULT_TEXT_MODEL = "anthropic/claude-haiku-4.5";
     try {
-      return (
-        localStorage.getItem("axisTextModel") || "deepseek/deepseek-v4-flash"
-      );
+      const stored = localStorage.getItem("axisTextModel");
+      // Migrate: the old default was deepseek; users who never deliberately
+      // changed it should follow the new default.
+      if (!stored || stored === "deepseek/deepseek-v4-flash") return DEFAULT_TEXT_MODEL;
+      return stored;
     } catch {
-      return "deepseek/deepseek-v4-flash";
+      return DEFAULT_TEXT_MODEL;
     }
   });
   const [textModelOptions, setTextModelOptions] = useState<ModelOption[]>([]);
@@ -381,19 +406,15 @@ function App() {
   const [autoPromoteEnabled, setAutoPromoteEnabled] = useState(true);
   const [promotedListingAdRate, setPromotedListingAdRate] = useState(7.0);
   const [bgRemovedPhotos, setBgRemovedPhotos] = useState<Record<string, string>>({});
-  const [bgRemovalProgress, setBgRemovalProgress] = useState<ProgressState>({
-    isActive: false,
-    currentStep: null,
-    completedSteps: [],
-    totalSteps: [],
-  });
   const [testingResult, setTestingResult] = useState<unknown>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [testingId, setTestingId] = useState("");
   const [appTokenResult, setAppTokenResult] = useState<TokenResult | null>(null);
-  const [isTestingAppToken, setIsTestingAppToken] = useState(false);
+  const [appTokenTaskId, setAppTokenTaskId] = useState<number | null>(null);
+  const isTestingAppToken = useTaskRunning(appTokenTaskId);
   const [userTokenResult, setUserTokenResult] = useState<TokenResult | null>(null);
-  const [isTestingUserToken, setIsTestingUserToken] = useState(false);
+  const [userTokenTaskId, setUserTokenTaskId] = useState<number | null>(null);
+  const isTestingUserToken = useTaskRunning(userTokenTaskId);
   const [allListings, setAllListings] = useState<Listing[]>([]);
   const [uploadListingsSearch, setUploadListingsSearch] = useState("");
   const [uploadListingsShowDrafts, setUploadListingsShowDrafts] =
@@ -403,6 +424,10 @@ function App() {
   const [loadingListings, setLoadingListings] = useState(false);
   const [uploadingSkus, setUploadingSkus] = useState<Set<string>>(new Set());
   const [uploadResults, setUploadResults] = useState<Record<string, UploadResult>>({});
+  // Per-card upload badge state (spinner → check/error). Waiting-state UI only;
+  // the summary toast is emitted through the Status Store.
+  const [uploadStatuses, setUploadStatuses] = useState<Record<string, CardUploadStatus>>({});
+  const uploadBatchRef = useRef<{ total: number; settled: number; failures: string[] } | null>(null);
   const [selectedListing, setSelectedListing] = useState<Listing | null>(null);
   const [listingDetailData, setListingDetailData] = useState<unknown>(null);
   const [loadingListingDetail, setLoadingListingDetail] = useState(false);
@@ -422,12 +447,14 @@ function App() {
   const [autoRestockQuantity, setAutoRestockQuantity] = useState(15);
   const [minimumImagesPerListing, setMinimumImagesPerListing] = useState(10);
   const [autoRestockConfirm, setAutoRestockConfirm] = useState<{ nextEnabled: boolean; nextQuantity: number } | null>(null);
-  const [isRestocking, setIsRestocking] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
+  // Waiting state for sync/restock/bulk-delete lives in the Status Store (ADR
+  // 0002) — these booleans are derived from running store tasks, not useState.
+  const isRestocking = useTaskRunningByName(RESTOCK_TASK_NAME);
+  const isSyncing = useTaskRunningByName(SYNC_TASK_NAME);
   const [syncLastRefreshed, setSyncLastRefreshed] = useState<string | null>(null);
   const [historySelectMode, setHistorySelectMode] = useState<boolean>(false);
   const [historySelectedSkus, setHistorySelectedSkus] = useState<Set<string>>(new Set());
-  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const isBulkDeleting = useTaskRunningByName(BULK_DELETE_TASK_NAME);
   const autoRestockRanRef = useRef<boolean>(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
@@ -459,32 +486,18 @@ function App() {
   const [isAddingNewVersions, setIsAddingNewVersions] = useState(false);
   const [promptModifier, setPromptModifier] = useState("");
 
-  // Progress tracking states
-  const [fetchProgress, setFetchProgress] = useState<ProgressState>({
-    isActive: false,
-    currentStep: null,
-    completedSteps: [],
-    totalSteps: [],
-  });
-  const [imageGenProgress, setImageGenProgress] = useState<ImageGenProgress>({
-    isActive: false,
-    taskId: null,
-    total: 0,
-    completed: 0,
-    currentGenerating: [],
-  });
-  const [createListingProgress, setCreateListingProgress] = useState<ProgressState>({
-    isActive: false,
-    currentStep: null,
-    completedSteps: [],
-    totalSteps: [],
-  });
-  const [uploadProgress, setUploadProgress] = useState<ProgressState>({
-    isActive: false,
-    currentStep: null,
-    completedSteps: [],
-    totalSteps: [],
-  });
+  // Waiting-state UI lives in the Status Store (ADR 0002): the Create
+  // workflow runs as one Pipeline, the eBay upload as another. These hold the
+  // pipeline ids/handles; the phase booleans below are derived from the store.
+  const [createPipelineId, setCreatePipelineId] = useState<number | null>(null);
+  const createPipelineRef = useRef<PipelineHandle | null>(null);
+  const createFailedPhaseRef = useRef<"fetch" | "images" | "create" | null>(null);
+  const [uploadPipelineId, setUploadPipelineId] = useState<number | null>(null);
+  const uploadPipelineRef = useRef<PipelineHandle | null>(null);
+  const [testCreatePipelineId, setTestCreatePipelineId] = useState<number | null>(null);
+  const testCreatePipelineRef = useRef<PipelineHandle | null>(null);
+  const [testUploadPipelineId, setTestUploadPipelineId] = useState<number | null>(null);
+  const testUploadPipelineRef = useRef<PipelineHandle | null>(null);
 
   // Token refresh panel state
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -872,13 +885,8 @@ function App() {
   const setTestEditableDescription = setTestKey("editableDescription");
   const setTestLightboxOpen = setTestKey("lightboxOpen");
   const setTestLightboxIndex = setTestKey("lightboxIndex");
-  const setTestFetchProgress = setTestKey("fetchProgress");
-  const setTestImageGenProgress = setTestKey("imageGenProgress");
-  const setTestCreateListingProgress = setTestKey("createListingProgress");
-  const setTestUploadProgress = setTestKey("uploadProgress");
   const setTestUploadingSkus = setTestKey("uploadingSkus");
   const setTestBgRemovedPhotos = setTestKey("bgRemovedPhotos");
-  const setTestBgRemovalProgress = setTestKey("bgRemovalProgress");
 
   const {
     listingId: testListingId,
@@ -913,14 +921,19 @@ function App() {
     editableDescription: testEditableDescription,
     lightboxOpen: testLightboxOpen,
     lightboxIndex: testLightboxIndex,
-    fetchProgress: testFetchProgress,
-    imageGenProgress: testImageGenProgress,
-    createListingProgress: testCreateListingProgress,
-    uploadProgress: testUploadProgress,
     uploadingSkus: testUploadingSkus,
     bgRemovedPhotos: testBgRemovedPhotos,
-    bgRemovalProgress: testBgRemovalProgress,
   } = testWf;
+
+  // Create/Upload waiting-state derived from the Status Store (ADR 0002).
+  const { pipelines: statusPipelines } = useSyncExternalStore(
+    statusStore.subscribe,
+    statusStore.getSnapshot,
+  );
+  const createPipeline = statusPipelines.find((p) => p.id === createPipelineId);
+  const createPhase = deriveCreatePhase(createPipeline);
+  const isConfirming = createPhase.generatingImages;
+  const isCreatingListing = createPhase.creatingListing;
   const filteredUploadListings = useMemo(() => {
     const order = new Map(allListings.map((l, i) => [l.sku, i]));
     const q = uploadListingsSearch.trim().toLowerCase();
@@ -1036,15 +1049,38 @@ function App() {
       textGenControllerRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    textGenCompleteRef.current = textGenComplete;
+  }, [textGenComplete]);
+
+  // Text generation runs concurrently with photo review / image generation,
+  // so it usually finishes before the pipeline reaches its step. When the
+  // pipeline is resting on the text step and generation is done, advance.
+  // (If text finishes earlier, the image-gen completion path advances past.)
+  useEffect(() => {
+    if (!textGenComplete || !createPipeline) return;
+    const current = createPipeline.steps[createPipeline.currentIndex];
+    if (current?.name === CREATE_STEP_TEXT_GEN) {
+      createPipelineRef.current?.advancePast(CREATE_STEP_TEXT_GEN);
+    }
+  }, [textGenComplete, createPipeline]);
+
+  // Same text-step advance for the simulated test workflow pipeline.
+  const testCreatePipeline = statusPipelines.find((p) => p.id === testCreatePipelineId);
+  useEffect(() => {
+    if (!testWf.textGenComplete || !testCreatePipeline) return;
+    const current = testCreatePipeline.steps[testCreatePipeline.currentIndex];
+    if (current?.name === CREATE_STEP_TEXT_GEN) {
+      testCreatePipelineRef.current?.advancePast(CREATE_STEP_TEXT_GEN);
+    }
+  }, [testWf.textGenComplete, testCreatePipeline]);
   const triggerAutoBackgroundRemoval = async (photoUrls: string[], sku: string): Promise<void> => {
     const controller = new AbortController();
     bgRemovalAbortControllerRef.current = controller;
-    setBgRemovalProgress({
-      isActive: true,
-      currentStep: null,
-      completedSteps: [],
-      totalSteps: photoUrls.map((_, i) => `Image ${i + 1}`),
-    });
+    const total = photoUrls.length;
+    let completed = 0;
+    const pipeline = createPipelineRef.current;
     try {
       const data = await fetchWithProgress(
         "/api/remove-backgrounds-batch",
@@ -1055,50 +1091,36 @@ function App() {
           signal: controller.signal,
         },
         (event) => {
-          const step = event.step as string | undefined;
-          setBgRemovalProgress((prev) => {
-            if (event.status === "completed") {
-              return {
-                ...prev,
-                completedSteps: [...prev.completedSteps, (step ?? prev.currentStep) as string],
-                currentStep: null,
-              };
-            }
-            return { ...prev, currentStep: step ?? null };
-          });
+          if (event.status === "completed") {
+            completed += 1;
+            pipeline?.progress(completed, total);
+          }
         },
       ) as { bgRemovedPhotos?: Record<string, string> };
       if (!controller.signal.aborted) {
         setBgRemovedPhotos(data.bgRemovedPhotos || {});
+        pipeline?.advancePast(CREATE_STEP_BG_REMOVAL);
       }
     } catch (err) {
       if (!controller.signal.aborted) {
         console.error("[BG Removal] Failed:", err);
+        // Background removal is best-effort: the flow continues with the
+        // original photos, so a failure skips the step rather than failing
+        // the pipeline.
+        pipeline?.advancePast(CREATE_STEP_BG_REMOVAL);
       }
-    } finally {
-      setBgRemovalProgress((prev) => ({ ...prev, isActive: false }));
     }
   };
 
   const testTriggerAutoBackgroundRemoval = (photoUrls: string[]): void => {
-    const totalSteps = photoUrls.map((_, i) => `Image ${i + 1}`);
-    setTestBgRemovalProgress({
-      isActive: true,
-      currentStep: null,
-      completedSteps: [],
-      totalSteps,
-    });
+    const total = photoUrls.length;
+    const pipeline = testCreatePipelineRef.current;
     photoUrls.forEach((url, idx) => {
       setTimeout(() => {
-        const stepLabel = `Image ${idx + 1}`;
-        setTestBgRemovalProgress((prev) => ({
-          ...prev,
-          completedSteps: [...prev.completedSteps, stepLabel],
-          currentStep: null,
-        }));
+        pipeline?.progress(idx + 1, total);
         setTestBgRemovedPhotos((prev) => ({ ...prev, [url]: url }));
         if (idx === photoUrls.length - 1) {
-          setTestBgRemovalProgress((prev) => ({ ...prev, isActive: false }));
+          pipeline?.advancePast(CREATE_STEP_BG_REMOVAL);
         }
       }, (idx + 1) * 800);
     });
@@ -1106,7 +1128,7 @@ function App() {
 
   const fetchListingPhotos = async (): Promise<void> => {
     if (!listingId.trim()) {
-      addToast("error", "Please enter an eBay listing ID or URL");
+      toast.error("Please enter an eBay listing ID or URL");
       return;
     }
     setLoading(true);
@@ -1123,24 +1145,31 @@ function App() {
     bgRemovalAbortControllerRef.current?.abort();
     bgRemovalAbortControllerRef.current = null;
     setBgRemovedPhotos({});
-    setBgRemovalProgress({ isActive: false, currentStep: null, completedSteps: [], totalSteps: [] });
-    const steps = classifyImagesEnabled
-      ? ["Fetching listing from eBay", "Creating initial JSON file", "Categorizing images"]
-      : ["Fetching listing from eBay", "Creating initial JSON file"];
-    setFetchProgress({ isActive: true, currentStep: null, completedSteps: [], totalSteps: steps });
+    // The whole Create workflow runs as one Pipeline in the Status Store.
+    if (createPipelineId != null) dismissPipeline(createPipelineId);
+    const { id: pipelineId, handle: pipeline } = startPipelineWithId(
+      "Create listing",
+      createPipelineSteps({
+        classify: classifyImagesEnabled,
+        bgRemoval: autoBackgroundRemovalEnabled,
+      }),
+    );
+    createPipelineRef.current = pipeline;
+    setCreatePipelineId(pipelineId);
+    createFailedPhaseRef.current = null;
     try {
       const photosUrl = classifyImagesEnabled
         ? `/api/photos/${encodeURIComponent(listingId.trim())}?classifier_model=${encodeURIComponent(classifierModel)}`
         : `/api/photos/${encodeURIComponent(listingId.trim())}?classify=false`;
+      const completedFetchSteps = new Set<string>();
       const data = await fetchWithProgress(
         photosUrl, {},
         (event) => {
-          const step = event.step as string;
-          setFetchProgress((prev) => {
-            const completed = [...prev.completedSteps];
-            if (event.status === "completed" && !completed.includes(step)) { completed.push(step); }
-            return { ...prev, completedSteps: completed, currentStep: event.status === "in_progress" ? step : prev.currentStep };
-          });
+          const step = event.step as string | undefined;
+          if (event.status === "completed" && step && !completedFetchSteps.has(step)) {
+            completedFetchSteps.add(step);
+            pipeline.advancePast(step);
+          }
         },
       ) as { photos?: string[]; categories?: Record<string, string>; listing?: Listing | null; sku?: string | null };
       setListingLinkSubmitted(true);
@@ -1164,12 +1193,21 @@ function App() {
         }
       }
       setSkippedPhotos(autoSkip);
+      // Advance past any fetch steps the backend did not echo back, so the
+      // pipeline rests on the bg-removal or image-generation step.
+      pipeline.advancePast(
+        classifyImagesEnabled ? CREATE_STEP_CATEGORIZE : CREATE_STEP_JSON,
+      );
       if (autoBackgroundRemovalEnabled && data.photos?.length && data.sku) {
         triggerAutoBackgroundRemoval(data.photos, data.sku);
+      } else if (autoBackgroundRemovalEnabled) {
+        pipeline.advancePast(CREATE_STEP_BG_REMOVAL);
       }
-      setFetchProgress({ isActive: false, currentStep: null, completedSteps: steps, totalSteps: steps });
     } catch (err) {
-      addToast("error", (err as Error).message || "An error occurred while fetching the listing");
+      const message = (err as Error).message || "An error occurred while fetching the listing";
+      toast.error(message);
+      createFailedPhaseRef.current = "fetch";
+      pipeline.fail(message);
       setListingLinkSubmitted(false);
       setPhotos([]);
       setCategories({});
@@ -1182,7 +1220,6 @@ function App() {
       setTextGenComplete(false);
       setEditableTitle("");
       setEditableDescription("");
-      setFetchProgress({ isActive: false, currentStep: null, completedSteps: [], totalSteps: [] });
     } finally {
       setLoading(false);
     }
@@ -1269,6 +1306,41 @@ function App() {
     fetchListingPhotos();
   };
 
+  /**
+   * Retry the failed phase of the Create pipeline. The store settles a failed
+   * pipeline permanently, so a retry re-runs the phase against a fresh
+   * pipeline; the failed one is dismissed.
+   */
+  const handleRetryCreatePhase = (): void => {
+    const phase = createFailedPhaseRef.current;
+    if (createPipelineId != null) dismissPipeline(createPipelineId);
+    setCreatePipelineId(null);
+    createPipelineRef.current = null;
+    createFailedPhaseRef.current = null;
+    if (phase === "fetch") {
+      // The listing id is still in the input (it is only cleared on success),
+      // so retry the fetch directly.
+      fetchListingPhotos();
+      return;
+    }
+    // Rebuild a pipeline reflecting the remaining phases so the tracker shows
+    // the retry's progress.
+    const remaining: string[] = [];
+    if (phase === "images") {
+      remaining.push(CREATE_STEP_IMAGE_GEN, CREATE_STEP_TEXT_GEN, CREATE_STEP_CREATE_LISTING);
+    } else {
+      remaining.push(CREATE_STEP_CREATE_LISTING);
+    }
+    const { id, handle } = startPipelineWithId("Create listing", remaining);
+    createPipelineRef.current = handle;
+    setCreatePipelineId(id);
+    if (phase === "images") {
+      handleConfirmCategories();
+    } else if (phase === "create") {
+      handleCreateListing();
+    }
+  };
+
   const handleChatSubmit = (prompt: string, context: string): void => {
     if (context === "title") regenerateTitle(prompt);
     else if (context === "description") regenerateDescription(prompt);
@@ -1297,13 +1369,13 @@ function App() {
       });
       const data = await res.json();
       if (!res.ok || data.error) {
-        addToast("error", data.error || "Failed to regenerate title");
+        toast.error(data.error || "Failed to regenerate title");
         return;
       }
       setEditableTitle(data.title);
       if (data.listing_data) setListingData(data.listing_data);
     } catch (err) {
-      addToast("error", (err as Error).message || "Failed to regenerate title");
+      toast.error((err as Error).message || "Failed to regenerate title");
     } finally {
       setIsRegeneratingTitle(false);
     }
@@ -1325,13 +1397,13 @@ function App() {
       });
       const data = await res.json();
       if (!res.ok || data.error) {
-        addToast("error", data.error || "Failed to regenerate description");
+        toast.error(data.error || "Failed to regenerate description");
         return;
       }
       setEditableDescription(data.description);
       if (data.listing_data) setListingData(data.listing_data);
     } catch (err) {
-      addToast("error", (err as Error).message || "Failed to regenerate description");
+      toast.error((err as Error).message || "Failed to regenerate description");
     } finally {
       setIsRegeneratingDescription(false);
     }
@@ -1372,12 +1444,12 @@ function App() {
       });
       const data = await res.json();
       if (!res.ok || data.error) {
-        addToast("error", data.error || "Failed to regenerate metadata");
+        toast.error(data.error || "Failed to regenerate metadata");
         return;
       }
       if (data.listing_data) setListingData(data.listing_data);
     } catch (err) {
-      addToast("error", (err as Error).message || "Failed to regenerate metadata");
+      toast.error((err as Error).message || "Failed to regenerate metadata");
     } finally {
       setIsRegeneratingMetadata(false);
     }
@@ -1475,13 +1547,11 @@ function App() {
           })
           .catch((err) => console.error("Failed to sync images to disk:", err));
       }
-      addToast(
-        "success",
-        `Added ${photoUrls.length} placeholder image${photoUrls.length === 1 ? "" : "s"} (AI generation skipped)`,
+      toast.success(`Added ${photoUrls.length} placeholder image${photoUrls.length === 1 ? "" : "s"} (AI generation skipped)`,
       );
     } catch (err) {
       console.error("Error adding placeholder images:", err);
-      addToast("error", (err as Error).message || "An error occurred while adding placeholder images");
+      toast.error((err as Error).message || "An error occurred while adding placeholder images");
     }
   };
   const handleConfirmCategories = async (): Promise<void> => {
@@ -1490,7 +1560,10 @@ function App() {
     console.log("Editable categories:", editableCategories);
     console.log("Skipped photos:", skippedPhotos);
 
-    setIsConfirming(true);
+    const pipeline = createPipelineRef.current;
+    // The pipeline may still be on the bg-removal step (e.g. it was skipped);
+    // rest it on the image-generation step before reporting progress.
+    pipeline?.advancePast(CREATE_STEP_BG_REMOVAL);
 
     try {
       const hasBgRemoved =
@@ -1505,7 +1578,7 @@ function App() {
 
       if (photosToProcess.length === 0) {
         setCategories(editableCategories);
-        setIsConfirming(false);
+        pipeline?.advancePast(CREATE_STEP_IMAGE_GEN);
         handleCreateListing();
         return;
       }
@@ -1562,13 +1635,7 @@ function App() {
         throw new Error("No task ID returned from server");
       }
 
-      setImageGenProgress({
-        isActive: true,
-        taskId: taskId,
-        total: totalImages,
-        completed: 0,
-        currentGenerating: [],
-      });
+      pipeline?.progress(0, totalImages);
 
       setPendingImagePromptModifier("");
 
@@ -1613,13 +1680,11 @@ function App() {
                   .catch((err) => console.error("Failed to sync images to disk:", err));
               }
 
-              setImageGenProgress({
-                isActive: false,
-                taskId: null,
-                total: totalImages,
-                completed: totalImages,
-                currentGenerating: [],
-              });
+              pipeline?.progress(totalImages, totalImages);
+              pipeline?.advancePast(CREATE_STEP_IMAGE_GEN);
+              if (textGenCompleteRef.current) {
+                pipeline?.advancePast(CREATE_STEP_TEXT_GEN);
+              }
             } else {
               const aiGeneratedList = statusData.generated_images || [];
               const partialImages = mergeGeneratedImages(photosToProcess, aiGeneratedList, {
@@ -1644,49 +1709,27 @@ function App() {
                 statusData.errors && statusData.errors.length > 0
                   ? `Image generation completed with errors: ${statusData.errors.join("; ")}`
                   : "Image generation failed";
-              addToast("error", errorMsg);
-
-              setImageGenProgress({
-                isActive: false,
-                taskId: null,
-                total: totalImages,
-                completed: statusData.completed || 0,
-                currentGenerating: [],
-              });
+              toast.error(errorMsg);
+              createFailedPhaseRef.current = "images";
+              pipeline?.fail(errorMsg);
             }
-
-            setIsConfirming(false);
           } else {
-            setImageGenProgress((prev) => ({
-              ...prev,
-              completed: statusData.completed || 0,
-            }));
+            pipeline?.progress(statusData.completed || 0, totalImages);
           }
         } catch (pollErr) {
           console.error("Error polling status:", pollErr);
           clearInterval(pollInterval);
-          addToast("error", "Error checking generation status");
-          setIsConfirming(false);
-          setImageGenProgress({
-            isActive: false,
-            taskId: null,
-            total: totalImages,
-            completed: 0,
-            currentGenerating: [],
-          });
+          toast.error("Error checking generation status");
+          createFailedPhaseRef.current = "images";
+          pipeline?.fail("Error checking generation status");
         }
       }, 500);
     } catch (err) {
       console.error("Error generating images:", err);
-      addToast("error", (err as Error).message || "An error occurred while generating images");
-      setIsConfirming(false);
-      setImageGenProgress({
-        isActive: false,
-        taskId: null,
-        total: 0,
-        completed: 0,
-        currentGenerating: [],
-      });
+      const message = (err as Error).message || "An error occurred while generating images";
+      toast.error(message);
+      createFailedPhaseRef.current = "images";
+      pipeline?.fail(message);
     }
   };
   const handleAddToListing = useCallback((ebayUrl: string): void => {
@@ -1803,7 +1846,7 @@ function App() {
   const handleBulkDeleteListings = async (): Promise<void> => {
     const skus = Array.from(historySelectedSkus);
     if (skus.length === 0) return;
-    setIsBulkDeleting(true);
+    const task = startTask(BULK_DELETE_TASK_NAME, { total: skus.length });
     try {
       const res = await fetch('/api/listings/bulk-delete', {
         method: 'POST',
@@ -1812,17 +1855,23 @@ function App() {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
-      if (data.errors?.length > 0) {
-        addToast('error', `${data.errors.length} listing(s) could not be deleted`);
-      }
+      task.progress(skus.length);
+      const failed: number = data.errors?.length ?? 0;
+      const succeeded = skus.length - failed;
       setHistorySelectMode(false);
       setHistorySelectedSkus(new Set());
       await fetchAllListings();
+      if (failed > 0) {
+        task.fail(
+          `${succeeded} deleted, ${failed} could not be deleted`,
+          (data.errors as string[]).join("\n"),
+        );
+      } else {
+        task.succeed(`${succeeded} listing${succeeded === 1 ? "" : "s"} deleted`);
+      }
     } catch (err) {
       console.error('[History] bulk delete failed:', err);
-      addToast('error', (err as Error).message || 'Bulk delete failed');
-    } finally {
-      setIsBulkDeleting(false);
+      task.fail((err as Error).message || 'Bulk delete failed');
     }
   };
 
@@ -1931,7 +1980,7 @@ function App() {
   const handleRegenerateImages = async (promptOverride?: string): Promise<void> => {
     const promptToUse = (promptOverride ?? customPrompt)?.trim();
     if (!promptToUse) {
-      addToast("error", "Please enter a prompt to guide the regeneration");
+      toast.error("Please enter a prompt to guide the regeneration");
       return;
     }
     const indices =
@@ -2002,7 +2051,7 @@ function App() {
       }
     } catch (err) {
       console.error("Error regenerating images:", err);
-      addToast("error", (err as Error).message || "An error occurred while regenerating images");
+      toast.error((err as Error).message || "An error occurred while regenerating images");
     } finally {
       setIsRegenerating(false);
     }
@@ -2057,7 +2106,7 @@ function App() {
       }
     } catch (err) {
       console.error("Error trimming images:", err);
-      addToast("error", (err as Error).message || "An error occurred while trimming images");
+      toast.error((err as Error).message || "An error occurred while trimming images");
     } finally {
       setIsTrimming(false);
     }
@@ -2065,11 +2114,11 @@ function App() {
 
   const handleAddNewVersions = async (): Promise<void> => {
     if (!customPrompt?.trim()) {
-      addToast("error", "Please enter a prompt to guide the new version");
+      toast.error("Please enter a prompt to guide the new version");
       return;
     }
     if (!currentSku) {
-      addToast("error", "SKU is required. Please fetch photos first.");
+      toast.error("SKU is required. Please fetch photos first.");
       return;
     }
 
@@ -2081,7 +2130,7 @@ function App() {
       .map((i) => generatedImages[i])
       .filter(Boolean);
     if (imagesToRegen.length === 0) {
-      addToast("error", "No valid images to regenerate");
+      toast.error("No valid images to regenerate");
       return;
     }
 
@@ -2131,35 +2180,25 @@ function App() {
       await handleUploadToEbay(currentSku, syncData.listing_data as ListingData | null);
     } catch (err) {
       console.error("Error in add new version:", err);
-      addToast("error", (err as Error).message || "An error occurred while adding new version");
+      toast.error((err as Error).message || "An error occurred while adding new version");
     } finally {
       setIsAddingNewVersions(false);
     }
   };
   const handleCreateListing = async (): Promise<void> => {
     if (!listing) {
-      addToast("error", "Original listing data is required");
+      toast.error("Original listing data is required");
       return;
     }
     if (!currentSku) {
-      addToast("error", "SKU is required. Please fetch photos first.");
+      toast.error("SKU is required. Please fetch photos first.");
       return;
     }
 
-    setIsCreatingListing(true);
-
-    const steps = [
-      "Updating images",
-      "Generating optimized text",
-      "Updating metadata",
-      "Updating aspects",
-    ];
-    setCreateListingProgress({
-      isActive: true,
-      currentStep: null,
-      completedSteps: [],
-      totalSteps: steps,
-    });
+    const pipeline = createPipelineRef.current;
+    // Rest the pipeline on the create-listing step (image/text steps may have
+    // been skipped when there was nothing to generate).
+    pipeline?.advancePast(CREATE_STEP_TEXT_GEN);
 
     try {
       console.log("Updating listing with images:", generatedImages);
@@ -2191,34 +2230,16 @@ function App() {
             image_prompt_experimental: imagePromptExperimental,
           }),
         },
-        (event) => {
-          const step = event.step as string;
-          setCreateListingProgress((prev) => {
-            const completed = [...prev.completedSteps];
-            if (
-              event.status === "completed" &&
-              !completed.includes(step)
-            ) {
-              completed.push(step);
-            }
-            return {
-              ...prev,
-              completedSteps: completed,
-              currentStep:
-                event.status === "in_progress" ? step : prev.currentStep,
-            };
-          });
+        () => {
+          // The create-listing endpoint's sub-steps ("Updating images",
+          // "Generating optimized text", …) are internal to this one Pipeline
+          // step; the step shows a spinner until the request completes.
         },
       ) as { listing_data?: ListingData };
 
       console.log("Create listing response:", data);
 
-      setCreateListingProgress({
-        isActive: false,
-        currentStep: null,
-        completedSteps: steps,
-        totalSteps: steps,
-      });
+      pipeline?.succeed();
 
       setListingData(data.listing_data ?? null);
       setEditableTitle(data.listing_data?.inventoryItem?.product?.title || "");
@@ -2232,15 +2253,10 @@ function App() {
       }
     } catch (err) {
       console.error("Error creating listing:", err);
-      addToast("error", (err as Error).message || "An error occurred while creating listing");
-      setCreateListingProgress({
-        isActive: false,
-        currentStep: null,
-        completedSteps: [],
-        totalSteps: steps,
-      });
-    } finally {
-      setIsCreatingListing(false);
+      const message = (err as Error).message || "An error occurred while creating listing";
+      toast.error(message);
+      createFailedPhaseRef.current = "create";
+      pipeline?.fail(message);
     }
   };
 
@@ -2272,7 +2288,7 @@ function App() {
       }
     } catch (err) {
       console.error("Error trimming title:", err);
-      addToast("error", (err as Error).message || "Failed to trim title");
+      toast.error((err as Error).message || "Failed to trim title");
     } finally {
       setIsTrimmingTitle(false);
     }
@@ -2306,7 +2322,7 @@ function App() {
       );
     } catch (err) {
       console.error("Error saving title:", err);
-      addToast("error", (err as Error).message || "Failed to save title");
+      toast.error((err as Error).message || "Failed to save title");
       setAutoSaveStatus((prev) => ({ ...prev, title: "idle" }));
     }
   };
@@ -2342,7 +2358,7 @@ function App() {
       );
     } catch (err) {
       console.error("Error saving description:", err);
-      addToast("error", (err as Error).message || "Failed to save description");
+      toast.error((err as Error).message || "Failed to save description");
       setAutoSaveStatus((prev) => ({ ...prev, description: "idle" }));
     }
   };
@@ -2424,7 +2440,7 @@ function App() {
       }
     } catch (err) {
       console.error("Error fetching listings:", err);
-      addToast("error", (err as Error).message || "An error occurred while fetching listings");
+      toast.error((err as Error).message || "An error occurred while fetching listings");
     } finally {
       setLoadingListings(false);
     }
@@ -2480,7 +2496,7 @@ function App() {
       .map((l) => l.sku);
     if (!skus.length) return;
 
-    setIsRestocking(true);
+    const task = startTask(RESTOCK_TASK_NAME, { total: skus.length });
     try {
       const res = await fetch("/api/listings/restock", {
         method: "POST",
@@ -2489,6 +2505,7 @@ function App() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to restock listings");
+      task.progress(skus.length);
 
       const skuToListing = (data.failed?.length || data.not_found?.length)
         ? Object.fromEntries(allListings.map((l) => [l.sku, l]))
@@ -2504,13 +2521,15 @@ function App() {
           return next;
         });
       }
+
+      const problemLines: string[] = [];
       if (data.failed?.length) {
         const failedErrors = data.failed_errors || {};
         data.failed.forEach((sku: string) => {
           const l = skuToListing[sku];
           const raw = l?.title || sku;
           const title = raw.length > 50 ? raw.slice(0, 50) + "\u2026" : raw;
-          addToast("error", `Failed to restock "${title}"`);
+          problemLines.push(`Failed to restock "${title}"`);
           const ebayId = l?.ebayListingId || "";
           const url = ebayId
             ? `https://www.ebay.com/itm/${ebayId}`
@@ -2529,19 +2548,27 @@ function App() {
           const l = skuToListing[sku];
           const raw = (l?.title as string) || sku;
           const title = raw.length > 50 ? raw.slice(0, 50) + '…' : raw;
-          addToast('error', `"${title}" not found on eBay`);
+          problemLines.push(`"${title}" not found on eBay`);
         });
+      }
+
+      const updatedCount: number = data.updated?.length ?? 0;
+      if (problemLines.length > 0) {
+        task.fail(
+          `${updatedCount} restocked, ${problemLines.length} failed`,
+          problemLines.join("\n"),
+        );
+      } else {
+        task.succeed(`Restocked ${updatedCount} listing${updatedCount === 1 ? "" : "s"} to ${qty}`);
       }
     } catch (err) {
       console.error("Error restocking listings:", err);
-      addToast("error", (err as Error).message || "Failed to restock listings");
-    } finally {
-      setIsRestocking(false);
+      task.fail((err as Error).message || "Failed to restock listings");
     }
   };
 
   const handleSyncWithEbay = async (): Promise<void> => {
-    setIsSyncing(true);
+    const task = startTask(SYNC_TASK_NAME);
     try {
       const res = await fetch('/api/listings/sync-active', {
         method: 'POST',
@@ -2557,17 +2584,15 @@ function App() {
           )
         );
       }
-      addToast('success', `Sync complete: ${data.active} active, ${data.newly_inactive} marked inactive, ${data.updated} updated`);
       await fetchAllListings();
+      task.succeed(`Sync complete: ${data.active} active, ${data.newly_inactive} marked inactive, ${data.updated} updated`);
     } catch (err) {
-      addToast('error', (err as Error).message || 'Sync failed');
-    } finally {
-      setIsSyncing(false);
+      task.fail((err as Error).message || 'Sync failed');
     }
   };
 
   const handleSyncEbayListings = async (): Promise<void> => {
-    setIsSyncing(true);
+    const task = startTask(SYNC_TASK_NAME);
     try {
       const res = await fetch('/api/import-listings', { method: 'POST' });
       const data = await res.json();
@@ -2575,13 +2600,11 @@ function App() {
       const imported = data.imported ?? 0;
       const updated = data.updated ?? 0;
       const skipped = data.skipped ?? 0;
-      addToast('success', `Sync complete: ${imported} imported, ${updated} updated, ${skipped} skipped`);
       setSyncLastRefreshed(new Date().toISOString());
       await fetchAllListings();
+      task.succeed(`Sync complete: ${imported} imported, ${updated} updated, ${skipped} skipped`);
     } catch (err) {
-      addToast('error', (err as Error).message || 'Sync failed');
-    } finally {
-      setIsSyncing(false);
+      task.fail((err as Error).message || 'Sync failed');
     }
   };
 
@@ -2851,24 +2874,32 @@ function App() {
 
   const handleUploadToEbay = async (sku: string, listingData: ListingData | null = null): Promise<void> => {
     if (!sku) {
-      addToast("error", "No SKU provided");
+      toast.error("No SKU provided");
       return;
     }
 
     setUploadingSkus((prev) => new Set(prev).add(sku));
+    setUploadStatuses((prev) => ({ ...prev, [sku]: "uploading" }));
+    // Join the current upload batch; when the last in-flight upload settles,
+    // one summary toast reports "N succeeded, M failed" (ADR 0002).
+    if (!uploadBatchRef.current) {
+      uploadBatchRef.current = { total: 0, settled: 0, failures: [] };
+    }
+    uploadBatchRef.current.total += 1;
 
-    const steps = ["Preparing listing data", "Uploading to eBay"];
-    setUploadProgress({
-      isActive: true,
-      currentStep: null,
-      completedSteps: [],
-      totalSteps: steps,
-    });
+    if (uploadPipelineId != null) dismissPipeline(uploadPipelineId);
+    const { id: pipelineId, handle: pipeline } = startPipelineWithId(
+      "Upload to eBay",
+      UPLOAD_PIPELINE_STEPS,
+    );
+    uploadPipelineRef.current = pipeline;
+    setUploadPipelineId(pipelineId);
 
     try {
       console.log("Uploading listing to eBay with SKU:", sku);
       console.log("Listing data:", listingData);
 
+      const completedUploadSteps = new Set<string>();
       const data = await fetchWithProgress(
         "/api/upload-listing",
         {
@@ -2884,22 +2915,11 @@ function App() {
           }),
         },
         (event) => {
-          const step = event.step as string;
-          setUploadProgress((prev) => {
-            const completed = [...prev.completedSteps];
-            if (
-              event.status === "completed" &&
-              !completed.includes(step)
-            ) {
-              completed.push(step);
-            }
-            return {
-              ...prev,
-              completedSteps: completed,
-              currentStep:
-                event.status === "in_progress" ? step : prev.currentStep,
-            };
-          });
+          const step = event.step as string | undefined;
+          if (event.status === "completed" && step && !completedUploadSteps.has(step)) {
+            completedUploadSteps.add(step);
+            pipeline.advancePast(step);
+          }
         },
       ) as { upload_result?: UploadResult };
 
@@ -2910,54 +2930,73 @@ function App() {
         throw new Error("Upload completed but no result returned");
       }
 
-      setUploadProgress({
-        isActive: false,
-        currentStep: null,
-        completedSteps: steps,
-        totalSteps: steps,
-      });
+      pipeline.succeed("Listing is now live on eBay");
 
       setUploadResults((prev) => ({
         ...prev,
         [sku]: data.upload_result!,
       }));
+      setUploadStatuses((prev) => ({ ...prev, [sku]: "success" }));
 
       if (sku === listingData?.sku) {
         setUploadResult(data.upload_result ?? null);
       }
-
-      addToast(
-        "success",
-        "Upload successful",
-        data.upload_result.listingId
-          ? `Listing ID: ${data.upload_result.listingId}`
-          : "Listing is now live on eBay",
-      );
 
       fetchAllListings();
 
       console.log("Upload successful:", data.upload_result);
     } catch (err) {
       console.error("Error uploading listing:", err);
-      addToast("error", (err as Error).message || "An error occurred while uploading listing");
-      setUploadProgress({
-        isActive: false,
-        currentStep: null,
-        completedSteps: [],
-        totalSteps: steps,
-      });
+      const message = (err as Error).message || "An error occurred while uploading listing";
+      pipeline.fail(message);
+      setUploadStatuses((prev) => ({ ...prev, [sku]: "error" }));
+      if (uploadBatchRef.current) {
+        uploadBatchRef.current.failures.push(
+          `${sku}: ${(err as Error).message || "upload failed"}`,
+        );
+      }
     } finally {
       setUploadingSkus((prev) => {
         const newSet = new Set(prev);
         newSet.delete(sku);
         return newSet;
       });
+      const batch = uploadBatchRef.current;
+      if (batch) {
+        batch.settled += 1;
+        if (batch.settled >= batch.total) {
+          const succeeded = batch.total - batch.failures.length;
+          const summary =
+            batch.failures.length === 0
+              ? `${succeeded} upload${succeeded === 1 ? "" : "s"} succeeded`
+              : `${succeeded} succeeded, ${batch.failures.length} failed`;
+          const detail = batch.failures.length ? batch.failures.join("\n") : undefined;
+          const toast = startTask("Upload summary");
+          if (batch.failures.length === 0) {
+            toast.succeed(summary);
+          } else {
+            toast.fail(summary, detail);
+          }
+          uploadBatchRef.current = null;
+        }
+      }
     }
   };
 
   const handleHistoryViewModeChange = (mode: "compact" | "detailed"): void => {
     setHistoryViewMode(mode);
     localStorage.setItem("axisHistoryViewMode", mode);
+  };
+
+  /**
+   * Retry a failed upload-to-eBay pipeline run. handleUploadToEbay dismisses
+   * the failed pipeline and starts a fresh one, so retry just re-invokes it
+   * with the current listing's sku/data.
+   */
+  const handleRetryUpload = (): void => {
+    const sku = listingData?.sku;
+    if (!sku) return;
+    void handleUploadToEbay(sku, listingData);
   };
 
   const handleTabChange = (tab: TabName): void => {
@@ -3360,8 +3399,9 @@ function App() {
     }`;
 
   const handleTestAppToken = async (): Promise<void> => {
-    setIsTestingAppToken(true);
     setAppTokenResult(null);
+    const { id, handle: task } = startTaskWithId("Testing application token");
+    setAppTokenTaskId(id);
     try {
       const response = await fetch("/api/test-application-token", {
         method: "POST",
@@ -3369,25 +3409,38 @@ function App() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Test failed");
       setAppTokenResult(data.result);
+      const result = data.result as TokenResult | undefined;
+      if (result && !result.ok) {
+        task.fail(result.message);
+      } else {
+        task.succeed(result?.message);
+      }
     } catch (err) {
-      setAppTokenResult({ ok: false, message: (err as Error).message });
-    } finally {
-      setIsTestingAppToken(false);
+      const message = (err as Error).message;
+      setAppTokenResult({ ok: false, message });
+      task.fail(message);
     }
   };
 
   const handleTestUserToken = async (): Promise<void> => {
-    setIsTestingUserToken(true);
     setUserTokenResult(null);
+    const { id, handle: task } = startTaskWithId("Testing user token");
+    setUserTokenTaskId(id);
     try {
       const response = await fetch("/api/test-user-token", { method: "POST" });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Test failed");
       setUserTokenResult(data.result);
+      const result = data.result as TokenResult | undefined;
+      if (result && !result.ok) {
+        task.fail(result.message);
+      } else {
+        task.succeed(result?.message);
+      }
     } catch (err) {
-      setUserTokenResult({ ok: false, message: (err as Error).message });
-    } finally {
-      setIsTestingUserToken(false);
+      const message = (err as Error).message;
+      setUserTokenResult({ ok: false, message });
+      task.fail(message);
     }
   };
 
@@ -3423,7 +3476,7 @@ function App() {
       console.log("Testing function completed:", data.result);
     } catch (err) {
       console.error("Error running testing function:", err);
-      addToast("error", (err as Error).message || "An error occurred while running testing function");
+      toast.error((err as Error).message || "An error occurred while running testing function");
     } finally {
       setIsTesting(false);
     }
@@ -3448,7 +3501,7 @@ function App() {
       setListingDetailData(data.listing_data);
     } catch (err) {
       console.error("Error fetching listing details:", err);
-      addToast("error", (err as Error).message || "An error occurred while fetching listing details");
+      toast.error((err as Error).message || "An error occurred while fetching listing details");
     } finally {
       setLoadingListingDetail(false);
     }
@@ -3512,51 +3565,26 @@ function App() {
   const testHandleCreateListing = (): void => {
     setTestIsCreatingListing(true);
     setTestError(null);
-    const steps = [
-      "Updating images",
-      "Generating optimized text",
-      "Updating metadata",
-      "Updating aspects",
-    ];
-    setTestCreateListingProgress({
-      isActive: true,
-      currentStep: steps[0],
-      completedSteps: [],
-      totalSteps: steps,
-    });
-    let stepIdx = 0;
-    const interval = setInterval(() => {
-      stepIdx += 1;
-      setTestCreateListingProgress((prev) => ({
-        ...prev,
-        completedSteps: steps.slice(0, stepIdx),
-        currentStep: steps[stepIdx] || null,
-      }));
-      if (stepIdx >= steps.length) {
-        clearInterval(interval);
-        const listingData = {
-          ...MOCK_DATA.listingData,
-          inventoryItem: {
-            ...MOCK_DATA.listingData.inventoryItem,
-            product: {
-              ...MOCK_DATA.listingData.inventoryItem.product,
-              title: MOCK_GENERATED_TITLE,
-              description: MOCK_GENERATED_DESCRIPTION,
-              imageUrls: testWf.generatedImages,
-            },
+    const pipeline = testCreatePipelineRef.current;
+    pipeline?.advancePast(CREATE_STEP_TEXT_GEN);
+    setTimeout(() => {
+      const listingData = {
+        ...MOCK_DATA.listingData,
+        inventoryItem: {
+          ...MOCK_DATA.listingData.inventoryItem,
+          product: {
+            ...MOCK_DATA.listingData.inventoryItem.product,
+            title: MOCK_GENERATED_TITLE,
+            description: MOCK_GENERATED_DESCRIPTION,
+            imageUrls: testWf.generatedImages,
           },
-        };
-        setTestListingData(listingData as unknown as Listing);
-        setTestUploadResult(null);
-        setTestCreateListingProgress({
-          isActive: false,
-          currentStep: null,
-          completedSteps: steps,
-          totalSteps: steps,
-        });
-        setTestIsCreatingListing(false);
-      }
-    }, 400);
+        },
+      };
+      setTestListingData(listingData as unknown as Listing);
+      setTestUploadResult(null);
+      pipeline?.succeed();
+      setTestIsCreatingListing(false);
+    }, 1600);
   };
 
   const testHandleSubmit = (e: React.FormEvent): void => {
@@ -3570,33 +3598,22 @@ function App() {
     setTestListingLinkSubmitted(true);
     setTestLoading(true);
     setTestError(null);
-    const steps = classifyImagesEnabled
-      ? [
-          "Fetching listing from eBay",
-          "Creating initial JSON file",
-          "Categorizing images",
-        ]
-      : ["Fetching listing from eBay", "Creating initial JSON file"];
-    setTestFetchProgress({
-      isActive: true,
-      currentStep: steps[0],
-      completedSteps: [],
-      totalSteps: steps,
-    });
+    if (testCreatePipelineId != null) dismissPipeline(testCreatePipelineId);
+    const { id: pipelineId, handle: pipeline } = startPipelineWithId(
+      "Create listing",
+      createPipelineSteps({
+        classify: classifyImagesEnabled,
+        bgRemoval: autoBackgroundRemovalEnabled,
+      }),
+    );
+    testCreatePipelineRef.current = pipeline;
+    setTestCreatePipelineId(pipelineId);
     setTimeout(() => {
-      setTestFetchProgress((prev) => ({
-        ...prev,
-        completedSteps: [steps[0]],
-        currentStep: steps[1],
-      }));
+      pipeline.advancePast(CREATE_STEP_FETCH);
     }, 400);
     if (classifyImagesEnabled) {
       setTimeout(() => {
-        setTestFetchProgress((prev) => ({
-          ...prev,
-          completedSteps: [steps[0], steps[1]],
-          currentStep: steps[2],
-        }));
+        pipeline.advancePast(CREATE_STEP_JSON);
       }, 800);
     }
     setTimeout(() => {
@@ -3622,15 +3639,14 @@ function App() {
         }
       }
       setTestSkippedPhotos(autoSkip);
+      pipeline.advancePast(
+        classifyImagesEnabled ? CREATE_STEP_CATEGORIZE : CREATE_STEP_JSON,
+      );
       if (autoBackgroundRemovalEnabled && MOCK_DATA.photos?.length) {
         testTriggerAutoBackgroundRemoval(MOCK_DATA.photos);
+      } else if (autoBackgroundRemovalEnabled) {
+        pipeline.advancePast(CREATE_STEP_BG_REMOVAL);
       }
-      setTestFetchProgress({
-        isActive: false,
-        currentStep: null,
-        completedSteps: steps,
-        totalSteps: steps,
-      });
       setTestLoading(false);
     }, 1500);
   };
@@ -3661,25 +3677,22 @@ function App() {
       .map((url) =>
         hasBgRemoved ? testBgRemovedPhotos[url] || url : url,
       );
+    const pipeline = testCreatePipelineRef.current;
+    pipeline?.advancePast(CREATE_STEP_BG_REMOVAL);
     if (photosToProcess.length === 0) {
       setTestCategories(testEditableCategories);
       setTestGeneratedImages([]);
+      pipeline?.advancePast(CREATE_STEP_IMAGE_GEN);
       return;
     }
     setTestIsConfirming(true);
     setTestError(null);
     const total = photosToProcess.length;
-    setTestImageGenProgress({
-      isActive: true,
-      taskId: "mock",
-      total,
-      completed: 0,
-      currentGenerating: [],
-    });
+    pipeline?.progress(0, total);
     let completed = 0;
     const interval = setInterval(() => {
       completed += 1;
-      setTestImageGenProgress((prev) => ({ ...prev, completed }));
+      pipeline?.progress(completed, total);
       if (completed >= total) {
         clearInterval(interval);
         const merged = photosToProcess.map(
@@ -3687,13 +3700,7 @@ function App() {
         );
         setTestGeneratedImages(merged);
         setTestCategories(testEditableCategories);
-        setTestImageGenProgress({
-          isActive: false,
-          taskId: null,
-          total,
-          completed,
-          currentGenerating: [],
-        });
+        pipeline?.advancePast(CREATE_STEP_IMAGE_GEN);
         setTestIsConfirming(false);
       }
     }, 500);
@@ -3703,31 +3710,25 @@ function App() {
     if (testRealUploadEnabled) {
       setTestUploadingSkus((prev) => new Set(prev).add(sku));
       setTestError(null);
-      const steps = ["Preparing listing data", "Uploading to eBay"];
-      setTestUploadProgress({
-        isActive: true,
-        currentStep: null,
-        completedSteps: [],
-        totalSteps: steps,
-      });
+      if (testUploadPipelineId != null) dismissPipeline(testUploadPipelineId);
+      const { id: pipelineId, handle: pipeline } = startPipelineWithId(
+        "Upload to eBay",
+        UPLOAD_PIPELINE_STEPS,
+      );
+      testUploadPipelineRef.current = pipeline;
+      setTestUploadPipelineId(pipelineId);
       try {
         console.log("[TEST-UPLOAD] Calling real /api/upload-test-listing");
+        const completedSteps = new Set<string>();
         const data = await fetchWithProgress(
           "/api/upload-test-listing",
           { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" },
           (event) => {
-            const step = event.step as string;
-            setTestUploadProgress((prev) => {
-              const completed = [...prev.completedSteps];
-              if (event.status === "completed" && !completed.includes(step)) {
-                completed.push(step);
-              }
-              return {
-                ...prev,
-                completedSteps: completed,
-                currentStep: event.status === "in_progress" ? step : prev.currentStep,
-              };
-            });
+            const step = event.step as string | undefined;
+            if (event.status === "completed" && step && !completedSteps.has(step)) {
+              completedSteps.add(step);
+              pipeline.advancePast(step);
+            }
           }
         ) as { upload_result?: UploadResult };
         console.log("[TEST-UPLOAD] Response:", data);
@@ -3736,16 +3737,12 @@ function App() {
         }
         setTestUploadResult(data.upload_result);
         console.log("[TEST-UPLOAD] setTestUploadResult called with", data.upload_result);
-        setTestUploadProgress({
-          isActive: false,
-          currentStep: null,
-          completedSteps: steps,
-          totalSteps: steps,
-        });
+        pipeline.succeed();
       } catch (err) {
         console.error("[TEST-UPLOAD] Error:", err);
-        setTestError((err as Error).message || "Real upload failed");
-        setTestUploadProgress({ isActive: false, currentStep: null, completedSteps: [], totalSteps: steps });
+        const message = (err as Error).message || "Real upload failed";
+        setTestError(message);
+        pipeline.fail(message);
       } finally {
         setTestUploadingSkus((prev) => {
           const s = new Set(prev);
@@ -3759,28 +3756,19 @@ function App() {
     console.log("[TEST-UPLOAD] Running in mock mode");
     setTestUploadingSkus((prev) => new Set(prev).add(sku));
     setTestError(null);
-    const steps = ["Preparing listing data", "Uploading to eBay"];
-    setTestUploadProgress({
-      isActive: true,
-      currentStep: steps[0],
-      completedSteps: [],
-      totalSteps: steps,
-    });
+    if (testUploadPipelineId != null) dismissPipeline(testUploadPipelineId);
+    const { id: mockPipelineId, handle: mockPipeline } = startPipelineWithId(
+      "Upload to eBay",
+      UPLOAD_PIPELINE_STEPS,
+    );
+    testUploadPipelineRef.current = mockPipeline;
+    setTestUploadPipelineId(mockPipelineId);
     setTimeout(() => {
-      setTestUploadProgress((prev) => ({
-        ...prev,
-        completedSteps: [steps[0]],
-        currentStep: steps[1],
-      }));
+      mockPipeline.advance();
     }, 400);
     setTimeout(() => {
       setTestUploadResult(MOCK_DATA.uploadResult);
-      setTestUploadProgress({
-        isActive: false,
-        currentStep: null,
-        completedSteps: steps,
-        totalSteps: steps,
-      });
+      mockPipeline.succeed();
       setTestUploadingSkus((prev) => {
         const s = new Set(prev);
         s.delete(sku);
@@ -3910,7 +3898,6 @@ function App() {
   };
   return (
     <div className="flex min-h-screen bg-surface-app text-text-primary">
-      <ToastContainer toasts={toasts} onRemove={removeToast} />
       <StartupToasts />
       <aside
         className={`sticky top-0 flex h-screen shrink-0 flex-col border-r border-border-default bg-surface-panel shadow-sm transition-[width] duration-200 ease-out ${
@@ -4110,10 +4097,8 @@ function App() {
               editableDescription={testEditableDescription}
               uploadResult={testUploadResult as UploadResult | null}
               isEditorOpen={testIsEditorOpen}
-              fetchProgress={testFetchProgress}
-              imageGenProgress={testImageGenProgress}
-              createListingProgress={testCreateListingProgress}
-              uploadProgress={testUploadProgress}
+              createPipelineId={testCreatePipelineId}
+              uploadPipelineId={testUploadPipelineId}
               uploadingSkus={testUploadingSkus}
               isTrimmingTitle={testIsTrimmingTitle}
               onListingIdChange={setTestListingId}
@@ -4223,9 +4208,8 @@ function App() {
               onCancelTextGen={cancelTestTextGeneration}
               autoSaveStatus={{ title: "idle", description: "idle" }}
               bgRemovedPhotos={testBgRemovedPhotos}
-              bgRemovalProgress={testBgRemovalProgress}
               autoBackgroundRemovalEnabled={autoBackgroundRemovalEnabled}
-              onError={(msg) => addToast("error", msg)}
+              onError={(msg) => toast.error(msg)}
             />
           )}
           {activeTab === "saved-3d-files" && <Saved3DFiles />}
@@ -4293,9 +4277,10 @@ function App() {
               </div>
 
               {loadingListings ? (
-                <div className="flex flex-col items-center justify-center gap-4 py-12">
-                  <div className="h-12 w-12 animate-spin rounded-full border-4 border-border-default border-t-primary" />
-                  <p className="text-text-muted">Loading history...</p>
+                <div className="flex flex-col gap-4" aria-busy="true" aria-label="Loading history">
+                  {Array.from({ length: historyPageSize }, (_, i) => (
+                    <ListingCardSkeleton key={i} viewMode={historyViewMode} />
+                  ))}
                 </div>
               ) : allListings.length === 0 ? (
                 <div className="rounded-xl border border-border-default bg-surface-muted p-8 text-center">
@@ -4320,6 +4305,7 @@ function App() {
                           onCardClick={handleListingClick}
                           onUpload={(l) => handleUploadToEbay(l.sku!, l)}
                           isUploading={uploadingSkus.has(listing.sku!)}
+                          uploadStatus={uploadStatuses[listing.sku!] ?? null}
                           uploadResult={uploadResults[listing.sku!]}
                           quantity={listingQuantities[listing.sku!]}
                           loadingQuantity={loadingQuantities}
@@ -4338,6 +4324,7 @@ function App() {
                           onCardClick={handleListingClick}
                           onUpload={(l) => handleUploadToEbay(l.sku!, l)}
                           isUploading={uploadingSkus.has(listing.sku!)}
+                          uploadStatus={uploadStatuses[listing.sku!] ?? null}
                           uploadResult={uploadResults[listing.sku!]}
                           quantity={listingQuantities[listing.sku!]}
                           loadingQuantity={loadingQuantities}
@@ -4508,14 +4495,13 @@ function App() {
                   </button>
                   {imageSearchOpen && (
                     <ImageSearchSteps
-                      addToast={addToast as (type: string, message: string) => void}
                       siteStatus={threeDSiteStatus}
                       enabledSites={THREE_D_SITES.map(({ site }) => site).filter(site => threeDSitesEnabled[site] ?? true)}
                       sitePriority={threeDSitePriority}
                       onUseLink={(link, meta) => {
                         setSharedDownloadLink(link);
                         setSharedDownloadMeta(meta);
-                        addToast("success", `Link ready for the download step: ${link}`);
+                        toast.success(`Link ready for the download step: ${link}`);
                       }}
                     />
                   )}
@@ -4523,7 +4509,6 @@ function App() {
 
                 {/* Title Search pipeline — expandable, open by default */}
                 <TitleSearchPipeline
-                  addToast={addToast as (type: string, message: string) => void}
                   siteStatus={threeDSiteStatus}
                   enabledSites={THREE_D_SITES.map(({ site }) => site).filter(site => threeDSitesEnabled[site] ?? true)}
                   sitePriority={threeDSitePriority}
@@ -4531,13 +4516,12 @@ function App() {
                   onUseLink={(link, meta) => {
                     setSharedDownloadLink(link);
                     setSharedDownloadMeta(meta);
-                    addToast("success", `Link ready for the download step: ${link}`);
+                    toast.success(`Link ready for the download step: ${link}`);
                   }}
                 />
 
                 {/* Shared Steps 3-4 — always visible below both pipelines */}
                 <SharedDownloadRender
-                  addToast={addToast as (type: string, message: string) => void}
                   fileDownloadDelay={threeDDownloadDelay}
                   externalUrl={sharedDownloadLink}
                   externalMeta={sharedDownloadMeta}
@@ -4548,14 +4532,12 @@ function App() {
 
                 {/* Research Pipeline — Copy Seller */}
                 <ResearchPipeline
-                  addToast={addToast as (type: string, message: string) => void}
                 />
 
                 <hr className="border-border-default" />
 
                 {/* Title-simplification config for the Copy Seller pipeline */}
                 <TitleSimplificationSettings
-                  addToast={addToast as (type: string, message: string) => void}
                 />
               </div>
             </div>
@@ -5429,10 +5411,10 @@ function App() {
               editableDescription={editableDescription}
               uploadResult={uploadResult}
               isEditorOpen={isEditorOpen}
-              fetchProgress={fetchProgress}
-              imageGenProgress={imageGenProgress}
-              createListingProgress={createListingProgress}
-              uploadProgress={uploadProgress}
+              createPipelineId={createPipelineId}
+              uploadPipelineId={uploadPipelineId}
+              onRetryCreate={handleRetryCreatePhase}
+              onRetryUpload={handleRetryUpload}
               uploadingSkus={uploadingSkus}
               isTrimmingTitle={isTrimmingTitle}
               autoSaveStatus={autoSaveStatus}
@@ -5483,8 +5465,7 @@ function App() {
               onCancelPhotoRegeneration={handleCancelPhotoRegeneration}
               autoBackgroundRemovalEnabled={autoBackgroundRemovalEnabled}
               bgRemovedPhotos={bgRemovedPhotos}
-              bgRemovalProgress={bgRemovalProgress}
-              onError={(msg) => addToast("error", msg)}
+              onError={(msg) => toast.error(msg)}
             />
           )}
           {promptModalOpen && (

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import StudioRenderPreview, { type StudioRenderPreviewHandle } from "./StudioRenderPreview";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
+import { toast } from "../utils/statusStore";
 import {
   RENDER_AMBIENT_MAX,
   RENDER_ANGLE_PRESETS,
@@ -51,12 +52,11 @@ interface RenderProfileEditorProps {
   // Called after "Current Settings" is saved so the parent reloads the flat
   // settings into its own state (Step 4's render path reads them)
   onSavedCurrentSettings?: () => void;
-  addToast?: (type: string, message: string) => void;
 }
 
 const BENCHY_URL = "/render/3DBenchy.stl";
 
-function RenderProfileEditor({ editingProfile, onBack, onSavedCurrentSettings, addToast }: RenderProfileEditorProps) {
+function RenderProfileEditor({ editingProfile, onBack, onSavedCurrentSettings }: RenderProfileEditorProps) {
   // Local copy of the settings being edited — nothing persists until Save
   const [settings, setSettings] = useState<RenderSettingsWire>(() => renderSettingsFromUnknown({}));
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -227,7 +227,7 @@ function RenderProfileEditor({ editingProfile, onBack, onSavedCurrentSettings, a
           const data = (await res.json().catch(() => null)) as { error?: string } | null;
           throw new Error(data?.error || "Could not save the settings");
         }
-        addToast?.("info", "Saved Current Settings");
+        toast.info("Saved Current Settings");
         onSavedCurrentSettings?.();
       } else {
         const res = await fetch(`/api/render-profiles/${encodeURIComponent(editingProfile)}`, {
@@ -239,11 +239,11 @@ function RenderProfileEditor({ editingProfile, onBack, onSavedCurrentSettings, a
           const data = (await res.json().catch(() => null)) as { error?: string } | null;
           throw new Error(data?.error || `Could not save "${editingProfile}"`);
         }
-        addToast?.("info", `Saved render profile "${editingProfile}"`);
+        toast.info(`Saved render profile "${editingProfile}"`);
       }
       onBack();
     } catch (err) {
-      addToast?.("error", (err as Error).message || "Save failed");
+      toast.error((err as Error).message || "Save failed");
     } finally {
       setSaving(false);
     }
@@ -264,10 +264,10 @@ function RenderProfileEditor({ editingProfile, onBack, onSavedCurrentSettings, a
         throw new Error(data?.error || `Could not create "${name}"`);
       }
       setNameModalOpen(false);
-      addToast?.("info", `Created render profile "${name}"`);
+      toast.info(`Created render profile "${name}"`);
       onBack();
     } catch (err) {
-      addToast?.("error", (err as Error).message || "Create failed");
+      toast.error((err as Error).message || "Create failed");
     } finally {
       setSaving(false);
     }

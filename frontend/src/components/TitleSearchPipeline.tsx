@@ -1,9 +1,27 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import MessageBarInput from "./MessageBarInput";
+import PipelineTracker from "./PipelineTracker";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { PIPELINE_TITLE_SEARCH, MATCH_LABEL_CONFIRMED_IMAGE_MATCH, MATCH_LABEL_UNCONFIRMED_TITLE_MATCH, type ThreeDSiteStatus, type Pipeline, type MatchLabel as ForwardedMatchLabel } from "../constants/files3d";
 import { filterOperationalThreeDResults, toastSkippedSites } from "../utils/filterThreeDResults";
+import {
+  dismissPipeline,
+  startPipelineWithId,
+  toast,
+  type PipelineHandle,
+} from "../utils/statusStore";
+
+// Title Search waiting state: one Pipeline in the Status Store per run
+// (ADR 0002), rendered by PipelineTracker. Bespoke step UIs below are unchanged.
+const TITLE_SEARCH_STEP_FETCH = "Fetch eBay listing";
+const TITLE_SEARCH_STEP_SEARCH = "Optimize title & search";
+const TITLE_SEARCH_STEP_CONFIRM = "Confirm match";
+const TITLE_SEARCH_STEPS = [
+  TITLE_SEARCH_STEP_FETCH,
+  TITLE_SEARCH_STEP_SEARCH,
+  TITLE_SEARCH_STEP_CONFIRM,
+];
 
 interface TextSearchResult {
   title: string;
@@ -18,7 +36,6 @@ interface TextSearchResult {
 // (or comparison impossible) — the download is never blocked either way.
 type MatchLabel = "checking" | "confirmed" | "unconfirmed";
 
-const DEFAULT_MAX_RESULTS = 35;
 const DEFAULT_OPTIMIZE_PROMPT = "";
 
 // Metadata forwarded with the top link so the shared download step can
@@ -31,7 +48,6 @@ interface ForwardedLinkMeta {
 }
 
 interface TitleSearchPipelineProps {
-  addToast?: (type: string, message: string) => void;
   enabledSites?: string[];
   sitePriority?: string[];
   siteStatus?: ThreeDSiteStatus | null;
@@ -40,7 +56,6 @@ interface TitleSearchPipelineProps {
 }
 
 function TitleSearchPipeline({
-  addToast,
   enabledSites,
   sitePriority,
   siteStatus = null,
@@ -61,26 +76,31 @@ function TitleSearchPipeline({
   const [promptOpen, setPromptOpen] = useState(false);
   const [promptTemplate, setPromptTemplate] = useState(DEFAULT_OPTIMIZE_PROMPT);
   const [defaultPrompt, setDefaultPrompt] = useState<string | null>(null);
-  const [maxResults, setMaxResults] = useState(DEFAULT_MAX_RESULTS);
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<TextSearchResult[]>([]);
+  const [retryingShortened, setRetryingShortened] = useState(false);
+  const [shortenedTitle, setShortenedTitle] = useState<string | null>(null);
 
   // Step 3 — Top-priority link image confirmation
   const [topLink, setTopLink] = useState<TextSearchResult | null>(null);
   const [siteImages, setSiteImages] = useState<string[]>([]);
   const [matchLabel, setMatchLabel] = useState<MatchLabel | null>(null);
 
-  const searchQuery = () => {
-    const base = optimizedTitle.trim();
-    if (!base) return "";
-    return base.endsWith(" 3d file") ? base : `${base} 3d file`;
+  // Waiting state lives in the Status Store; only the pipeline id is local.
+  const [pipelineId, setPipelineId] = useState<number | null>(null);
+  const pipelineRef = useRef<PipelineHandle | null>(null);
+
+  const searchQuery = (base: string) => {
+    const trimmed = base.trim();
+    if (!trimmed) return "";
+    return trimmed.endsWith(" 3d file") ? trimmed : `${trimmed} 3d file`;
   };
 
   const handleStep1Submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = step1Link.trim();
     if (!trimmed) {
-      addToast?.("error", "Please enter an eBay listing ID or URL");
+      toast.error("Please enter an eBay listing ID or URL");
       return;
     }
     setStep1Loading(true);
@@ -91,6 +111,15 @@ function TitleSearchPipeline({
     setTopLink(null);
     setSiteImages([]);
     setMatchLabel(null);
+    setRetryingShortened(false);
+    setShortenedTitle(null);
+    if (pipelineId != null) dismissPipeline(pipelineId);
+    const { id: newPipelineId, handle: pipeline } = startPipelineWithId(
+      "Title Search",
+      TITLE_SEARCH_STEPS,
+    );
+    pipelineRef.current = pipeline;
+    setPipelineId(newPipelineId);
     try {
       // /api/photos streams NDJSON progress events; fetchWithProgress parses the
       // stream and returns the final `result` payload (or throws on `error`).
@@ -108,9 +137,15 @@ function TitleSearchPipeline({
       setPhotos(fetchedPhotos);
       const title = data?.listing?.title || "";
       setOriginalTitle(title);
-      if (!title) addToast?.("info", "Listing fetched but no title found");
+      pipeline.advance(); // → Optimize title & search
+      if (!title) {
+        toast.info("Listing fetched but no title found");
+      } else {
+        void optimizeTitle(title);
+      }
     } catch (err) {
-      addToast?.("error", (err as Error).message || "Failed to fetch listing");
+      pipeline.fail((err as Error).message || "Failed to fetch listing");
+      toast.error((err as Error).message || "Failed to fetch listing");
     } finally {
       setStep1Loading(false);
     }
@@ -130,24 +165,27 @@ function TitleSearchPipeline({
     }
   };
 
-  const handleOptimize = async () => {
-    if (!originalTitle.trim()) return;
+  const optimizeTitle = async (title: string) => {
+    if (!title.trim()) return;
     setOptimizing(true);
+    setOptimizedTitle("");
     try {
       const res = await fetch("/api/optimize-title", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: originalTitle,
+          title,
           ...(promptTemplate.trim() ? { prompt: promptTemplate } : {}),
           ...(textModel ? { text_model: textModel } : {}),
         }),
       });
       const data = (await res.json()) as { optimized_title?: string; error?: string };
       if (!res.ok || data.error) throw new Error(data.error || "Title optimization failed");
-      setOptimizedTitle(data.optimized_title || "");
+      const optimized = data.optimized_title || "";
+      setOptimizedTitle(optimized);
+      if (optimized.trim()) void runSearch(optimized);
     } catch (err) {
-      addToast?.("error", (err as Error).message || "Title optimization failed");
+      toast.error((err as Error).message || "Title optimization failed");
     } finally {
       setOptimizing(false);
     }
@@ -184,18 +222,36 @@ function TitleSearchPipeline({
       } else {
         setMatchLabel("unconfirmed");
       }
+      pipelineRef.current?.succeed();
     } catch (err) {
       setMatchLabel(null);
-      addToast?.("error", (err as Error).message || "Failed to scrape site images");
+      pipelineRef.current?.fail((err as Error).message || "Failed to scrape site images");
+      toast.error((err as Error).message || "Failed to scrape site images");
     }
   };
 
-  const handleSearch = async () => {
-    const query = searchQuery();
-    if (!query) {
-      addToast?.("error", "Optimized title is empty — optimize or type a title first");
-      return;
+  const shortenTitle = async (title: string): Promise<string | null> => {
+    try {
+      const res = await fetch("/api/shorten-title", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          ...(textModel ? { text_model: textModel } : {}),
+        }),
+      });
+      const data = (await res.json()) as { shortened_title?: string; error?: string };
+      if (!res.ok || data.error) throw new Error(data.error || "Title shortening failed");
+      return data.shortened_title || null;
+    } catch (err) {
+      toast.error((err as Error).message || "Title shortening failed");
+      return null;
     }
+  };
+
+  const runSearch = async (base: string, isRetry = false) => {
+    const query = searchQuery(base);
+    if (!query) return;
     setSearching(true);
     setResults([]);
     setTopLink(null);
@@ -209,7 +265,6 @@ function TitleSearchPipeline({
           query,
           enabled_sites: enabledSites,
           site_priorities: sitePriority,
-          max_results: maxResults,
         }),
       });
       const data = (await res.json()) as { results?: TextSearchResult[]; error?: string };
@@ -217,18 +272,58 @@ function TitleSearchPipeline({
       // Whitelisted results only, already ordered by site priority by the backend
       const { filtered, skippedSites } = filterOperationalThreeDResults(data.results, siteStatus);
       setResults(filtered);
-      toastSkippedSites(addToast, skippedSites);
+      toastSkippedSites(skippedSites);
       if (filtered.length === 0) {
-        if (skippedSites.length === 0) addToast?.("info", "No 3D file results found for this title");
+        // No viable whitelisted link — retry once with a shortened query
+        // (first version/model code only, unnecessary words cut).
+        if (!isRetry) {
+          setRetryingShortened(true);
+          const shortened = await shortenTitle(base);
+          if (shortened && shortened.trim() && shortened.trim() !== base.trim()) {
+            setShortenedTitle(shortened);
+            toast.info(`No whitelisted results — retrying with shorter query: "${shortened}"`);
+            await runSearch(shortened, true);
+            return;
+          }
+          setShortenedTitle(null);
+        }
+        if (skippedSites.length === 0) toast.info("No 3D file results found for this title");
+        pipelineRef.current?.fail("No 3D file results found for this title");
         return;
       }
       const top = filtered[0];
       setTopLink(top);
+      pipelineRef.current?.advancePast(TITLE_SEARCH_STEP_SEARCH); // → Confirm match
       void confirmTopLink(top, photos);
     } catch (err) {
-      addToast?.("error", (err as Error).message || "Search failed");
+      pipelineRef.current?.fail((err as Error).message || "Search failed");
+      toast.error((err as Error).message || "Search failed");
     } finally {
       setSearching(false);
+      if (isRetry) setRetryingShortened(false);
+    }
+  };
+
+  /**
+   * Retry the failed pipeline. The store settles a failed pipeline permanently,
+   * so a retry dismisses it and re-runs against a fresh pipeline: re-run the
+   * search when the fetch step already produced a title (search/confirm
+   * failed), otherwise re-run the fetch from step 1.
+   */
+  const handleRetry = () => {
+    if (originalTitle.trim()) {
+      if (pipelineId != null) dismissPipeline(pipelineId);
+      const { id: newPipelineId, handle: pipeline } = startPipelineWithId(
+        "Title Search",
+        [TITLE_SEARCH_STEP_SEARCH, TITLE_SEARCH_STEP_CONFIRM],
+      );
+      pipelineRef.current = pipeline;
+      setPipelineId(newPipelineId);
+      setRetryingShortened(false);
+      setShortenedTitle(null);
+      void runSearch(optimizedTitle);
+    } else if (step1Link.trim()) {
+      void handleStep1Submit({ preventDefault: () => {} } as React.FormEvent);
     }
   };
 
@@ -267,6 +362,9 @@ function TitleSearchPipeline({
           <p className="text-sm text-text-muted">
             Search 3D file sites by listing title instead of reverse image search.
           </p>
+
+          {/* Waiting state: one Pipeline in the Status Store (ADR 0002) */}
+          <PipelineTracker pipelineId={pipelineId} onRetry={handleRetry} />
 
           {/* Step 1 — Fetch eBay title + photos */}
           <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
@@ -331,51 +429,32 @@ function TitleSearchPipeline({
                   />
                 )}
               </div>
-              <div className="flex items-end gap-3">
-                <div className="flex flex-1 flex-col gap-1">
-                  <label htmlFor="title-search-optimized" className="text-xs font-semibold text-text-muted">
-                    Optimized title (editable) — " 3d file" is appended on search
-                  </label>
-                  <input
-                    id="title-search-optimized"
-                    type="text"
-                    className="rounded-lg border-2 border-border-default bg-surface-panel px-4 py-2 text-text-primary transition-colors focus:border-primary focus:outline-none disabled:bg-surface-hover"
-                    value={optimizedTitle}
-                    onChange={(e) => setOptimizedTitle(e.target.value)}
-                    placeholder="Optimize the title or type a search title..."
-                    disabled={optimizing}
-                  />
-                </div>
-                <button
-                  type="button"
-                  className={btnPillSm}
-                  onClick={handleOptimize}
-                  disabled={optimizing || !originalTitle.trim()}
-                >
-                  {optimizing ? "Optimizing..." : "Optimize"}
-                </button>
+              <div className="flex flex-col gap-1">
+                <p className="text-xs font-semibold text-text-muted">
+                  Optimized title (by Haiku) — " 3d file" is appended on search
+                </p>
+                <p className="text-sm text-text-primary">
+                  {optimizing ? "Optimizing..." : optimizedTitle || "—"}
+                </p>
+                {shortenedTitle && (
+                  <p className="text-xs text-text-muted">
+                    No whitelisted results for the full title — retried with:{" "}
+                    <span className="text-text-primary">{shortenedTitle}</span>
+                  </p>
+                )}
               </div>
               <div className="flex items-center gap-3">
-                <div className="flex flex-col gap-1">
-                  <label htmlFor="title-search-max-results" className="text-xs font-semibold text-text-muted">
-                    Max results
-                  </label>
-                  <input
-                    id="title-search-max-results"
-                    type="number"
-                    min={1}
-                    className="w-24 rounded-lg border-2 border-border-default bg-surface-panel px-3 py-2 text-text-primary transition-colors focus:border-primary focus:outline-none"
-                    value={maxResults}
-                    onChange={(e) => setMaxResults(Math.max(1, parseInt(e.target.value, 10) || DEFAULT_MAX_RESULTS))}
-                  />
-                </div>
                 <button
                   type="button"
                   className={btnPill}
-                  onClick={handleSearch}
-                  disabled={searching || !optimizedTitle.trim()}
+                  onClick={() => void runSearch(optimizedTitle)}
+                  disabled={searching || optimizing || !optimizedTitle.trim()}
                 >
-                  {searching ? "Searching..." : "Search"}
+                  {searching
+                    ? retryingShortened
+                      ? "Retrying with shorter query..."
+                      : "Searching..."
+                    : "Search again"}
                 </button>
               </div>
               {results.length > 0 && (

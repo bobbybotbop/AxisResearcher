@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { btnPillSm } from "../styles/buttonPill";
 import { CURRENT_SETTINGS_LABEL, type RenderProfilesResponse, type RenderProfileSettings } from "../constants/render";
+import { toast } from "../utils/statusStore";
 
 interface RenderProfileDropdownProps {
   // Selecting a profile copies its settings into the flat settings; the parent
@@ -10,13 +11,12 @@ interface RenderProfileDropdownProps {
   // mode "edit" with a profile name, "edit-current" for Current Settings,
   // or "create" for a new profile.
   onEdit: (mode: "edit" | "edit-current" | "create", name: string | null) => void;
-  addToast?: (type: string, message: string) => void;
 }
 
 // Step 4's Render Profile picker: "Current Settings" (always present, the flat
 // settings) plus every saved profile. The selection is sticky — the backend
 // persists it as the active profile and this component restores it on load.
-function RenderProfileDropdown({ onSelect, onEdit, addToast }: RenderProfileDropdownProps) {
+function RenderProfileDropdown({ onSelect, onEdit }: RenderProfileDropdownProps) {
   const [profiles, setProfiles] = useState<Record<string, RenderProfileSettings>>({});
   const [active, setActive] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -86,11 +86,11 @@ function RenderProfileDropdown({ onSelect, onEdit, addToast }: RenderProfileDrop
           setActive(null);
           onSelect(null, null);
         }
-        addToast?.("info", `Deleted render profile "${name}"`);
+        toast.info(`Deleted render profile "${name}"`);
       })
       .catch((err) => {
         setConfirmDelete(null);
-        addToast?.("error", (err as Error).message || `Could not delete "${name}"`);
+        toast.error((err as Error).message || `Could not delete "${name}"`);
       });
   };
 

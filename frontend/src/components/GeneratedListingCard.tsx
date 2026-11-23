@@ -6,7 +6,11 @@ import {
   formatCategoryShort,
 } from "../utils/listingDisplay";
 import { displaySku } from "../utils/listingStatus";
+import CardUploadBadge from "./CardUploadBadge";
+import type { CardUploadStatus } from "./CardUploadBadge";
 import type { Listing } from "../types/listing";
+
+export type { CardUploadStatus };
 
 const THUMB_PX = 80;
 const THUMB_GAP = 8;
@@ -21,6 +25,7 @@ interface GeneratedListingCardProps {
   onCardClick?: (listing: Listing) => void;
   onUpload?: (listing: Listing) => void;
   isUploading?: boolean;
+  uploadStatus?: CardUploadStatus | null;
   uploadResult?: UploadResult | null;
   quantity?: number | null;
   loadingQuantity?: boolean;
@@ -132,6 +137,7 @@ export default function GeneratedListingCard({
   onCardClick,
   onUpload,
   isUploading,
+  uploadStatus,
   uploadResult,
   quantity,
   loadingQuantity,
@@ -163,8 +169,14 @@ export default function GeneratedListingCard({
   const createdDateTime = listing.createdDateTime as string | undefined;
   const models = listing.models as ListingModels | undefined;
 
+  const resolvedUploadStatus: CardUploadStatus | null =
+    uploadStatus ?? (isUploading ? "uploading" : null);
+
   return (
     <div className="relative w-full">
+      {resolvedUploadStatus && (
+        <CardUploadBadge status={resolvedUploadStatus} className="left-3 top-3" />
+      )}
       {isReady && (
         <div
           className="absolute right-3 top-3 z-10 flex items-center gap-2"

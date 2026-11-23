@@ -39,7 +39,7 @@ from flask import Flask, jsonify, request, Response, stream_with_context
 from flask_cors import CORS
 from werkzeug.serving import WSGIRequestHandler
 from backend.copyScripts.CopyListingMain import copy_listing_main, testing_function
-from backend.serp import search_by_image, extract_top_links, filter_links_by_enabled_sites, search_by_text, order_by_site_priority
+from backend.serp import search_by_image, extract_top_links, filter_links_by_enabled_sites, search_by_text, order_by_site_priority, drop_blacklisted
 from backend.downloaders.thingiverse import extract_thing_id, stream_zip as tv_stream_zip, probe as probe_thingiverse, scrape_images as tv_scrape_images, probe_images as probe_images_thingiverse
 from backend.downloaders.printables import extract_model_id as printables_model_id, build_zip as printables_build_zip, probe as probe_printables, scrape_images as printables_scrape_images, probe_images as probe_images_printables
 from backend.downloaders.makerworld import extract_model_info as mw_extract_model_info, download_3mf as mw_download_3mf, probe as probe_makerworld, open_session as mw_open_session, session_status as mw_session_status, close_session as mw_close_session, scrape_images as mw_scrape_images, probe_images as probe_images_makerworld
@@ -3242,6 +3242,7 @@ def serp_lens_search():
 
         raw = search_by_image(image_url)
         links = extract_top_links(raw, limit=10)
+        links = drop_blacklisted(links)
         links = filter_links_by_enabled_sites(links, enabled_sites)
         links = order_by_site_priority(links, site_priorities)
 
@@ -3310,16 +3311,57 @@ def optimize_title():
         return jsonify({"error": f"Title optimization failed: {str(e)}"}), 500
 
 
+@app.route('/api/shorten-title', methods=['POST'])
+def shorten_title():
+    """
+    Shorten an optimized search title for a retry search after the full
+    version found no viable whitelisted link. Keeps the first version/model
+    number/code and drops the rest, and cuts unnecessary words.
+
+    Expects JSON: {
+        "title": "optimized title to shorten",
+        "text_model": "model id" (optional; defaults to Claude Haiku)
+    }
+    Returns JSON: {"shortened_title": "..."}
+    """
+    try:
+        data = request.get_json()
+        if not data or not data.get("title", "").strip():
+            return jsonify({"error": "title is required"}), 400
+
+        title = data["title"].strip()
+        template = _load_prompt("title/shortenTitleForSearch.txt")
+        prompt = template.replace("{title}", title)
+
+        text_model = data.get("text_model") or DEFAULT_TITLE_SEARCH_MODEL
+        print(f"[API] /api/shorten-title model={text_model} title='{title}'")
+
+        raw = call_text_llm(prompt, model=text_model)
+        shortened = _sanitize_title(raw)
+        if not shortened:
+            return jsonify({"error": "Failed to get response from AI"}), 502
+
+        print(f"[API] /api/shorten-title result: '{shortened}'")
+        return jsonify({"shortened_title": shortened}), 200
+
+    except FileNotFoundError:
+        return jsonify({"error": "Title shortening prompt not found"}), 500
+    except Exception as e:
+        print(f"[API] /api/shorten-title error: {e}")
+        return jsonify({"error": f"Title shortening failed: {str(e)}"}), 500
+
+
 @app.route('/api/serp-text-search', methods=['POST'])
 def serp_text_search():
     """
-    Google text search via SerpAPI, classified against whitelisted/blacklisted
-    3D-print file hosting sites, filtered by enabled sites, ordered by site priority.
+    Google text search via SerpAPI (full google engine), classified against
+    whitelisted/blacklisted 3D-print file hosting sites, filtered by enabled
+    sites, ordered by site priority. Whitelisted links that don't point to a
+    specific product page (e.g. tag/search pages) are classified blacklisted.
 
     Expects JSON: {
         "query": "benchy 3d file",
         "enabled_sites": ["printables.com", ...] (optional; omitted means all sites),
-        "max_results": 35 (optional),
         "site_priorities": ["thingiverse.com", ...] (optional; domains in priority order)
     }
     Returns JSON: {"results": [{"title", "link", "snippet", "site_type", "priority_rank"}, ...]}
@@ -3336,12 +3378,10 @@ def serp_text_search():
         site_priorities = data.get("site_priorities")  # list[str] | None; domains in priority order
         if site_priorities is not None and not isinstance(site_priorities, list):
             return jsonify({"error": "site_priorities must be a list of strings"}), 400
-        max_results = data.get("max_results", 35)
-        if not isinstance(max_results, int) or max_results < 1:
-            return jsonify({"error": "max_results must be a positive integer"}), 400
         print(f"[API] SerpAPI text search for: {query}")
 
-        results = search_by_text(query, max_results=max_results)
+        results = search_by_text(query)
+        results = drop_blacklisted(results)
         results = filter_links_by_enabled_sites(results, enabled_sites)
         results = order_by_site_priority(results, site_priorities)
 

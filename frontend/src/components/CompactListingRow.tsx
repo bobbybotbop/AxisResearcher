@@ -5,7 +5,11 @@ import {
   formatCategoryShort,
 } from "../utils/listingDisplay";
 import { displaySku } from "../utils/listingStatus";
+import CardUploadBadge from "./CardUploadBadge";
+import type { CardUploadStatus } from "./CardUploadBadge";
 import type { Listing } from "../types/listing";
+
+export type { CardUploadStatus };
 
 interface UploadResult {
   listingId?: string;
@@ -17,6 +21,7 @@ interface CompactListingRowProps {
   onCardClick?: (listing: Listing) => void;
   onUpload?: (listing: Listing) => void;
   isUploading?: boolean;
+  uploadStatus?: CardUploadStatus | null;
   uploadResult?: UploadResult | null;
   quantity?: number | null;
   loadingQuantity?: boolean;
@@ -62,6 +67,7 @@ export default function CompactListingRow({
   onCardClick,
   onUpload,
   isUploading,
+  uploadStatus,
   uploadResult,
   quantity,
   loadingQuantity,
@@ -89,8 +95,14 @@ export default function CompactListingRow({
 
   const createdDateTime = listing.createdDateTime as string | undefined;
 
+  const resolvedUploadStatus: CardUploadStatus | null =
+    uploadStatus ?? (isUploading ? "uploading" : null);
+
   return (
     <div className="relative w-full">
+      {resolvedUploadStatus && (
+        <CardUploadBadge status={resolvedUploadStatus} className="-top-2 left-3" />
+      )}
       {isReady && (
         <div
           className="absolute -top-2 right-3 z-10 flex items-center gap-2"
