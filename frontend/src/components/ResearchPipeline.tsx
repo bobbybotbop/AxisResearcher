@@ -34,6 +34,15 @@ const SORT_OPTIONS: { value: SortMetric; label: string }[] = [
 const inputClass =
   "rounded-lg border-2 border-border-default bg-surface-panel px-4 py-2 text-text-primary transition-colors focus:border-primary focus:outline-none disabled:bg-surface-hover";
 
+/** Today's date as a YYYY-MM-DD string (local calendar day). */
+function todayIsoDate(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 interface MetricsProgress {
   current: number;
   total: number;
@@ -46,6 +55,18 @@ export default function ResearchPipeline() {
   const [k, setK] = useState(20);
   const [minSold, setMinSold] = useState(1);
   const [sortBy, setSortBy] = useState<SortMetric>("demand");
+  // Date-Posted Range (ticket 12): collection-time filter on the seller's own
+  // listings. Default today→today; picking a past start day sets end to today.
+  const [datePostedStart, setDatePostedStart] = useState(todayIsoDate);
+  const [datePostedEnd, setDatePostedEnd] = useState(todayIsoDate);
+
+  const handleDatePostedStartChange = (value: string): void => {
+    setDatePostedStart(value);
+    // Picking a past start day sets the range from that day to today.
+    if (value && value < datePostedEnd) {
+      setDatePostedEnd(todayIsoDate());
+    }
+  };
 
   const [isRunning, setIsRunning] = useState(false);
   // Waiting state lives in the Status Store as a Pipeline (ADR 0002); only the
@@ -157,6 +178,8 @@ export default function ResearchPipeline() {
             top_n: topN,
             k,
             min_sold: minSold,
+            date_posted_start: datePostedStart || null,
+            date_posted_end: datePostedEnd || null,
           }),
         },
         (event) => {
@@ -275,6 +298,35 @@ export default function ResearchPipeline() {
               onCommit={setMinSold}
               min={0}
               ariaLabel="Minimum sold threshold"
+              className={inputClass}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-semibold text-text-primary">
+              Date posted from
+            </span>
+            <input
+              type="date"
+              aria-label="Date posted from"
+              value={datePostedStart}
+              max={todayIsoDate()}
+              onChange={(e) => handleDatePostedStartChange(e.target.value)}
+              disabled={isRunning}
+              className={inputClass}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-semibold text-text-primary">
+              Date posted to
+            </span>
+            <input
+              type="date"
+              aria-label="Date posted to"
+              value={datePostedEnd}
+              min={datePostedStart}
+              max={todayIsoDate()}
+              onChange={(e) => setDatePostedEnd(e.target.value)}
+              disabled={isRunning}
               className={inputClass}
             />
           </label>

@@ -103,6 +103,65 @@ def test_select_top_listings_sorts_descending_by_sold():
 
 
 # ---------------------------------------------------------------------------
+# filter_listings_by_date_posted (ticket 12)
+# ---------------------------------------------------------------------------
+
+def test_filter_listings_by_date_posted_keeps_listings_within_range():
+    items = [
+        _listing("a", 10, created="2026-11-20T12:00:00.000Z"),
+        _listing("b", 10, created="2026-11-21T12:00:00.000Z"),
+        _listing("c", 10, created="2026-11-22T12:00:00.000Z"),
+    ]
+    kept = copy_seller.filter_listings_by_date_posted(
+        items, date_posted_start="2026-11-21", date_posted_end="2026-11-22",
+    )
+    assert [l["itemId"] for l in kept] == ["b", "c"]
+
+
+def test_filter_listings_by_date_posted_excludes_before_start_and_after_end():
+    items = [
+        _listing("before", 10, created="2026-11-01T00:00:00.000Z"),
+        _listing("in", 10, created="2026-11-15T00:00:00.000Z"),
+        _listing("after", 10, created="2026-12-01T00:00:00.000Z"),
+    ]
+    kept = copy_seller.filter_listings_by_date_posted(
+        items, date_posted_start="2026-11-10", date_posted_end="2026-11-20",
+    )
+    assert [l["itemId"] for l in kept] == ["in"]
+
+
+def test_filter_listings_by_date_posted_includes_full_end_day():
+    # End date is inclusive of the whole calendar day.
+    items = [
+        _listing("morning", 10, created="2026-11-22T00:00:01.000Z"),
+        _listing("night", 10, created="2026-11-22T23:59:59.000Z"),
+    ]
+    kept = copy_seller.filter_listings_by_date_posted(
+        items, date_posted_start="2026-11-22", date_posted_end="2026-11-22",
+    )
+    assert [l["itemId"] for l in kept] == ["morning", "night"]
+
+
+def test_filter_listings_by_date_posted_no_range_returns_all():
+    items = [_listing("a", 10), _listing("b", 10)]
+    kept = copy_seller.filter_listings_by_date_posted(
+        items, date_posted_start=None, date_posted_end=None,
+    )
+    assert [l["itemId"] for l in kept] == ["a", "b"]
+
+
+def test_filter_listings_by_date_posted_missing_creation_date_excluded():
+    items = [
+        {"itemId": "no-date", "title": "x", "estimatedAvailabilities": [{"estimatedSoldQuantity": 5}]},
+        _listing("has-date", 5, created="2026-11-21T00:00:00.000Z"),
+    ]
+    kept = copy_seller.filter_listings_by_date_posted(
+        items, date_posted_start="2026-11-01", date_posted_end="2026-11-22",
+    )
+    assert [l["itemId"] for l in kept] == ["has-date"]
+
+
+# ---------------------------------------------------------------------------
 # simplify_title_to_phrase (stub contract — ticket 07 owns the real prompt)
 # ---------------------------------------------------------------------------
 
@@ -262,6 +321,64 @@ def test_run_copy_seller_result_has_no_weights(monkeypatch, tmp_path):
 
     saved = copy_seller.load_pipeline_run(result["run_id"], storage_root=str(tmp_path))
     assert "weights" not in saved
+
+
+def test_run_copy_seller_filters_by_date_posted_before_top_n_and_metrics(monkeypatch, tmp_path):
+    """Ticket 12: date-posted range filter applies to the seller's listings
+    before the top-N cut and before any metric is computed."""
+    today = datetime.now(timezone.utc).date()
+    yesterday = today - timedelta(days=1)
+    old = today - timedelta(days=30)
+
+    # Three listings: one old (outside range), two recent (inside range).
+    # The old one has the highest sold count — if the date filter ran after
+    # top-N, it would be picked first. With the filter before top-N, it is
+    # excluded and only the two recent listings become candidates.
+    seller_items = [
+        _listing("old", 1000, created=f"{old.isoformat()}T00:00:00.000Z"),
+        _listing("new1", 10, created=f"{today.isoformat()}T08:00:00.000Z"),
+        _listing("new2", 5, created=f"{yesterday.isoformat()}T08:00:00.000Z"),
+    ]
+    details = {item["itemId"]: item for item in seller_items}
+
+    monkeypatch.setattr(copy_seller, "getItemIds", lambda seller: [i["itemId"] for i in seller_items])
+    monkeypatch.setattr(
+        copy_seller,
+        "single_get_detailed_item_data",
+        lambda item_id, verbose=False: details.get(item_id),
+    )
+
+    search_calls = []
+    def fake_search(query, limit=50):
+        search_calls.append(query)
+        return {"total_items": 10, "items": []}
+    monkeypatch.setattr(copy_seller, "single_search_by_query", fake_search)
+
+    real_tracker_cls = copy_seller.ApiUsageTracker
+    monkeypatch.setattr(
+        copy_seller, "ApiUsageTracker",
+        lambda: real_tracker_cls(storage_path=str(tmp_path / "u.json")),
+    )
+
+    events = list(copy_seller.run_copy_seller(
+        "someseller", top_n=5, k=3, min_sold=1,
+        date_posted_start=yesterday.isoformat(),
+        date_posted_end=today.isoformat(),
+        storage_root=str(tmp_path),
+    ))
+    assert events[-1]["type"] == "result"
+    candidates = events[-1]["data"]["product_candidates"]
+    # Old listing (highest sold) excluded by date filter; only the two recent
+    # listings remain. Sold-desc order: new1 (10) before new2 (5).
+    assert [c["listing_url"] for c in candidates] == [
+        "https://www.ebay.com/itm/new1",
+        "https://www.ebay.com/itm/new2",
+    ]
+    # Metrics computed only for the date-filtered pool: 2 phrase searches, not 3.
+    assert len(search_calls) == 2
+    # Inputs echoed back include the date range.
+    assert events[-1]["data"]["inputs"]["date_posted_start"] == yesterday.isoformat()
+    assert events[-1]["data"]["inputs"]["date_posted_end"] == today.isoformat()
 
 
 def test_run_copy_seller_emits_error_when_budget_exceeded(monkeypatch, tmp_path):
