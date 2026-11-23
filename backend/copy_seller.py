@@ -10,7 +10,7 @@ import json
 import os
 import re
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -86,6 +86,54 @@ def select_top_listings(detailed_items, min_sold, top_n):
     ]
     eligible.sort(key=lambda item: _extract_sold_quantity(item) or 0, reverse=True)
     return eligible[:top_n]
+
+
+def _parse_item_creation_date(item_creation_date):
+    """Parse an eBay itemCreationDate ISO string to an aware datetime.
+
+    Same parsing approach as compute_sold_velocity. Returns None when missing
+    or unparseable.
+    """
+    if not item_creation_date:
+        return None
+    try:
+        created = datetime.fromisoformat(str(item_creation_date).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    return created
+
+
+def filter_listings_by_date_posted(detailed_items, date_posted_start=None, date_posted_end=None):
+    """Keep only listings whose itemCreationDate falls within [start, end].
+
+    Both bounds are calendar dates (YYYY-MM-DD strings), inclusive — the end
+    date covers the whole day. Listings with a missing/unparseable creation
+    date are excluded when a range is given. With no range, returns the input
+    unchanged. Applied before the top-N cut and before metric computation.
+    """
+    if not date_posted_start and not date_posted_end:
+        return detailed_items
+    start_dt = None
+    end_dt = None
+    if date_posted_start:
+        start_dt = datetime.fromisoformat(str(date_posted_start)).replace(tzinfo=timezone.utc)
+    if date_posted_end:
+        # Inclusive of the whole end day: bound at the start of the next day.
+        end_day = datetime.fromisoformat(str(date_posted_end)).replace(tzinfo=timezone.utc)
+        end_dt = end_day + timedelta(days=1)
+    kept = []
+    for item in detailed_items:
+        created = _parse_item_creation_date(item.get("itemCreationDate"))
+        if created is None:
+            continue
+        if start_dt and created < start_dt:
+            continue
+        if end_dt and created >= end_dt:
+            continue
+        kept.append(item)
+    return kept
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +395,9 @@ def single_search_by_query(query, limit=50):
 # Pipeline orchestration
 # ---------------------------------------------------------------------------
 
-def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, storage_root=None, collect_demand=True):
+def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1,
+                    date_posted_start=None, date_posted_end=None,
+                    storage_root=None, collect_demand=True):
     """Run the Copy Seller pipeline, yielding progress/result/error event dicts.
 
     Emits raw Product Candidates with their collected metrics; ordering happens
@@ -358,6 +408,10 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, storage_root=No
     When collect_demand is False, the K per-product sold-sum getItem lookups
     are skipped (the one search per product still runs, so Competition Count
     is still collected) and each candidate's demand_coefficient is None.
+
+    date_posted_start / date_posted_end (YYYY-MM-DD) bound the seller's own
+    listings by itemCreationDate — a collection-time filter applied before the
+    top-N cut and before any metric is computed.
     """
     tracker = ApiUsageTracker()
     estimated_cost = estimate_api_call_cost(top_n, k, collect_demand=collect_demand)
@@ -411,7 +465,25 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, storage_root=No
             "fetched": len(detailed),
         }
 
-        top_listings = select_top_listings(detailed, min_sold=min_sold, top_n=top_n)
+        # Date-posted range filter (ticket 12): collection-time filter on the
+        # seller's own listings, applied before the top-N cut and before any
+        # metric is computed.
+        date_filtered = filter_listings_by_date_posted(
+            detailed,
+            date_posted_start=date_posted_start,
+            date_posted_end=date_posted_end,
+        )
+        if not date_filtered:
+            yield {
+                "type": "error",
+                "error": (
+                    f"No listings posted within the date range "
+                    f"{date_posted_start or '…'} → {date_posted_end or '…'}"
+                ),
+            }
+            return
+
+        top_listings = select_top_listings(date_filtered, min_sold=min_sold, top_n=top_n)
         if not top_listings:
             yield {"type": "error", "error": f"No listings at or above min-sold threshold ({min_sold})"}
             return
@@ -478,7 +550,12 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, storage_root=No
         saved_run = save_pipeline_run(
             {
                 "seller": seller_username,
-                "inputs": {"top_n": top_n, "k": k, "min_sold": min_sold, "collect_demand": collect_demand},
+                "inputs": {
+                    "top_n": top_n, "k": k, "min_sold": min_sold,
+                    "collect_demand": collect_demand,
+                    "date_posted_start": date_posted_start,
+                    "date_posted_end": date_posted_end,
+                },
                 "product_candidates": candidates,
             },
             storage_root=storage_root,
@@ -493,7 +570,12 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, storage_root=No
                 "seller": seller_username,
                 "run_id": saved_run["run_id"],
                 "timestamp": saved_run["timestamp"],
-                "inputs": {"top_n": top_n, "k": k, "min_sold": min_sold, "collect_demand": collect_demand},
+                "inputs": {
+                    "top_n": top_n, "k": k, "min_sold": min_sold,
+                    "collect_demand": collect_demand,
+                    "date_posted_start": date_posted_start,
+                    "date_posted_end": date_posted_end,
+                },
                 "api_calls_made": calls_made,
                 "api_calls_used_today": tracker.used_today,
                 "product_candidates": candidates,

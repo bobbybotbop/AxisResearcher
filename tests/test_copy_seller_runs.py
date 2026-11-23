@@ -200,7 +200,10 @@ def test_run_copy_seller_saves_run_and_logs_milestone(monkeypatch, tmp_path):
     assert runs[0]["seller"] == "someseller"
     assert runs[0]["candidate_count"] == 1
     full = copy_seller.load_pipeline_run(runs[0]["run_id"], storage_root=str(tmp_path))
-    assert full["inputs"] == {"top_n": 5, "k": 3, "min_sold": 1, "collect_demand": True}
+    assert full["inputs"] == {
+        "top_n": 5, "k": 3, "min_sold": 1, "collect_demand": True,
+        "date_posted_start": None, "date_posted_end": None,
+    }
     assert "weights" not in full
     assert full["product_candidates"][0]["listing_url"] == "https://www.ebay.com/itm/1"
 

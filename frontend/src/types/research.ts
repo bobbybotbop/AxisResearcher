@@ -42,7 +42,14 @@ export interface CopySellerResult {
   seller: string;
   run_id?: string;
   timestamp?: string;
-  inputs: { top_n: number; k: number; min_sold: number; collect_demand?: boolean };
+  inputs: {
+    top_n: number;
+    k: number;
+    min_sold: number;
+    collect_demand?: boolean;
+    date_posted_start: string | null;
+    date_posted_end: string | null;
+  };
   api_calls_made: number;
   api_calls_used_today: number;
   product_candidates: ProductCandidate[];
@@ -61,6 +68,13 @@ export interface PipelineRun {
   run_id: string;
   seller: string;
   timestamp: string;
-  inputs: { top_n: number; k: number; min_sold: number; collect_demand?: boolean };
+  inputs: {
+    top_n: number;
+    k: number;
+    min_sold: number;
+    collect_demand?: boolean;
+    date_posted_start: string | null;
+    date_posted_end: string | null;
+  };
   product_candidates: ProductCandidate[];
 }

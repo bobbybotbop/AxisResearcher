@@ -261,7 +261,9 @@ def research_copy_seller():
     """
     Run the Copy Seller research pipeline for an eBay seller.
     Streams progress events and the final raw (unranked) Product Candidates as NDJSON.
-    Body: { seller, top_n?, k?, min_sold?, collect_demand? }
+    Body: { seller, top_n?, k?, min_sold?, collect_demand?, date_posted_start?, date_posted_end? }
+    date_posted_start / date_posted_end are YYYY-MM-DD calendar dates bounding
+    the seller's listings by itemCreationDate (collection-time filter).
     """
     data = request.get_json()
 
@@ -282,8 +284,22 @@ def research_copy_seller():
             return
         collect_demand = bool(data.get("collect_demand", True))
 
-        print(f"[API] /api/research/copy-seller: seller={seller} top_n={top_n} k={k} min_sold={min_sold} collect_demand={collect_demand}")
-        for event in run_copy_seller(seller, top_n=top_n, k=k, min_sold=min_sold, collect_demand=collect_demand):
+        date_posted_start = (data.get("date_posted_start") or "").strip() or None
+        date_posted_end = (data.get("date_posted_end") or "").strip() or None
+        for date_value, name in ((date_posted_start, "date_posted_start"),
+                                 (date_posted_end, "date_posted_end")):
+            if date_value is not None:
+                try:
+                    datetime.strptime(date_value, "%Y-%m-%d")
+                except ValueError:
+                    yield error_event(f"{name} must be a YYYY-MM-DD date")
+                    return
+
+        print(f"[API] /api/research/copy-seller: seller={seller} top_n={top_n} k={k} min_sold={min_sold} collect_demand={collect_demand} date_posted={date_posted_start}→{date_posted_end}")
+        for event in run_copy_seller(
+            seller, top_n=top_n, k=k, min_sold=min_sold, collect_demand=collect_demand,
+            date_posted_start=date_posted_start, date_posted_end=date_posted_end,
+        ):
             event_type = event.get("type")
             if event_type == "progress":
                 extra = {k: v for k, v in event.items() if k not in ("type", "step", "status")}
