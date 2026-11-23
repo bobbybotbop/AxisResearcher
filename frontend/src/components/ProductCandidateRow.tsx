@@ -1,3 +1,4 @@
+import { METRIC_INFO } from "../constants/metricInfo";
 import type { ProductCandidate } from "../types/research";
 
 interface ProductCandidateRowProps {
@@ -89,11 +90,11 @@ export default function ProductCandidateRow({
                 className="whitespace-nowrap"
                 title={
                   candidate.demand_coefficient === null
-                    ? "Demand Coefficient was not collected for this run (Demand score toggle off)"
-                    : "Demand Coefficient: top-K sold sum ÷ active listings (higher is better)"
+                    ? `${METRIC_INFO.demand.label} was not collected for this run (collection toggle off)`
+                    : `${METRIC_INFO.demand.label}: ${METRIC_INFO.demand.calculation} ${METRIC_INFO.demand.direction}`
                 }
               >
-                Demand{" "}
+                {METRIC_INFO.demand.label}{" "}
                 {candidate.demand_coefficient === null
                   ? "not collected"
                   : formatMetric(candidate.demand_coefficient)}
@@ -101,21 +102,23 @@ export default function ProductCandidateRow({
               <span className="text-text-muted">·</span>
               <span
                 className="whitespace-nowrap"
-                title="Competition Count: active listings for the search phrase (fewer is better)"
+                title={`${METRIC_INFO.competition.label}: ${METRIC_INFO.competition.calculation} ${METRIC_INFO.competition.direction}`}
               >
-                Competition {candidate.competition_count.toLocaleString()}
+                {METRIC_INFO.competition.label}{" "}
+                {candidate.competition_count.toLocaleString()}
               </span>
               <span className="text-text-muted">·</span>
               <span
                 className="whitespace-nowrap"
-                title="Sold Velocity: estimated sold ÷ listing age in days (higher is better)"
+                title={`${METRIC_INFO.velocity.label}: ${METRIC_INFO.velocity.calculation} ${METRIC_INFO.velocity.direction}`}
               >
-                Velocity {formatMetric(candidate.sold_velocity)}/day
+                {METRIC_INFO.velocity.label}{" "}
+                {formatMetric(candidate.sold_velocity)}
               </span>
               <span className="text-text-muted">·</span>
               <span
                 className="whitespace-nowrap"
-                title="Estimated sold quantity on the seller's listing"
+                title="Estimated times this listing has sold"
               >
                 Sold {candidate.estimated_sold_quantity.toLocaleString()}
               </span>

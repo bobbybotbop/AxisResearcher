@@ -3,9 +3,11 @@ import { fetchWithProgress } from "../utils/fetchWithProgress";
 import { filterCandidates } from "../utils/filterCandidates";
 import PipelineTracker from "./PipelineTracker";
 import ProductCandidateRow from "./ProductCandidateRow";
+import MetricCard from "./MetricCard";
 import NumberInput from "./NumberInput";
 import { btnPill } from "../styles/buttonPill";
 import { estimateApiCallCost } from "../constants/research";
+import { METRIC_INFO, SORT_OPTIONS } from "../constants/metricInfo";
 import {
   dismissPipeline,
   startPipelineWithId,
@@ -27,12 +29,6 @@ const STEP_COLLECT = "Collecting seller listings";
 const STEP_DETAILS = "Fetching listing details";
 const STEP_METRICS = "Computing metrics";
 const PIPELINE_STEPS = [STEP_BUDGET, STEP_COLLECT, STEP_DETAILS, STEP_METRICS];
-
-const SORT_OPTIONS: { value: SortMetric; label: string }[] = [
-  { value: "demand", label: "Demand Coefficient" },
-  { value: "competition", label: "Competition Count" },
-  { value: "velocity", label: "Sold Velocity" },
-];
 
 const inputClass =
   "rounded-lg border-2 border-border-default bg-surface-panel px-4 py-2 text-text-primary transition-colors focus:border-primary focus:outline-none disabled:bg-surface-hover";
@@ -58,98 +54,6 @@ const EMPTY_RANGES: MetricRangeFilters = {
   competition: { ...EMPTY_RANGE },
   velocity: { ...EMPTY_RANGE },
 };
-
-interface OptionalBoundInputProps {
-  value: number | null;
-  onCommit: (value: number | null) => void;
-  ariaLabel: string;
-  className?: string;
-}
-
-/**
- * Number input for an optional range bound. Empty field = null = "any" (that
- * side does not filter). Commits on every valid edit and on blur.
- */
-function OptionalBoundInput({
-  value,
-  onCommit,
-  ariaLabel,
-  className,
-}: OptionalBoundInputProps) {
-  const [draft, setDraft] = useState(value === null ? "" : String(value));
-  const [focused, setFocused] = useState(false);
-
-  useEffect(() => {
-    if (!focused) setDraft(value === null ? "" : String(value));
-  }, [value, focused]);
-
-  const commit = (raw: string): void => {
-    const trimmed = raw.trim();
-    if (trimmed === "") {
-      if (value !== null) onCommit(null);
-      return;
-    }
-    const parsed = parseFloat(trimmed);
-    if (!Number.isFinite(parsed)) return;
-    if (parsed !== value) onCommit(parsed);
-  };
-
-  return (
-    <input
-      type="number"
-      value={draft}
-      placeholder="any"
-      onFocus={() => setFocused(true)}
-      onChange={(e) => {
-        setDraft(e.target.value);
-        commit(e.target.value);
-      }}
-      onBlur={() => {
-        setFocused(false);
-        commit(draft);
-      }}
-      aria-label={ariaLabel}
-      className={className}
-    />
-  );
-}
-
-interface MetricRangeInputsProps {
-  label: string;
-  range: MetricRange;
-  onChange: (next: MetricRange) => void;
-  minAria: string;
-  maxAria: string;
-}
-
-function MetricRangeInputs({
-  label,
-  range,
-  onChange,
-  minAria,
-  maxAria,
-}: MetricRangeInputsProps) {
-  return (
-    <div className="flex flex-col gap-1">
-      <span className="text-xs font-semibold text-text-primary">{label}</span>
-      <div className="flex items-center gap-2">
-        <OptionalBoundInput
-          value={range.min}
-          onCommit={(min) => onChange({ ...range, min })}
-          ariaLabel={minAria}
-          className={`${inputClass} w-24 px-2 py-1 text-sm`}
-        />
-        <span className="text-xs text-text-muted">to</span>
-        <OptionalBoundInput
-          value={range.max}
-          onCommit={(max) => onChange({ ...range, max })}
-          ariaLabel={maxAria}
-          className={`${inputClass} w-24 px-2 py-1 text-sm`}
-        />
-      </div>
-    </div>
-  );
-}
 
 export default function ResearchPipeline() {
   const [seller, setSeller] = useState("");
@@ -376,57 +280,26 @@ export default function ResearchPipeline() {
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs font-semibold text-text-primary">
-              Top N listings
+              Listings to analyze
             </span>
             <NumberInput
               value={topN}
               onCommit={setTopN}
               min={1}
               max={200}
-              ariaLabel="Top N listings"
+              ariaLabel="Listings to analyze"
               className={inputClass}
             />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-xs font-semibold text-text-primary">
-              K (demand sold-sum)
-            </span>
-            <NumberInput
-              value={k}
-              onCommit={setK}
-              min={1}
-              max={200}
-              ariaLabel="K for demand coefficient"
-              className={inputClass}
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs font-semibold text-text-primary">
-              Demand score
-            </span>
-            <span className="flex h-full items-center gap-2 px-1">
-              <input
-                type="checkbox"
-                aria-label="Collect Demand score"
-                checked={collectDemand}
-                onChange={(e) => setCollectDemand(e.target.checked)}
-                disabled={isRunning}
-                className="h-4 w-4 accent-primary"
-              />
-              <span className="text-sm text-text-muted">
-                {collectDemand ? "Collected" : "Not collected"}
-              </span>
-            </span>
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs font-semibold text-text-primary">
-              Min sold threshold
+              Minimum times sold
             </span>
             <NumberInput
               value={minSold}
               onCommit={setMinSold}
               min={0}
-              ariaLabel="Minimum sold threshold"
+              ariaLabel="Minimum times sold"
               className={inputClass}
             />
           </label>
@@ -461,6 +334,55 @@ export default function ResearchPipeline() {
           </label>
         </div>
 
+        {/* One card per metric: label + "?" calculation tooltip + collection
+            toggle (Demand score only) + acceptable-range inputs. Editing a
+            range re-filters the cached candidates live — no re-run. */}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <MetricCard
+            metric="demand"
+            info={METRIC_INFO.demand}
+            range={ranges.demand}
+            onRangeChange={(next) =>
+              setRanges((prev) => ({ ...prev, demand: next }))
+            }
+            isRunning={isRunning}
+            collected={collectDemand}
+            onCollectedChange={setCollectDemand}
+          >
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-semibold text-text-primary">
+                Listings to check for demand
+              </span>
+              <NumberInput
+                value={k}
+                onCommit={setK}
+                min={1}
+                max={200}
+                ariaLabel="Listings to check for demand"
+                className={`${inputClass} w-24 px-2 py-1 text-sm`}
+              />
+            </label>
+          </MetricCard>
+          <MetricCard
+            metric="competition"
+            info={METRIC_INFO.competition}
+            range={ranges.competition}
+            onRangeChange={(next) =>
+              setRanges((prev) => ({ ...prev, competition: next }))
+            }
+            isRunning={isRunning}
+          />
+          <MetricCard
+            metric="velocity"
+            info={METRIC_INFO.velocity}
+            range={ranges.velocity}
+            onRangeChange={(next) =>
+              setRanges((prev) => ({ ...prev, velocity: next }))
+            }
+            isRunning={isRunning}
+          />
+        </div>
+
         <div className="flex flex-wrap items-center gap-4">
           <button
             type="button"
@@ -472,7 +394,7 @@ export default function ResearchPipeline() {
           </button>
           <span
             className="text-sm text-text-muted"
-            title="Estimated eBay API calls: N×(1 + K·[demand on]) + seller setup"
+            title="Estimated eBay API calls: listings to analyze × (1 + listings to check for demand, when Demand score is collected) + seller setup"
           >
             Estimated cost: ~{estimatedCost.toLocaleString()} API calls
           </span>
@@ -558,38 +480,6 @@ export default function ResearchPipeline() {
                 ))}
               </select>
             </label>
-          </div>
-
-          {/* Acceptable-range filters — edit re-filters live from cached
-              candidates. Empty bound = "any" (that side does not filter). */}
-          <div className="flex flex-wrap gap-x-6 gap-y-3 rounded-xl border border-border-default bg-surface-panel p-3">
-            <MetricRangeInputs
-              label="Demand Coefficient"
-              range={ranges.demand}
-              onChange={(next) =>
-                setRanges((prev) => ({ ...prev, demand: next }))
-              }
-              minAria="Demand Coefficient minimum"
-              maxAria="Demand Coefficient maximum"
-            />
-            <MetricRangeInputs
-              label="Competition Count"
-              range={ranges.competition}
-              onChange={(next) =>
-                setRanges((prev) => ({ ...prev, competition: next }))
-              }
-              minAria="Competition Count minimum"
-              maxAria="Competition Count maximum"
-            />
-            <MetricRangeInputs
-              label="Sold Velocity"
-              range={ranges.velocity}
-              onChange={(next) =>
-                setRanges((prev) => ({ ...prev, velocity: next }))
-              }
-              minAria="Sold Velocity minimum"
-              maxAria="Sold Velocity maximum"
-            />
           </div>
 
           {visibleCandidates.map((candidate, index) => (
