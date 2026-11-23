@@ -640,12 +640,12 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
           </p>
         )}
       </StepCard>
-      {/* Step 4 — Studio Render (disabled until Step 3 has produced a file) */}
+      {/* Step 4 — Studio Render (stays enabled: "test your own file" is an
+          independent entry point, same as Image Search Step 2's pasted URL) */}
       <StepCard
         title="Step 4 — Studio Render"
         status={step4.status}
         statusText={step4.statusText}
-        disabled={!step3Result}
         progress={
           step4.status === "running" && renderProgress?.shot != null && renderProgress?.shots != null
             ? { current: renderProgress.shot, total: renderProgress.shots }
