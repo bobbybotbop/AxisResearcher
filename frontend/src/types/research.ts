@@ -6,6 +6,23 @@
 /** Metrics a Product Candidate can be sorted by (greatest-to-least). */
 export type SortMetric = "demand" | "competition" | "velocity";
 
+/**
+ * An acceptable range for one metric. Either bound may be null — a null bound
+ * means "any" on that side (no filtering). Both null = the metric does not
+ * filter at all.
+ */
+export interface MetricRange {
+  min: number | null;
+  max: number | null;
+}
+
+/** Per-metric acceptable ranges. A Product Candidate outside any set range is dropped. */
+export interface MetricRangeFilters {
+  demand: MetricRange;
+  competition: MetricRange;
+  velocity: MetricRange;
+}
+
 export interface ProductCandidate {
   listing_url: string;
   title: string;

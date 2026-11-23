@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
+import { filterCandidates } from "../utils/filterCandidates";
 import PipelineTracker from "./PipelineTracker";
 import ProductCandidateRow from "./ProductCandidateRow";
 import NumberInput from "./NumberInput";
@@ -13,6 +14,8 @@ import {
 } from "../utils/statusStore";
 import type {
   CopySellerResult,
+  MetricRange,
+  MetricRangeFilters,
   PipelineRun,
   PipelineRunSummary,
   ProductCandidate,
@@ -40,12 +43,112 @@ interface MetricsProgress {
   title: string;
 }
 
+const EMPTY_RANGE: MetricRange = { min: null, max: null };
+const EMPTY_RANGES: MetricRangeFilters = {
+  demand: { ...EMPTY_RANGE },
+  competition: { ...EMPTY_RANGE },
+  velocity: { ...EMPTY_RANGE },
+};
+
+interface OptionalBoundInputProps {
+  value: number | null;
+  onCommit: (value: number | null) => void;
+  ariaLabel: string;
+  className?: string;
+}
+
+/**
+ * Number input for an optional range bound. Empty field = null = "any" (that
+ * side does not filter). Commits on every valid edit and on blur.
+ */
+function OptionalBoundInput({
+  value,
+  onCommit,
+  ariaLabel,
+  className,
+}: OptionalBoundInputProps) {
+  const [draft, setDraft] = useState(value === null ? "" : String(value));
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) setDraft(value === null ? "" : String(value));
+  }, [value, focused]);
+
+  const commit = (raw: string): void => {
+    const trimmed = raw.trim();
+    if (trimmed === "") {
+      if (value !== null) onCommit(null);
+      return;
+    }
+    const parsed = parseFloat(trimmed);
+    if (!Number.isFinite(parsed)) return;
+    if (parsed !== value) onCommit(parsed);
+  };
+
+  return (
+    <input
+      type="number"
+      value={draft}
+      placeholder="any"
+      onFocus={() => setFocused(true)}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        commit(e.target.value);
+      }}
+      onBlur={() => {
+        setFocused(false);
+        commit(draft);
+      }}
+      aria-label={ariaLabel}
+      className={className}
+    />
+  );
+}
+
+interface MetricRangeInputsProps {
+  label: string;
+  range: MetricRange;
+  onChange: (next: MetricRange) => void;
+  minAria: string;
+  maxAria: string;
+}
+
+function MetricRangeInputs({
+  label,
+  range,
+  onChange,
+  minAria,
+  maxAria,
+}: MetricRangeInputsProps) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-semibold text-text-primary">{label}</span>
+      <div className="flex items-center gap-2">
+        <OptionalBoundInput
+          value={range.min}
+          onCommit={(min) => onChange({ ...range, min })}
+          ariaLabel={minAria}
+          className={`${inputClass} w-24 px-2 py-1 text-sm`}
+        />
+        <span className="text-xs text-text-muted">to</span>
+        <OptionalBoundInput
+          value={range.max}
+          onCommit={(max) => onChange({ ...range, max })}
+          ariaLabel={maxAria}
+          className={`${inputClass} w-24 px-2 py-1 text-sm`}
+        />
+      </div>
+    </div>
+  );
+}
+
 export default function ResearchPipeline() {
   const [seller, setSeller] = useState("");
   const [topN, setTopN] = useState(25);
   const [k, setK] = useState(20);
   const [minSold, setMinSold] = useState(1);
   const [sortBy, setSortBy] = useState<SortMetric>("demand");
+  const [ranges, setRanges] = useState<MetricRangeFilters>(EMPTY_RANGES);
 
   const [isRunning, setIsRunning] = useState(false);
   // Waiting state lives in the Status Store as a Pipeline (ADR 0002); only the
@@ -111,9 +214,12 @@ export default function ResearchPipeline() {
     }
   };
 
-  // Live sorting: order the cached candidates greatest-to-least by the chosen
-  // metric — no pipeline re-run. A null Sold Velocity sorts last.
-  const sortedCandidates = useMemo(() => {
+  // Live filter + sort on cached candidates — no pipeline re-run. Filtering
+  // drops candidates outside any set metric range; sorting then orders the
+  // survivors greatest-to-least by the chosen metric. A null Sold Velocity
+  // sorts last.
+  const visibleCandidates = useMemo(() => {
+    const filtered = filterCandidates(candidates, ranges);
     const metricValue = (c: ProductCandidate): number => {
       switch (sortBy) {
         case "demand":
@@ -124,8 +230,8 @@ export default function ResearchPipeline() {
           return c.sold_velocity ?? Number.NEGATIVE_INFINITY;
       }
     };
-    return [...candidates].sort((a, b) => metricValue(b) - metricValue(a));
-  }, [candidates, sortBy]);
+    return filtered.sort((a, b) => metricValue(b) - metricValue(a));
+  }, [candidates, ranges, sortBy]);
 
   const handleRun = async (): Promise<void> => {
     const trimmedSeller = seller.trim();
@@ -356,8 +462,8 @@ export default function ResearchPipeline() {
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <p className="text-sm text-text-muted">
-              {candidates.length} Product Candidate
-              {candidates.length !== 1 ? "s" : ""}
+              {visibleCandidates.length} of {candidates.length} Product
+              Candidate{candidates.length !== 1 ? "s" : ""}
               {runSummary
                 ? ` — ${runSummary.api_calls_made} API calls made, ${runSummary.api_calls_used_today} used today`
                 : ""}
@@ -378,7 +484,40 @@ export default function ResearchPipeline() {
               </select>
             </label>
           </div>
-          {sortedCandidates.map((candidate, index) => (
+
+          {/* Acceptable-range filters — edit re-filters live from cached
+              candidates. Empty bound = "any" (that side does not filter). */}
+          <div className="flex flex-wrap gap-x-6 gap-y-3 rounded-xl border border-border-default bg-surface-panel p-3">
+            <MetricRangeInputs
+              label="Demand Coefficient"
+              range={ranges.demand}
+              onChange={(next) =>
+                setRanges((prev) => ({ ...prev, demand: next }))
+              }
+              minAria="Demand Coefficient minimum"
+              maxAria="Demand Coefficient maximum"
+            />
+            <MetricRangeInputs
+              label="Competition Count"
+              range={ranges.competition}
+              onChange={(next) =>
+                setRanges((prev) => ({ ...prev, competition: next }))
+              }
+              minAria="Competition Count minimum"
+              maxAria="Competition Count maximum"
+            />
+            <MetricRangeInputs
+              label="Sold Velocity"
+              range={ranges.velocity}
+              onChange={(next) =>
+                setRanges((prev) => ({ ...prev, velocity: next }))
+              }
+              minAria="Sold Velocity minimum"
+              maxAria="Sold Velocity maximum"
+            />
+          </div>
+
+          {visibleCandidates.map((candidate, index) => (
             <ProductCandidateRow
               key={`${candidate.listing_url}-${index}`}
               candidate={candidate}
