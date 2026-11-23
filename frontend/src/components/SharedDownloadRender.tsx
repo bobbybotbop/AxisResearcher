@@ -1,18 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
 import MessageBarInput from "./MessageBarInput";
-import PipelineTracker from "./PipelineTracker";
+import StepCard, { type StepStatus } from "./StepCard";
 import RenderProfileDropdown from "./RenderProfileDropdown";
 import RenderProfileEditor from "./RenderProfileEditor";
 import StudioRenderPreview, { type StudioRenderPreviewHandle } from "./StudioRenderPreview";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
-import {
-  dismissPipeline,
-  startPipelineWithId,
-  toast,
-  type PipelineHandle,
-} from "../utils/statusStore";
+import { toast } from "../utils/toasts";
 import { DOWNLOAD_MODE_FILES, DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, type DownloadMode, type Pipeline, type MatchLabel } from "../constants/files3d";
 import {
   DEFAULT_RENDER_SHOT_MODE,
@@ -158,17 +153,23 @@ interface SharedDownloadRenderProps {
   onExternalUrlConsumed?: () => void;
 }
 
-// Download + Render waiting state: one Pipeline in the Status Store per
-// download (ADR 0002), rendered by PipelineTracker. The bespoke detail UIs
-// (render progress text, preview, results) below are unchanged.
-const DOWNLOAD_RENDER_STEPS = ["Download 3D file", "Studio render"];
+// Download + Render waiting state: each StepCard owns its status display (ADR
+// 0003). The workflow orchestrates — step state lives here in local useState
+// and is passed down; no Status Store, no PipelineTracker.
+interface StepState {
+  status: StepStatus;
+  statusText?: string;
+  error?: string;
+}
+
+const IDLE_STEP: StepState = { status: "pending" };
 
 function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta, onExternalUrlConsumed }: SharedDownloadRenderProps) {
   // Step 3 — Download 3D File
   const [step3Url, setStep3Url] = useState("");
   const [step3LoadingMode, setStep3LoadingMode] = useState<DownloadMode | null>(null);
   const [step3Result, setStep3Result] = useState<{ filename: string; bytes: number; fileCount?: number } | null>(null);
-  const [step3Error, setStep3Error] = useState<string | null>(null);
+  const [step3, setStep3] = useState<StepState>(IDLE_STEP);
   // Listing/pipeline metadata attached to the current Step 3 URL (set when a
   // pipeline forwards a link; cleared on manual edits) — drives the auto-save
   const [step3Meta, setStep3Meta] = useState<DownloadMeta | null>(null);
@@ -189,7 +190,13 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
   const previewRef = useRef<StudioRenderPreviewHandle>(null);
   const [step4Loading, setStep4Loading] = useState(false);
   const [step4Image, setStep4Image] = useState<{ url: string; filename: string } | null>(null);
-  const [step4Error, setStep4Error] = useState<string | null>(null);
+  const [step4, setStep4] = useState<StepState>(IDLE_STEP);
+  // What the Step 4 card's Retry button re-runs — set alongside each error so
+  // a conversion failure retries the conversion and a render failure the render
+  const [step4Retry, setStep4Retry] = useState<(() => void) | null>(null);
+  // Bumped to re-run the preview-conversion effect (Step 4 Retry after a
+  // conversion failure)
+  const [convertAttempt, setConvertAttempt] = useState(0);
   const [renderProgress, setRenderProgress] = useState<{ current: number; total: number; remainingSeconds: number | null; shot: number | null; shots: number | null } | null>(null);
 
   // Step 4 — Render Settings (persisted in listingPreferences.json via /api/render-settings)
@@ -217,11 +224,8 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
   const [step4View, setStep4View] = useState<"dropdown" | "editor">("dropdown");
   const [editingProfile, setEditingProfile] = useState<string | null | "create">(null);
 
-  // Waiting state lives in the Status Store; only the pipeline id is local.
-  const [pipelineId, setPipelineId] = useState<number | null>(null);
-  const pipelineRef = useRef<PipelineHandle | null>(null);
-  // Last download mode attempted — lets Retry re-run a failed download with the
-  // same mode after the failed pipeline is dismissed.
+  // Last download mode attempted — lets the Step 3 card's Retry re-run a
+  // failed download with the same mode.
   const lastDownloadModeRef = useRef<DownloadMode>(DOWNLOAD_MODE_FULL_ZIP);
 
   // Accept an external URL (from either pipeline) into the Step 3 input,
@@ -231,7 +235,7 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
       setStep3Url(externalUrl);
       setStep3Meta(externalMeta ?? null);
       setStep3Result(null);
-      setStep3Error(null);
+      setStep3(IDLE_STEP);
       resetStep4();
       onExternalUrlConsumed?.();
     }
@@ -326,7 +330,8 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
     setPreviewReady(false);
     setStep4Loading(false);
     setStep4Image(null);
-    setStep4Error(null);
+    setStep4(IDLE_STEP);
+    setStep4Retry(null);
   };
 
   // Normalize non-native formats server-side so the preview shows the same
@@ -341,7 +346,8 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
     let cancelled = false;
     setPreviewFile(null);
     setPreviewConverting(true);
-    setStep4Error(null);
+    setStep4(IDLE_STEP);
+    setStep4Retry(null);
     const form = new FormData();
     form.append("file", renderFile);
     fetch("/api/render-preview", { method: "POST", body: form })
@@ -361,10 +367,13 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
       .catch((err) => {
         if (cancelled) return;
         setPreviewConverting(false);
-        setStep4Error((err as Error).message || "Could not convert the model for preview");
+        const message = (err as Error).message || "Could not convert the model for preview";
+        setStep4({ status: "error", error: message });
+        setStep4Retry(() => () => setConvertAttempt((n) => n + 1));
+        toast.error(message);
       });
     return () => { cancelled = true; };
-  }, [renderFile]);
+  }, [renderFile, convertAttempt]);
 
   // Auto-pick the best-ranked model; the dropdown lets the user switch when
   // a download contains several renderable candidates
@@ -378,13 +387,16 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
   // Load a user-chosen local file (single model or zip) into Step 4 through
   // the same pipeline as a Step 3 download
   const handleCustomRenderFile = async (file: File) => {
-    setStep4Error(null);
+    setStep4(IDLE_STEP);
+    setStep4Retry(null);
     try {
       const entries = await unzipBlob(file, file.name);
       setDownloadHasAmf(entries.some((e) => modelExtensionOf(e.path[e.path.length - 1]) === ".amf"));
       applyRenderCandidates(pickRenderCandidates(entries));
     } catch (err) {
-      setStep4Error((err as Error).message || "Could not read that file");
+      const message = (err as Error).message || "Could not read that file";
+      setStep4({ status: "error", error: message });
+      toast.error(message);
     }
   };
 
@@ -403,15 +415,13 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
     lastDownloadModeRef.current = mode;
     setStep3LoadingMode(mode);
     setStep3Result(null);
-    setStep3Error(null);
     resetStep4();
-    if (pipelineId != null) dismissPipeline(pipelineId);
-    const { id: newPipelineId, handle: pipeline } = startPipelineWithId(
-      "Download + Render",
-      DOWNLOAD_RENDER_STEPS,
-    );
-    pipelineRef.current = pipeline;
-    setPipelineId(newPipelineId);
+    const site = (() => {
+      try { return new URL(link).hostname.replace(/^www\./, ""); } catch { return "site"; }
+    })();
+    // The /api/download-3d-file response is a binary payload (no status
+    // stream), so the card's status line reports the client-side stages.
+    setStep3({ status: "running", statusText: `Downloading from ${site}…` });
     try {
       // "files" mode reuses the full-zip response; unzipping happens client-side
       const wireMode = mode === DOWNLOAD_MODE_FILES ? DOWNLOAD_MODE_FULL_ZIP : mode;
@@ -444,20 +454,25 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
       const filename = nameMatch ? nameMatch[1] : (mode === DOWNLOAD_MODE_SINGLE_FILE ? "download.3mf" : "download.zip");
       const blob = await res.blob();
       if (mode === DOWNLOAD_MODE_FILES) {
+        setStep3({ status: "running", statusText: "Unzipping files…" });
         const entries = await unzipBlob(blob, filename);
         setDownloadHasAmf(entries.some((e) => modelExtensionOf(e.path[e.path.length - 1]) === ".amf"));
         applyRenderCandidates(pickRenderCandidates(entries));
+        setStep3({ status: "running", statusText: "Saving files to folder…" });
         const savedToFolder = await saveEntriesToFolder(entries);
         if (savedToFolder === null) {
-          pipeline.fail("Download cancelled");
-          return; // user cancelled the folder picker
+          // user cancelled the folder picker
+          const message = "Save cancelled — download aborted";
+          setStep3({ status: "error", error: message });
+          toast.error(message);
+          return;
         }
         if (!savedToFolder) {
           downloadEntriesIndividually(entries);
           toast.info(`Downloading ${entries.length} files individually — browser may ask to allow multiple downloads`);
         }
         setStep3Result({ filename: filename.replace(/\.zip$/i, ""), bytes: blob.size, fileCount: entries.length });
-        pipeline.advance(); // → Studio render
+        setStep3({ status: "success", statusText: `Downloaded ${entries.length} file${entries.length !== 1 ? "s" : ""}` });
         return;
       }
       const downloadUrl = URL.createObjectURL(blob);
@@ -466,15 +481,17 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
       a.download = filename;
       a.click();
       URL.revokeObjectURL(downloadUrl);
+      setStep3({ status: "running", statusText: "Reading downloaded files…" });
       const entries = await unzipBlob(blob, filename);
       setDownloadHasAmf(entries.some((e) => modelExtensionOf(e.path[e.path.length - 1]) === ".amf"));
       applyRenderCandidates(pickRenderCandidates(entries));
       setStep3Result({ filename, bytes: blob.size });
-      pipeline.advance(); // → Studio render
+      setStep3({ status: "success", statusText: `Downloaded ${filename}` });
       if (step3Meta) toast.success("Saved to Saved 3D Files");
     } catch (err) {
-      pipeline.fail((err as Error).message || "Download failed");
-      setStep3Error((err as Error).message || "Download failed");
+      const message = (err as Error).message || "Download failed";
+      setStep3({ status: "error", error: message });
+      toast.error(message);
     } finally {
       setStep3LoadingMode(null);
     }
@@ -483,7 +500,8 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
   const handleStep4Render = async () => {
     if (!renderFile || step4Loading) return;
     setStep4Loading(true);
-    setStep4Error(null);
+    setStep4({ status: "running", statusText: "Rendering in Blender…" });
+    setStep4Retry(null);
     setStep4Image(null);
     setRenderProgress(null);
     setStep4Images([]);
@@ -534,7 +552,6 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
               shot,
               shots,
             });
-            pipelineRef.current?.progress(event.current, event.total);
           } else if (shot !== null) {
             // "shot i of N" marker: a new camera is starting (reset the sample bar)
             setRenderProgress({ current: 0, total: 0, remainingSeconds: null, shot, shots });
@@ -545,49 +562,32 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
       if (images.length === 0 || !data.filename) throw new Error("Render finished without an image");
       if (multi) {
         setStep4Images(images.map((url) => ({ url, filename: url.split("/").pop() ?? "render.png" })));
+        setStep4({ status: "success", statusText: `${images.length} shot${images.length !== 1 ? "s" : ""} rendered` });
       } else {
         setStep4Image({ url: images[0], filename: data.filename });
+        setStep4({ status: "success", statusText: "Render complete" });
       }
-      pipelineRef.current?.succeed();
     } catch (err) {
-      pipelineRef.current?.fail((err as Error).message || "Render failed");
-      setStep4Error((err as Error).message || "Render failed");
+      const message = (err as Error).message || "Render failed";
+      setStep4({ status: "error", error: message });
+      setStep4Retry(() => () => { void handleStep4Render(); });
+      toast.error(message);
     } finally {
       setStep4Loading(false);
       setRenderProgress(null);
     }
   };
 
-  /**
-   * Retry the failed pipeline. The store settles a failed pipeline permanently,
-   * so a retry dismisses it and re-runs against a fresh pipeline: re-run the
-   * render when the download already produced a render file, otherwise re-run
-   * the download with the last mode.
-   */
-  const handleRetry = () => {
-    if (renderFile) {
-      if (pipelineId != null) dismissPipeline(pipelineId);
-      const { id: newPipelineId, handle: pipeline } = startPipelineWithId(
-        "Download + Render",
-        [DOWNLOAD_RENDER_STEPS[1]],
-      );
-      pipelineRef.current = pipeline;
-      setPipelineId(newPipelineId);
-      void handleStep4Render();
-    } else {
-      // handleStep3Download dismisses the failed pipeline and starts a fresh one
-      void handleStep3Download(lastDownloadModeRef.current);
-    }
-  };
-
   return (
     <div className="flex flex-col gap-4">
-      {/* Waiting state: one Pipeline in the Status Store (ADR 0002) */}
-      <PipelineTracker pipelineId={pipelineId} onRetry={handleRetry} />
-
       {/* Step 3 — Download 3D File */}
-      <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
-        <p className="text-sm font-semibold text-text-primary">Step 3 — Download 3D File</p>
+      <StepCard
+        title="Step 3 — Download 3D File"
+        status={step3.status}
+        statusText={step3.statusText}
+        error={step3.error}
+        onRetry={() => { void handleStep3Download(lastDownloadModeRef.current); }}
+      >
         <form
           onSubmit={(e) => { e.preventDefault(); handleStep3Download(DOWNLOAD_MODE_FULL_ZIP); }}
           className="flex items-center gap-3"
@@ -599,7 +599,7 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
                 setStep3Url(val);
                 setStep3Meta(null); // manual edit: no pipeline metadata to auto-save
                 setStep3Result(null);
-                setStep3Error(null);
+                setStep3(IDLE_STEP);
                 resetStep4();
               }}
               placeholder="Paste printables.com, thingiverse.com, makerworld.com, or cults3d.com URL..."
@@ -646,13 +646,20 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
             Downloaded: {step3Result.filename}{step3Result.fileCount !== undefined ? ` (${step3Result.fileCount} file${step3Result.fileCount !== 1 ? "s" : ""} unzipped)` : ""} ({formatBytes(step3Result.bytes)})
           </p>
         )}
-        {step3Error && (
-          <p className="text-sm text-danger">{step3Error}</p>
-        )}
-      </div>
+      </StepCard>
       {/* Step 4 — Studio Render */}
-      <div className="rounded-xl border border-border-default bg-surface-panel p-4 flex flex-col gap-3">
-        <p className="text-sm font-semibold text-text-primary">Step 4 — Studio Render</p>
+      <StepCard
+        title="Step 4 — Studio Render"
+        status={step4.status}
+        statusText={step4.statusText}
+        progress={
+          step4.status === "running" && renderProgress?.shot != null && renderProgress?.shots != null
+            ? { current: renderProgress.shot, total: renderProgress.shots }
+            : undefined
+        }
+        error={step4.error}
+        onRetry={step4Retry ?? undefined}
+      >
         {step4View === "editor" ? (
           <RenderProfileEditor
             editingProfile={editingProfile}
@@ -812,10 +819,7 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
             ))}
           </div>
         )}
-        {step4Error && (
-          <p className="text-sm text-danger">{step4Error}</p>
-        )}
-      </div>
+      </StepCard>
     </div>
   );
 }
