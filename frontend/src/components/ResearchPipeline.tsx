@@ -4,7 +4,6 @@ import PipelineTracker from "./PipelineTracker";
 import ProductCandidateRow from "./ProductCandidateRow";
 import NumberInput from "./NumberInput";
 import { btnPill } from "../styles/buttonPill";
-import { rankCandidates } from "../utils/ranking";
 import { estimateApiCallCost } from "../constants/research";
 import {
   dismissPipeline,
@@ -17,6 +16,7 @@ import type {
   PipelineRun,
   PipelineRunSummary,
   ProductCandidate,
+  SortMetric,
 } from "../types/research";
 
 const STEP_BUDGET = "Checking API budget";
@@ -25,7 +25,12 @@ const STEP_DETAILS = "Fetching listing details";
 const STEP_METRICS = "Computing metrics";
 const PIPELINE_STEPS = [STEP_BUDGET, STEP_COLLECT, STEP_DETAILS, STEP_METRICS];
 
-const sliderClass = "w-full accent-primary";
+const SORT_OPTIONS: { value: SortMetric; label: string }[] = [
+  { value: "demand", label: "Demand Coefficient" },
+  { value: "competition", label: "Competition Count" },
+  { value: "velocity", label: "Sold Velocity" },
+];
+
 const inputClass =
   "rounded-lg border-2 border-border-default bg-surface-panel px-4 py-2 text-text-primary transition-colors focus:border-primary focus:outline-none disabled:bg-surface-hover";
 
@@ -40,9 +45,7 @@ export default function ResearchPipeline() {
   const [topN, setTopN] = useState(25);
   const [k, setK] = useState(20);
   const [minSold, setMinSold] = useState(1);
-  const [weightDemand, setWeightDemand] = useState(1);
-  const [weightCompetition, setWeightCompetition] = useState(1);
-  const [weightVelocity, setWeightVelocity] = useState(1);
+  const [sortBy, setSortBy] = useState<SortMetric>("demand");
 
   const [isRunning, setIsRunning] = useState(false);
   // Waiting state lives in the Status Store as a Pipeline (ADR 0002); only the
@@ -93,14 +96,9 @@ export default function ResearchPipeline() {
       const loadedCandidates = Array.isArray(run.product_candidates)
         ? run.product_candidates
         : [];
-      // Feed the loaded run's cached candidates + weights into live re-ranking
-      // (ticket 05) — no pipeline re-run.
+      // Feed the loaded run's cached candidates into live sorting — no
+      // pipeline re-run. Legacy runs may carry a weights field; it is ignored.
       setCandidates(loadedCandidates);
-      if (run.weights) {
-        setWeightDemand(run.weights.demand);
-        setWeightCompetition(run.weights.competition);
-        setWeightVelocity(run.weights.velocity);
-      }
       setSeller(run.seller);
       setRunSummary(null);
       setLoadedRunId(run.run_id);
@@ -113,17 +111,21 @@ export default function ResearchPipeline() {
     }
   };
 
-  // Live re-ranking: recomputed from cached metrics whenever a weight slider
-  // moves — no pipeline re-run.
-  const rankedCandidates = useMemo(
-    () =>
-      rankCandidates(candidates, {
-        demand: weightDemand,
-        competition: weightCompetition,
-        velocity: weightVelocity,
-      }),
-    [candidates, weightDemand, weightCompetition, weightVelocity],
-  );
+  // Live sorting: order the cached candidates greatest-to-least by the chosen
+  // metric — no pipeline re-run. A null Sold Velocity sorts last.
+  const sortedCandidates = useMemo(() => {
+    const metricValue = (c: ProductCandidate): number => {
+      switch (sortBy) {
+        case "demand":
+          return c.demand_coefficient;
+        case "competition":
+          return c.competition_count;
+        case "velocity":
+          return c.sold_velocity ?? Number.NEGATIVE_INFINITY;
+      }
+    };
+    return [...candidates].sort((a, b) => metricValue(b) - metricValue(a));
+  }, [candidates, sortBy]);
 
   const handleRun = async (): Promise<void> => {
     const trimmedSeller = seller.trim();
@@ -155,11 +157,6 @@ export default function ResearchPipeline() {
             top_n: topN,
             k,
             min_sold: minSold,
-            weights: {
-              demand: weightDemand,
-              competition: weightCompetition,
-              velocity: weightVelocity,
-            },
           }),
         },
         (event) => {
@@ -221,8 +218,8 @@ export default function ResearchPipeline() {
           Research Pipeline — Copy Seller
         </h3>
         <p className="text-sm text-text-muted">
-          Find a seller's best products and score them by demand metrics.
-          Weight sliders re-rank instantly from cached metrics — no re-run.
+          Find a seller's best products and sort them by demand metrics. The
+          sort-by control re-orders instantly from cached metrics — no re-run.
         </p>
       </div>
 
@@ -283,58 +280,6 @@ export default function ResearchPipeline() {
           </label>
         </div>
 
-        {/* Weight sliders — re-rank live from cached metrics */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">
-              Demand Coefficient weight ({weightDemand.toFixed(2)})
-            </span>
-            <input
-              type="range"
-              aria-label="Demand Coefficient weight"
-              min={0}
-              max={2}
-              step={0.05}
-              value={weightDemand}
-              onChange={(e) => setWeightDemand(Number(e.target.value))}
-              disabled={isRunning}
-              className={sliderClass}
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">
-              Competition Count weight ({weightCompetition.toFixed(2)})
-            </span>
-            <input
-              type="range"
-              aria-label="Competition Count weight"
-              min={0}
-              max={2}
-              step={0.05}
-              value={weightCompetition}
-              onChange={(e) => setWeightCompetition(Number(e.target.value))}
-              disabled={isRunning}
-              className={sliderClass}
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-muted">
-              Sold Velocity weight ({weightVelocity.toFixed(2)})
-            </span>
-            <input
-              type="range"
-              aria-label="Sold Velocity weight"
-              min={0}
-              max={2}
-              step={0.05}
-              value={weightVelocity}
-              onChange={(e) => setWeightVelocity(Number(e.target.value))}
-              disabled={isRunning}
-              className={sliderClass}
-            />
-          </label>
-        </div>
-
         <div className="flex flex-wrap items-center gap-4">
           <button
             type="button"
@@ -353,15 +298,15 @@ export default function ResearchPipeline() {
         </div>
       </div>
 
-      {/* Past runs — reload one to re-rank its cached candidates live */}
+      {/* Past runs — reload one to re-sort its cached candidates live */}
       {pastRuns.length > 0 && (
         <div className="flex flex-col gap-2 rounded-xl border border-border-default bg-surface-panel p-4">
           <h4 className="text-sm font-semibold text-text-primary">
             Past Pipeline Runs
           </h4>
           <p className="text-xs text-text-muted">
-            Reload a run to restore its metrics and weights, then compare weight
-            configurations live — no re-run.
+            Reload a run to restore its cached metrics, then re-sort live — no
+            re-run.
           </p>
           <ul className="flex flex-col divide-y divide-border-default">
             {pastRuns.map((run) => (
@@ -384,13 +329,6 @@ export default function ResearchPipeline() {
                     {run.candidate_count} candidate
                     {run.candidate_count !== 1 ? "s" : ""}
                   </span>
-                  {run.weights && (
-                    <span className="text-xs text-text-muted">
-                      w: {run.weights.demand.toFixed(2)} /{" "}
-                      {run.weights.competition.toFixed(2)} /{" "}
-                      {run.weights.velocity.toFixed(2)}
-                    </span>
-                  )}
                   {loadedRunId === run.run_id && (
                     <span className="text-xs text-primary">(loaded)</span>
                   )}
@@ -416,17 +354,34 @@ export default function ResearchPipeline() {
       {/* Results */}
       {candidates.length > 0 && (
         <div className="flex flex-col gap-2">
-          <p className="text-sm text-text-muted">
-            {candidates.length} Product Candidate
-            {candidates.length !== 1 ? "s" : ""}
-            {runSummary
-              ? ` — ${runSummary.api_calls_made} API calls made, ${runSummary.api_calls_used_today} used today`
-              : ""}
-          </p>
-          {rankedCandidates.map((ranked, index) => (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <p className="text-sm text-text-muted">
+              {candidates.length} Product Candidate
+              {candidates.length !== 1 ? "s" : ""}
+              {runSummary
+                ? ` — ${runSummary.api_calls_made} API calls made, ${runSummary.api_calls_used_today} used today`
+                : ""}
+            </p>
+            <label className="flex items-center gap-2 text-sm text-text-muted">
+              Sort by
+              <select
+                aria-label="Sort by metric"
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortMetric)}
+                className={inputClass}
+              >
+                {SORT_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {sortedCandidates.map((candidate, index) => (
             <ProductCandidateRow
-              key={`${ranked.candidate.listing_url}-${index}`}
-              ranked={ranked}
+              key={`${candidate.listing_url}-${index}`}
+              candidate={candidate}
             />
           ))}
         </div>

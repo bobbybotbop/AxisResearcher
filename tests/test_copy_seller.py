@@ -235,6 +235,35 @@ def test_run_copy_seller_collects_metrics_and_streams_events(monkeypatch, tmp_pa
     assert competitor_calls == ["v1|c1|0", "v1|c2|0", "v1|c3|0"] * 2
 
 
+def test_run_copy_seller_result_has_no_weights(monkeypatch, tmp_path):
+    """Ticket 09: the pipeline no longer accepts or emits ranking weights."""
+    monkeypatch.setattr(copy_seller, "getItemIds", lambda seller: ["1"])
+    monkeypatch.setattr(
+        copy_seller,
+        "single_get_detailed_item_data",
+        lambda item_id, verbose=False: _details_for("1", 100),
+    )
+    monkeypatch.setattr(
+        copy_seller,
+        "single_search_by_query",
+        lambda query, limit=50: {"total_items": 40, "items": []},
+    )
+    real_tracker_cls = copy_seller.ApiUsageTracker
+    monkeypatch.setattr(
+        copy_seller, "ApiUsageTracker",
+        lambda: real_tracker_cls(storage_path=str(tmp_path / "u.json")),
+    )
+
+    events = list(copy_seller.run_copy_seller(
+        "someseller", top_n=5, k=3, min_sold=1, storage_root=str(tmp_path),
+    ))
+    result = events[-1]["data"]
+    assert "weights" not in result
+
+    saved = copy_seller.load_pipeline_run(result["run_id"], storage_root=str(tmp_path))
+    assert "weights" not in saved
+
+
 def test_run_copy_seller_emits_error_when_budget_exceeded(monkeypatch, tmp_path):
     tracker = copy_seller.ApiUsageTracker(storage_path=str(tmp_path / "u.json"), daily_budget=10)
     tracker.record(10)

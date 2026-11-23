@@ -280,13 +280,9 @@ def research_copy_seller():
         except (TypeError, ValueError):
             yield error_event("top_n, k, and min_sold must be integers")
             return
-        weights = data.get("weights")
-        if weights is not None and not isinstance(weights, dict):
-            yield error_event("weights must be an object")
-            return
 
         print(f"[API] /api/research/copy-seller: seller={seller} top_n={top_n} k={k} min_sold={min_sold}")
-        for event in run_copy_seller(seller, top_n=top_n, k=k, min_sold=min_sold, weights=weights):
+        for event in run_copy_seller(seller, top_n=top_n, k=k, min_sold=min_sold):
             event_type = event.get("type")
             if event_type == "progress":
                 extra = {k: v for k, v in event.items() if k not in ("type", "step", "status")}
@@ -316,7 +312,7 @@ def list_copy_seller_runs():
 
 @app.route('/api/research/copy-seller/runs/<run_id>', methods=['GET'])
 def get_copy_seller_run(run_id):
-    """Fetch one full Pipeline Run (input + weights + candidates) by run_id."""
+    """Fetch one full Pipeline Run (input + candidates) by run_id."""
     try:
         print(f"[API] /api/research/copy-seller/runs/{run_id} endpoint called")
         run = load_pipeline_run(run_id)

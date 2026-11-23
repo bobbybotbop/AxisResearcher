@@ -39,7 +39,6 @@ def _run(seller="someseller", candidates=None):
     return {
         "seller": seller,
         "inputs": {"top_n": 25, "k": 20, "min_sold": 1},
-        "weights": {"demand": 1.0, "competition": 0.5, "velocity": 2.0},
         "product_candidates": candidates if candidates is not None else [_candidate("1")],
     }
 
@@ -60,7 +59,7 @@ def test_save_pipeline_run_writes_json_under_seller_runs_dir(tmp_path):
     on_disk = json.loads(path.read_text(encoding="utf-8"))
     assert on_disk["seller"] == "someseller"
     assert on_disk["inputs"] == {"top_n": 25, "k": 20, "min_sold": 1}
-    assert on_disk["weights"] == {"demand": 1.0, "competition": 0.5, "velocity": 2.0}
+    assert "weights" not in on_disk
     assert on_disk["product_candidates"][0]["listing_url"] == "https://www.ebay.com/itm/1"
 
 
@@ -90,11 +89,11 @@ def test_list_pipeline_runs_returns_summaries_newest_first(tmp_path):
     # newest first
     assert summaries[0]["run_id"] == second["run_id"]
     assert summaries[1]["run_id"] == first["run_id"]
-    # summary shape: seller, timestamp, weights, candidate count — no candidates
+    # summary shape: seller, timestamp, candidate count — no weights, no candidates
     top = summaries[0]
     assert top["seller"] == "beta"
     assert top["timestamp"] == second["timestamp"]
-    assert top["weights"] == {"demand": 1.0, "competition": 0.5, "velocity": 2.0}
+    assert "weights" not in top
     assert top["candidate_count"] == 2
     assert "product_candidates" not in top
 
@@ -125,8 +124,25 @@ def test_load_pipeline_run_returns_full_run(tmp_path):
     assert loaded["run_id"] == saved["run_id"]
     assert loaded["seller"] == "someseller"
     assert loaded["inputs"]["top_n"] == 25
-    assert loaded["weights"]["velocity"] == 2.0
+    assert "weights" not in loaded
     assert loaded["product_candidates"][0]["demand_coefficient"] == 1.5
+
+
+def test_load_pipeline_run_legacy_run_with_weights_still_loads(tmp_path):
+    """Ticket 09: legacy saved runs carrying a `weights` field still load;
+    the stored weights are ignored (dropped from the returned record)."""
+    legacy = _run()
+    legacy["weights"] = {"demand": 1.0, "competition": 0.5, "velocity": 2.0}
+    saved = copy_seller.save_pipeline_run(legacy, storage_root=str(tmp_path))
+
+    loaded = copy_seller.load_pipeline_run(saved["run_id"], storage_root=str(tmp_path))
+    assert loaded is not None
+    assert loaded["run_id"] == saved["run_id"]
+    assert "weights" not in loaded
+
+    summaries = copy_seller.list_pipeline_runs(storage_root=str(tmp_path))
+    assert len(summaries) == 1
+    assert "weights" not in summaries[0]
 
 
 def test_load_pipeline_run_unknown_id_returns_none(tmp_path):
@@ -174,7 +190,6 @@ def test_run_copy_seller_saves_run_and_logs_milestone(monkeypatch, tmp_path):
 
     events = list(copy_seller.run_copy_seller(
         "someseller", top_n=5, k=3, min_sold=1,
-        weights={"demand": 1.0, "competition": 0.5, "velocity": 2.0},
         storage_root=str(tmp_path),
     ))
     assert events[-1]["type"] == "result"
@@ -186,7 +201,7 @@ def test_run_copy_seller_saves_run_and_logs_milestone(monkeypatch, tmp_path):
     assert runs[0]["candidate_count"] == 1
     full = copy_seller.load_pipeline_run(runs[0]["run_id"], storage_root=str(tmp_path))
     assert full["inputs"] == {"top_n": 5, "k": 3, "min_sold": 1}
-    assert full["weights"] == {"demand": 1.0, "competition": 0.5, "velocity": 2.0}
+    assert "weights" not in full
     assert full["product_candidates"][0]["listing_url"] == "https://www.ebay.com/itm/1"
 
     # Milestone logged to logs.ndjson via log_event
@@ -226,7 +241,7 @@ def test_list_runs_endpoint_returns_summaries(client, runs_dir):
     for summary in body["runs"]:
         assert summary["run_id"]
         assert summary["timestamp"]
-        assert summary["weights"] == {"demand": 1.0, "competition": 0.5, "velocity": 2.0}
+        assert "weights" not in summary
         assert summary["candidate_count"] == 1
         assert "product_candidates" not in summary
 
@@ -248,7 +263,7 @@ def test_get_run_endpoint_returns_full_run(client, runs_dir):
     assert run["run_id"] == saved["run_id"]
     assert run["seller"] == "someseller"
     assert run["inputs"] == {"top_n": 25, "k": 20, "min_sold": 1}
-    assert run["weights"] == {"demand": 1.0, "competition": 0.5, "velocity": 2.0}
+    assert "weights" not in run
     assert run["product_candidates"][0]["listing_url"] == "https://www.ebay.com/itm/1"
 
 

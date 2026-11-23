@@ -233,14 +233,17 @@ def _safe_seller_dirname(seller_username):
 def save_pipeline_run(run, storage_root=None, now=None):
     """Persist one Pipeline Run as JSON; returns the saved record.
 
-    `run` carries seller, inputs, weights, and product_candidates; this adds
-    run_id and timestamp. Written to <storage_root>/<seller>/runs/<run_id>.json.
+    `run` carries seller, inputs, and product_candidates; this adds run_id and
+    timestamp. Written to <storage_root>/<seller>/runs/<run_id>.json. Any
+    legacy `weights` field on the record is dropped — ranking weights are no
+    longer part of a Pipeline Run.
     """
     root = storage_root or _COLLECTED_DATA_DIR
     now = now or datetime.now(timezone.utc)
     timestamp = now.isoformat()
     run_id = now.strftime("%Y%m%d_%H%M%S_%f")
-    record = {**run, "run_id": run_id, "timestamp": timestamp}
+    record = {k: v for k, v in run.items() if k != "weights"}
+    record = {**record, "run_id": run_id, "timestamp": timestamp}
 
     runs_dir = os.path.join(root, _safe_seller_dirname(run["seller"]), "runs")
     os.makedirs(runs_dir, exist_ok=True)
@@ -267,7 +270,8 @@ def _run_summaries(root):
 def list_pipeline_runs(storage_root=None):
     """List past Pipeline Runs as summaries (newest first).
 
-    Summary shape: run_id, seller, timestamp, weights, candidate_count.
+    Summary shape: run_id, seller, timestamp, candidate_count. Legacy runs
+    carrying a `weights` field still load; the weights are ignored.
     """
     root = storage_root or _COLLECTED_DATA_DIR
     if not os.path.isdir(root):
@@ -277,7 +281,6 @@ def list_pipeline_runs(storage_root=None):
             "run_id": run.get("run_id", ""),
             "seller": run.get("seller", ""),
             "timestamp": run.get("timestamp", ""),
-            "weights": run.get("weights"),
             "candidate_count": len(run.get("product_candidates") or []),
         }
         for run in _run_summaries(root)
@@ -288,13 +291,17 @@ def list_pipeline_runs(storage_root=None):
 
 
 def load_pipeline_run(run_id, storage_root=None):
-    """Load one full Pipeline Run (input + weights + candidates) by run_id."""
+    """Load one full Pipeline Run (input + candidates) by run_id.
+
+    Legacy runs carrying a `weights` field still load; the weights are ignored
+    (dropped from the returned record).
+    """
     root = storage_root or _COLLECTED_DATA_DIR
     if not os.path.isdir(root):
         return None
     for run in _run_summaries(root):
         if run.get("run_id") == run_id:
-            return run
+            return {k: v for k, v in run.items() if k != "weights"}
     return None
 
 
@@ -336,13 +343,13 @@ def single_search_by_query(query, limit=50):
 # Pipeline orchestration
 # ---------------------------------------------------------------------------
 
-def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, weights=None, storage_root=None):
+def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, storage_root=None):
     """Run the Copy Seller pipeline, yielding progress/result/error event dicts.
 
-    Emits raw (unranked) Product Candidates; ranking happens client-side from
-    these cached metrics plus the user's current weights. On completion the
-    Pipeline Run (input + weights + candidates) is persisted under
-    Collected-Data/<seller>/runs/ and the milestone is logged.
+    Emits raw Product Candidates with their collected metrics; ordering happens
+    client-side by one user-picked metric. On completion the Pipeline Run
+    (input + candidates) is persisted under Collected-Data/<seller>/runs/ and
+    the milestone is logged.
     """
     tracker = ApiUsageTracker()
     estimated_cost = estimate_api_call_cost(top_n, k)
@@ -459,7 +466,6 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, weights=None, s
             {
                 "seller": seller_username,
                 "inputs": {"top_n": top_n, "k": k, "min_sold": min_sold},
-                "weights": weights,
                 "product_candidates": candidates,
             },
             storage_root=storage_root,
@@ -475,7 +481,6 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, weights=None, s
                 "run_id": saved_run["run_id"],
                 "timestamp": saved_run["timestamp"],
                 "inputs": {"top_n": top_n, "k": k, "min_sold": min_sold},
-                "weights": weights,
                 "api_calls_made": calls_made,
                 "api_calls_used_today": tracker.used_today,
                 "product_candidates": candidates,

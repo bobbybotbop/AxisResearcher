@@ -73,13 +73,13 @@ A new top-level tab for debugging: a file-browser-style interface over the SQLit
 The Testing tab is a development sandbox: every control, threshold, and intermediate value should be exposed and editable so features can be debugged and tuned before promotion to the main workflow. Nothing in the Testing tab should be a hidden constant.
 
 ## Research Pipeline
-A named, multi-step market-research workflow under the Testing tab, distinct from the 3D File Finder pipelines (which find 3D files). A Research Pipeline takes a typed input (e.g. an eBay seller), collects raw per-product metrics, and produces a ranked list of Product Candidates. "Copy Seller" is the first Research Pipeline.
+A named, multi-step market-research workflow under the Testing tab, distinct from the 3D File Finder pipelines (which find 3D files). A Research Pipeline takes a typed input (e.g. an eBay seller), collects raw per-product metrics, and produces a sortable list of Product Candidates. "Copy Seller" is the first Research Pipeline.
 
 ## Pipeline Run
-A persisted record of one execution of a Research Pipeline: its input, the ranking weights used, a timestamp, and the resulting ranked Product Candidates. Runs are saved so different weight configurations can be compared.
+A persisted record of one execution of a Research Pipeline: its input, a timestamp, and the resulting Product Candidates with their raw metrics. Runs are saved so past results can be reloaded and re-sorted without re-running the pipeline.
 
 ## Product Candidate
-A single product identified by a Research Pipeline, carrying: the seller's representative eBay listing link, a simplified search phrase, and its collected market metrics. The ranked unit of a Pipeline Run.
+A single product identified by a Research Pipeline, carrying: the seller's representative eBay listing link, a simplified search phrase, and its collected market metrics. The unit of a Pipeline Run's results.
 
 ## Demand Coefficient
 The ratio of active listings to sold listings for a Product Candidate's simplified search phrase — a proxy for how saturated vs. in-demand a product is.
@@ -90,8 +90,8 @@ The number of active listings also selling the same product (matching the Produc
 ## Sold Velocity
 A Product Candidate's total sold quantity divided by its listing age (estimatedSoldQuantity ÷ days since itemCreationDate, both from the eBay Browse API). A proxy for how fast a product sells. Caveat: estimatedSoldQuantity is an estimate, and itemCreationDate resets on relist.
 
-## Ranking Weights
-The user-adjustable importances applied to each metric to compute a Product Candidate's rank. Weights affect scoring only, not metric collection, so re-weighting re-ranks instantly from cached metrics. Each metric is min-max normalized to 0–1 across the run's products before weighting, so a given weight means the same thing on every slider; raw values are shown alongside normalized ones. All metrics are oriented "higher is better" (Competition Count is inverted during normalization).
+## Sort Metric
+The single user-picked metric (Demand Coefficient, Competition Count, or Sold Velocity) by which a Pipeline Run's Product Candidates are ordered, greatest-to-least. Sorting operates on cached raw metrics, so changing the Sort Metric re-orders instantly without re-running the pipeline.
 
 ## eBay API Budget
 The app's eBay API usage is capped at roughly 5,000 calls per day. Research Pipelines must be designed to bound their per-run call count (top-N listing cap, top-K sold-sum cap) so a run cannot blow the daily budget.

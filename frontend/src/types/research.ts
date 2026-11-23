@@ -3,12 +3,8 @@
  * streamed by /api/research/copy-seller (backend/copy_seller.py).
  */
 
-/** User-adjustable importances per metric; canonical shape used across the UI. */
-export interface RankingWeights {
-  demand: number;
-  competition: number;
-  velocity: number;
-}
+/** Metrics a Product Candidate can be sorted by (greatest-to-least). */
+export type SortMetric = "demand" | "competition" | "velocity";
 
 export interface ProductCandidate {
   listing_url: string;
@@ -29,7 +25,6 @@ export interface CopySellerResult {
   run_id?: string;
   timestamp?: string;
   inputs: { top_n: number; k: number; min_sold: number };
-  weights?: RankingWeights | null;
   api_calls_made: number;
   api_calls_used_today: number;
   product_candidates: ProductCandidate[];
@@ -40,7 +35,6 @@ export interface PipelineRunSummary {
   run_id: string;
   seller: string;
   timestamp: string;
-  weights: RankingWeights | null;
   candidate_count: number;
 }
 
@@ -50,6 +44,5 @@ export interface PipelineRun {
   seller: string;
   timestamp: string;
   inputs: { top_n: number; k: number; min_sold: number };
-  weights: RankingWeights | null;
   product_candidates: ProductCandidate[];
 }
