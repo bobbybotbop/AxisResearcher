@@ -2421,16 +2421,10 @@ function App() {
           // Manual refresh — the user already gets immediate button feedback.
           void fetchQuantitiesForPage(listings);
         } else if (isStockRefreshStale()) {
-          const toast = startTaskToast("Refreshing eBay quantities…");
+          // Background refresh on tab switch — silent on success; failures still surface.
           void fetchQuantitiesForPage(listings).then((result) => {
-            if (result.ok) {
-              toast.succeed(
-                result.count > 0
-                  ? `Quantities refreshed for ${result.count} listing(s)`
-                  : "Quantities up to date",
-              );
-            } else {
-              toast.fail(result.error || "Quantity refresh failed — eBay may be unreachable");
+            if (!result.ok) {
+              toast.error(result.error || "Quantity refresh failed — eBay may be unreachable");
             }
           });
         } else {
