@@ -1,4 +1,4 @@
-import type { StepProgress, StepStatus } from "../components/StepCard";
+import type { StepProgress, StepState } from "../components/StepCard";
 
 /**
  * Per-step waiting state for the Research Pipeline (Copy Seller), driven by
@@ -6,11 +6,8 @@ import type { StepProgress, StepStatus } from "../components/StepCard";
  * useState and feeds backend stream events (backend/copy_seller.py) through
  * applyResearchProgressEvent; this module is the pure transition logic.
  */
-export interface ResearchStepState {
-  status: StepStatus;
-  statusText?: string;
+export interface ResearchStepState extends StepState {
   progress?: StepProgress;
-  error?: string;
 }
 
 /** Step titles carry the sequence (ADR 0003 — no overall tracker). */

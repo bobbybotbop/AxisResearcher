@@ -1,4 +1,4 @@
-import type { StepStatus } from "../components/StepCard";
+import type { StepState } from "../components/StepCard";
 
 /**
  * Upload-to-eBay step state (ADR 0003). The Upload flow — prepare listing
@@ -9,11 +9,7 @@ import type { StepStatus } from "../components/StepCard";
 
 export type UploadStepId = "prepare" | "upload";
 
-export interface UploadStepState {
-  status: StepStatus;
-  statusText?: string;
-  error?: string;
-}
+export type UploadStepState = StepState;
 
 export type UploadStepsState = Record<UploadStepId, UploadStepState>;
 

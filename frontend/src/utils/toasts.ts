@@ -13,6 +13,8 @@
  * Never throws — a broken toast must never break the app.
  */
 
+import { SUCCESS_DISMISS_MS } from "../constants/toasts";
+
 export type ToastStatus = "pending" | "success" | "error";
 
 export interface ToastItem {
@@ -34,8 +36,6 @@ export interface TaskToastHandle {
   /** Mark the task failed; toast persists until manually dismissed. */
   fail: (message: string, detail?: string) => void;
 }
-
-const SUCCESS_DISMISS_MS = 5000;
 
 interface ToastState {
   toasts: ToastItem[];

@@ -8,6 +8,13 @@ export interface StepProgress {
   total: number;
 }
 
+/** The per-step waiting state every workflow holds in local state (ADR 0003). */
+export interface StepState {
+  status: StepStatus;
+  statusText?: string;
+  error?: string;
+}
+
 export interface StepCardProps {
   /** Step title, e.g. "Step 1 — Fetch eBay Photos". Carries the sequence. */
   title: string;

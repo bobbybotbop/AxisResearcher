@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import JSZip from "jszip";
 import MessageBarInput from "./MessageBarInput";
-import StepCard, { type StepStatus } from "./StepCard";
+import StepCard, { type StepState } from "./StepCard";
 import RenderProfileDropdown from "./RenderProfileDropdown";
 import RenderProfileEditor from "./RenderProfileEditor";
 import StudioRenderPreview, { type StudioRenderPreviewHandle } from "./StudioRenderPreview";
@@ -156,12 +156,6 @@ interface SharedDownloadRenderProps {
 // Download + Render waiting state: each StepCard owns its status display (ADR
 // 0003). The workflow orchestrates — step state lives here in local useState
 // and is passed down; no Status Store, no PipelineTracker.
-interface StepState {
-  status: StepStatus;
-  statusText?: string;
-  error?: string;
-}
-
 const IDLE_STEP: StepState = { status: "pending" };
 
 function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta, onExternalUrlConsumed }: SharedDownloadRenderProps) {
@@ -487,7 +481,6 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
       applyRenderCandidates(pickRenderCandidates(entries));
       setStep3Result({ filename, bytes: blob.size });
       setStep3({ status: "success", statusText: `Downloaded ${filename}` });
-      if (step3Meta) toast.success("Saved to Saved 3D Files");
     } catch (err) {
       const message = (err as Error).message || "Download failed";
       setStep3({ status: "error", error: message });
@@ -647,11 +640,12 @@ function SharedDownloadRender({ fileDownloadDelay = 0, externalUrl, externalMeta
           </p>
         )}
       </StepCard>
-      {/* Step 4 — Studio Render */}
+      {/* Step 4 — Studio Render (disabled until Step 3 has produced a file) */}
       <StepCard
         title="Step 4 — Studio Render"
         status={step4.status}
         statusText={step4.statusText}
+        disabled={!step3Result}
         progress={
           step4.status === "running" && renderProgress?.shot != null && renderProgress?.shots != null
             ? { current: renderProgress.shot, total: renderProgress.shots }

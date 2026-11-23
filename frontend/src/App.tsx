@@ -1244,6 +1244,7 @@ function App() {
 
     const MAX_ATTEMPTS = 3;
     let succeeded = false;
+    let lastError: string | null = null;
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       if (controller.signal.aborted) break;
@@ -1282,6 +1283,7 @@ function App() {
         break;
       } catch (err) {
         if ((err as Error).name === "AbortError") break;
+        lastError = (err as Error).message || null;
         console.error(`Text generation error (attempt ${attempt}/${MAX_ATTEMPTS}):`, err);
         if (attempt < MAX_ATTEMPTS) {
           setEditableTitle("");
@@ -1291,7 +1293,22 @@ function App() {
     }
 
     if (!succeeded && !controller.signal.aborted) {
-      console.error("Text generation failed after", MAX_ATTEMPTS, "attempts — displaying partial result");
+      // Real failure: the step shows the error inline with a Retry (which
+      // re-runs text generation), plus an error toast as the scroll-away
+      // safety net (ADR 0003). Any partial streamed text stays in the fields.
+      // textGenComplete stays false so the auto create-listing effect doesn't
+      // fire on a failed generation.
+      const message = `Text generation failed after ${MAX_ATTEMPTS} attempts${lastError ? `: ${lastError}` : ""}`;
+      toast.error(message);
+      setTextGenStatus("writing");
+      setCreateSteps((prev) =>
+        patchCreateStep(prev, "textGen", {
+          status: "error",
+          error: `${message} — any partial text is kept below`,
+        }),
+      );
+      setIsGeneratingText(false);
+      return;
     }
 
     if (!controller.signal.aborted) {
@@ -1321,7 +1338,8 @@ function App() {
   /**
    * Retry a failed Create step by re-running its phase (ADR 0003). Completed
    * steps keep their success state: a fetch retry restarts the workflow, an
-   * images retry re-confirms the categories, a create retry re-runs only
+   * images retry re-confirms the categories, a textGen retry re-runs text
+   * generation from the fetched listing, a create retry re-runs only
    * create-listing.
    */
   const handleRetryCreateStep = (id: CreateStepId): void => {
@@ -1332,6 +1350,8 @@ function App() {
       fetchListingPhotos();
     } else if (phase === "images") {
       handleConfirmCategories();
+    } else if (phase === "textGen") {
+      if (listing) void startTextGeneration(listing.title, listing.description || "");
     } else {
       handleCreateListing();
     }

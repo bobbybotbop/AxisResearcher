@@ -1,6 +1,6 @@
 import { useState } from "react";
 import MessageBarInput from "./MessageBarInput";
-import StepCard, { type StepStatus } from "./StepCard";
+import StepCard, { type StepState } from "./StepCard";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { PIPELINE_IMAGE_SEARCH, MATCH_LABEL_CONFIRMED_IMAGE_MATCH, type ThreeDSiteStatus, type Pipeline, type MatchLabel } from "../constants/files3d";
@@ -10,12 +10,6 @@ import { toast } from "../utils/toasts";
 // Image Search waiting state: each StepCard owns its status display (ADR
 // 0003). The workflow orchestrates — step state lives here in local useState
 // and is passed down; no Status Store, no PipelineTracker.
-interface StepState {
-  status: StepStatus;
-  statusText?: string;
-  error?: string;
-}
-
 const IDLE_STEP: StepState = { status: "pending" };
 
 interface SearchResult {
@@ -56,6 +50,9 @@ function ImageSearchSteps({ siteStatus = null, enabledSites, sitePriority, onUse
   const [step1Title, setStep1Title] = useState("");
   const [step1, setStep1] = useState<StepState>(IDLE_STEP);
   const [step1Selected, setStep1Selected] = useState<string | null>(null);
+  // The listing the last fetch was submitted with — kept so Retry re-fetches
+  // even though the input clears after every submit
+  const [submittedLink, setSubmittedLink] = useState("");
   // The eBay listing URL/photo set the current results came from — kept after
   // the input clears so a forwarded link can be tied back to the listing
   const [fetchedListingUrl, setFetchedListingUrl] = useState("");
@@ -75,6 +72,7 @@ function ImageSearchSteps({ siteStatus = null, enabledSites, sitePriority, onUse
       toast.error("Please enter an eBay listing ID or URL");
       return;
     }
+    setSubmittedLink(trimmed);
     setStep1({ status: "running", statusText: "Fetching photos…" });
     setStep1Photos([]);
     setStep1Title("");
@@ -159,8 +157,8 @@ function ImageSearchSteps({ siteStatus = null, enabledSites, sitePriority, onUse
         status={step1.status}
         statusText={step1.statusText}
         error={step1.error}
-        onRetry={fetchedListingUrl ? () => {
-          void handleStep1Submit({ preventDefault: () => {} } as React.FormEvent, fetchedListingUrl);
+        onRetry={submittedLink ? () => {
+          void handleStep1Submit({ preventDefault: () => {} } as React.FormEvent, submittedLink);
         } : undefined}
       >
         <form onSubmit={handleStep1Submit} className="flex">

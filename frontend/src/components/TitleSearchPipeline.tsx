@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import MessageBarInput from "./MessageBarInput";
-import StepCard, { type StepStatus } from "./StepCard";
+import StepCard, { type StepState } from "./StepCard";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { PIPELINE_TITLE_SEARCH, MATCH_LABEL_CONFIRMED_IMAGE_MATCH, MATCH_LABEL_UNCONFIRMED_TITLE_MATCH, type ThreeDSiteStatus, type Pipeline, type MatchLabel as ForwardedMatchLabel } from "../constants/files3d";
@@ -10,12 +10,6 @@ import { toast } from "../utils/toasts";
 // Title Search waiting state: each StepCard owns its status display (ADR
 // 0003). The workflow orchestrates — step state lives here in local useState
 // and is passed down; no Status Store, no PipelineTracker.
-interface StepState {
-  status: StepStatus;
-  statusText?: string;
-  error?: string;
-}
-
 const IDLE_STEP: StepState = { status: "pending" };
 
 interface TextSearchResult {

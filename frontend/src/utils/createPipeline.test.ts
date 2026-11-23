@@ -154,7 +154,7 @@ describe("createRetryPhaseForStep", () => {
     expect(createRetryPhaseForStep("categorize")).toBe("fetch");
     expect(createRetryPhaseForStep("bgRemoval")).toBe("images");
     expect(createRetryPhaseForStep("imageGen")).toBe("images");
-    expect(createRetryPhaseForStep("textGen")).toBe("images");
+    expect(createRetryPhaseForStep("textGen")).toBe("textGen");
     expect(createRetryPhaseForStep("createListing")).toBe("create");
   });
 });

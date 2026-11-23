@@ -24,6 +24,7 @@ When adding a new value, find the most relevant existing constants file or creat
 - `placeholder` — test-user placeholder image data URLs
 - `cooldown` — auto-operation cooldown default and stock-snapshot localStorage keys
 - `render` — Step 4 Studio Render extensions, settings defaults, poll/debounce timings, preview camera/material params
+- `toasts` — toast auto-dismiss timings
 
 ## What is NOT moved to constants
 

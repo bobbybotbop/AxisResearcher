@@ -1,4 +1,4 @@
-import type { StepProgress, StepStatus } from "../components/StepCard";
+import type { StepProgress, StepState } from "../components/StepCard";
 
 /**
  * Create workflow step state (ADR 0003). The Create flow — fetch listing →
@@ -17,10 +17,7 @@ export type CreateStepId =
   | "textGen"
   | "createListing";
 
-export interface CreateStepState {
-  status: StepStatus;
-  statusText?: string;
-  error?: string;
+export interface CreateStepState extends StepState {
   progress?: StepProgress;
 }
 
@@ -160,12 +157,14 @@ export const CREATE_FETCH_PHASE_STEPS = FETCH_PHASE_STEPS;
 /**
  * Phase-based retry (was createFailedPhaseRef): which phase a failed step's
  * Retry re-runs. Retrying "images" re-confirms the categories (image
- * generation re-runs); retrying "create" re-runs only create-listing.
+ * generation re-runs); retrying "textGen" re-runs text generation; retrying
+ * "create" re-runs only create-listing.
  */
-export type CreateRetryPhase = "fetch" | "images" | "create";
+export type CreateRetryPhase = "fetch" | "images" | "textGen" | "create";
 
 export function createRetryPhaseForStep(id: CreateStepId): CreateRetryPhase {
   if (id === "createListing") return "create";
+  if (id === "textGen") return "textGen";
   if (FETCH_PHASE_STEPS.includes(id)) return "fetch";
   return "images";
 }
