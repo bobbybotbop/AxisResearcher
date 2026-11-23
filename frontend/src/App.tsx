@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback, useRef, useMemo, useSyncExternalStore } from "react";
+﻿import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   FilePlus,
   History,
@@ -47,20 +47,21 @@ import { fetchWithProgress } from "./utils/fetchWithProgress";
 import {
   dismissPipeline,
   startPipelineWithId,
-  statusStore,
   type PipelineHandle,
 } from "./utils/statusStore";
 import {
-  CREATE_STEP_BG_REMOVAL,
-  CREATE_STEP_CATEGORIZE,
-  CREATE_STEP_CREATE_LISTING,
-  CREATE_STEP_FETCH,
-  CREATE_STEP_IMAGE_GEN,
-  CREATE_STEP_JSON,
-  CREATE_STEP_TEXT_GEN,
+  CREATE_FETCH_PHASE_STEPS,
+  FETCH_STREAM_STEP_IDS,
   UPLOAD_PIPELINE_STEPS,
-  createPipelineSteps,
-  deriveCreatePhase,
+  createRetryPhaseForStep,
+  failCreatePhaseStep,
+  initialCreateSteps,
+  patchCreateStep,
+  startCreateStep,
+  succeedCreateStep,
+  succeedCreateStepsThrough,
+  type CreateStepId,
+  type CreateStepsState,
 } from "./utils/createPipeline";
 import { DEFAULT_TEXT_MODEL_OPTIONS, IMAGE_MODEL_OPTIONS, CLASSIFIER_MODEL_OPTIONS, PROVIDER_LABELS } from "./constants/models";
 import type { ImageModelOption } from "./constants/models";
@@ -486,16 +487,17 @@ function App() {
   const [isAddingNewVersions, setIsAddingNewVersions] = useState(false);
   const [promptModifier, setPromptModifier] = useState("");
 
-  // Waiting-state UI lives in the Status Store (ADR 0002): the Create
-  // workflow runs as one Pipeline, the eBay upload as another. These hold the
-  // pipeline ids/handles; the phase booleans below are derived from the store.
-  const [createPipelineId, setCreatePipelineId] = useState<number | null>(null);
-  const createPipelineRef = useRef<PipelineHandle | null>(null);
-  const createFailedPhaseRef = useRef<"fetch" | "images" | "create" | null>(null);
+  // Create-workflow waiting state is parent-owned local state (ADR 0003):
+  // each step's StepCard is driven from this record, no Status Store. The
+  // eBay upload still runs as a Status Store Pipeline (migrates in ticket 05).
+  const [createSteps, setCreateSteps] = useState<CreateStepsState>(() =>
+    initialCreateSteps(),
+  );
   const [uploadPipelineId, setUploadPipelineId] = useState<number | null>(null);
   const uploadPipelineRef = useRef<PipelineHandle | null>(null);
-  const [testCreatePipelineId, setTestCreatePipelineId] = useState<number | null>(null);
-  const testCreatePipelineRef = useRef<PipelineHandle | null>(null);
+  const [testCreateSteps, setTestCreateSteps] = useState<CreateStepsState>(() =>
+    initialCreateSteps(),
+  );
   const [testUploadPipelineId, setTestUploadPipelineId] = useState<number | null>(null);
   const testUploadPipelineRef = useRef<PipelineHandle | null>(null);
 
@@ -925,15 +927,9 @@ function App() {
     bgRemovedPhotos: testBgRemovedPhotos,
   } = testWf;
 
-  // Create/Upload waiting-state derived from the Status Store (ADR 0002).
-  const { pipelines: statusPipelines } = useSyncExternalStore(
-    statusStore.subscribe,
-    statusStore.getSnapshot,
-  );
-  const createPipeline = statusPipelines.find((p) => p.id === createPipelineId);
-  const createPhase = deriveCreatePhase(createPipeline);
-  const isConfirming = createPhase.generatingImages;
-  const isCreatingListing = createPhase.creatingListing;
+  // Create waiting-state derived from the parent-owned step record (ADR 0003).
+  const isConfirming = createSteps.imageGen.status === "running";
+  const isCreatingListing = createSteps.createListing.status === "running";
   const filteredUploadListings = useMemo(() => {
     const order = new Map(allListings.map((l, i) => [l.sku, i]));
     const q = uploadListingsSearch.trim().toLowerCase();
@@ -1054,33 +1050,17 @@ function App() {
     textGenCompleteRef.current = textGenComplete;
   }, [textGenComplete]);
 
-  // Text generation runs concurrently with photo review / image generation,
-  // so it usually finishes before the pipeline reaches its step. When the
-  // pipeline is resting on the text step and generation is done, advance.
-  // (If text finishes earlier, the image-gen completion path advances past.)
-  useEffect(() => {
-    if (!textGenComplete || !createPipeline) return;
-    const current = createPipeline.steps[createPipeline.currentIndex];
-    if (current?.name === CREATE_STEP_TEXT_GEN) {
-      createPipelineRef.current?.advancePast(CREATE_STEP_TEXT_GEN);
-    }
-  }, [textGenComplete, createPipeline]);
-
-  // Same text-step advance for the simulated test workflow pipeline.
-  const testCreatePipeline = statusPipelines.find((p) => p.id === testCreatePipelineId);
-  useEffect(() => {
-    if (!testWf.textGenComplete || !testCreatePipeline) return;
-    const current = testCreatePipeline.steps[testCreatePipeline.currentIndex];
-    if (current?.name === CREATE_STEP_TEXT_GEN) {
-      testCreatePipelineRef.current?.advancePast(CREATE_STEP_TEXT_GEN);
-    }
-  }, [testWf.textGenComplete, testCreatePipeline]);
+  // Text generation runs concurrently with photo review / image generation;
+  // its step state is updated directly by startTextGeneration's callbacks, so
+  // no cross-step advance effect is needed (ADR 0003).
   const triggerAutoBackgroundRemoval = async (photoUrls: string[], sku: string): Promise<void> => {
     const controller = new AbortController();
     bgRemovalAbortControllerRef.current = controller;
     const total = photoUrls.length;
     let completed = 0;
-    const pipeline = createPipelineRef.current;
+    setCreateSteps((prev) =>
+      startCreateStep(prev, "bgRemoval", "Removing backgrounds…"),
+    );
     try {
       const data = await fetchWithProgress(
         "/api/remove-backgrounds-batch",
@@ -1093,34 +1073,54 @@ function App() {
         (event) => {
           if (event.status === "completed") {
             completed += 1;
-            pipeline?.progress(completed, total);
+            setCreateSteps((prev) =>
+              patchCreateStep(prev, "bgRemoval", {
+                progress: { current: completed, total },
+              }),
+            );
           }
         },
       ) as { bgRemovedPhotos?: Record<string, string> };
       if (!controller.signal.aborted) {
         setBgRemovedPhotos(data.bgRemovedPhotos || {});
-        pipeline?.advancePast(CREATE_STEP_BG_REMOVAL);
+        setCreateSteps((prev) =>
+          succeedCreateStep(prev, "bgRemoval", "Backgrounds removed"),
+        );
       }
     } catch (err) {
       if (!controller.signal.aborted) {
         console.error("[BG Removal] Failed:", err);
         // Background removal is best-effort: the flow continues with the
         // original photos, so a failure skips the step rather than failing
-        // the pipeline.
-        pipeline?.advancePast(CREATE_STEP_BG_REMOVAL);
+        // the workflow.
+        setCreateSteps((prev) =>
+          succeedCreateStep(
+            prev,
+            "bgRemoval",
+            "Skipped — continuing with original photos",
+          ),
+        );
       }
     }
   };
 
   const testTriggerAutoBackgroundRemoval = (photoUrls: string[]): void => {
     const total = photoUrls.length;
-    const pipeline = testCreatePipelineRef.current;
+    setTestCreateSteps((prev) =>
+      startCreateStep(prev, "bgRemoval", "Removing backgrounds…"),
+    );
     photoUrls.forEach((url, idx) => {
       setTimeout(() => {
-        pipeline?.progress(idx + 1, total);
+        setTestCreateSteps((prev) =>
+          patchCreateStep(prev, "bgRemoval", {
+            progress: { current: idx + 1, total },
+          }),
+        );
         setTestBgRemovedPhotos((prev) => ({ ...prev, [url]: url }));
         if (idx === photoUrls.length - 1) {
-          pipeline?.advancePast(CREATE_STEP_BG_REMOVAL);
+          setTestCreateSteps((prev) =>
+            succeedCreateStep(prev, "bgRemoval", "Backgrounds removed"),
+          );
         }
       }, (idx + 1) * 800);
     });
@@ -1145,18 +1145,15 @@ function App() {
     bgRemovalAbortControllerRef.current?.abort();
     bgRemovalAbortControllerRef.current = null;
     setBgRemovedPhotos({});
-    // The whole Create workflow runs as one Pipeline in the Status Store.
-    if (createPipelineId != null) dismissPipeline(createPipelineId);
-    const { id: pipelineId, handle: pipeline } = startPipelineWithId(
-      "Create listing",
-      createPipelineSteps({
-        classify: classifyImagesEnabled,
-        bgRemoval: autoBackgroundRemovalEnabled,
-      }),
+    // The Create workflow's waiting state lives in createSteps (ADR 0003); a
+    // new fetch restarts the whole workflow from step 1.
+    const createStepSettings = {
+      classify: classifyImagesEnabled,
+      bgRemoval: autoBackgroundRemovalEnabled,
+    };
+    setCreateSteps(
+      startCreateStep(initialCreateSteps(), "fetch", "Fetching listing from eBay…"),
     );
-    createPipelineRef.current = pipeline;
-    setCreatePipelineId(pipelineId);
-    createFailedPhaseRef.current = null;
     try {
       const photosUrl = classifyImagesEnabled
         ? `/api/photos/${encodeURIComponent(listingId.trim())}?classifier_model=${encodeURIComponent(classifierModel)}`
@@ -1166,9 +1163,15 @@ function App() {
         photosUrl, {},
         (event) => {
           const step = event.step as string | undefined;
-          if (event.status === "completed" && step && !completedFetchSteps.has(step)) {
+          const stepId = step ? FETCH_STREAM_STEP_IDS[step] : undefined;
+          if (!step || !stepId) return;
+          if (event.status === "in_progress") {
+            setCreateSteps((prev) => startCreateStep(prev, stepId, `${step}…`));
+          } else if (event.status === "completed" && !completedFetchSteps.has(step)) {
             completedFetchSteps.add(step);
-            pipeline.advancePast(step);
+            setCreateSteps((prev) =>
+              succeedCreateStepsThrough(prev, stepId, createStepSettings),
+            );
           }
         },
       ) as { photos?: string[]; categories?: Record<string, string>; listing?: Listing | null; sku?: string | null };
@@ -1193,21 +1196,32 @@ function App() {
         }
       }
       setSkippedPhotos(autoSkip);
-      // Advance past any fetch steps the backend did not echo back, so the
-      // pipeline rests on the bg-removal or image-generation step.
-      pipeline.advancePast(
-        classifyImagesEnabled ? CREATE_STEP_CATEGORIZE : CREATE_STEP_JSON,
-      );
+      // Complete any fetch steps the backend did not echo back, then show how
+      // many photos arrived on the fetch card.
+      setCreateSteps((prev) => {
+        const through = succeedCreateStepsThrough(
+          prev,
+          classifyImagesEnabled ? "categorize" : "json",
+          createStepSettings,
+        );
+        const photoCount = data.photos?.length ?? 0;
+        return patchCreateStep(through, "fetch", {
+          statusText: `${photoCount} photo${photoCount !== 1 ? "s" : ""} found`,
+        });
+      });
       if (autoBackgroundRemovalEnabled && data.photos?.length && data.sku) {
         triggerAutoBackgroundRemoval(data.photos, data.sku);
       } else if (autoBackgroundRemovalEnabled) {
-        pipeline.advancePast(CREATE_STEP_BG_REMOVAL);
+        setCreateSteps((prev) =>
+          succeedCreateStep(prev, "bgRemoval", "Nothing to process"),
+        );
       }
     } catch (err) {
       const message = (err as Error).message || "An error occurred while fetching the listing";
       toast.error(message);
-      createFailedPhaseRef.current = "fetch";
-      pipeline.fail(message);
+      setCreateSteps((prev) =>
+        failCreatePhaseStep(prev, CREATE_FETCH_PHASE_STEPS, message),
+      );
       setListingLinkSubmitted(false);
       setPhotos([]);
       setCategories({});
@@ -1236,6 +1250,7 @@ function App() {
     setTextGenComplete(false);
     setEditableTitle("");
     setEditableDescription("");
+    setCreateSteps((prev) => startCreateStep(prev, "textGen", "AI is writing…"));
 
     const MAX_ATTEMPTS = 3;
     let succeeded = false;
@@ -1266,6 +1281,11 @@ function App() {
           () => {
             setEditableTitle("");
             setTextGenStatus("nudging");
+            setCreateSteps((prev) =>
+              patchCreateStep(prev, "textGen", {
+                statusText: "Adjusting title length…",
+              }),
+            );
           },
         );
         succeeded = true;
@@ -1286,6 +1306,7 @@ function App() {
 
     if (!controller.signal.aborted) {
       setTextGenComplete(true);
+      setCreateSteps((prev) => succeedCreateStep(prev, "textGen", "Done"));
     }
 
     setIsGeneratingText(false);
@@ -1299,6 +1320,7 @@ function App() {
     setIsGeneratingText(false);
     setTextGenStatus("writing");
     setTextGenComplete(false);
+    setCreateSteps((prev) => patchCreateStep(prev, "textGen", { status: "pending" }));
   };
 
   const handleSubmit = (e: React.FormEvent): void => {
@@ -1307,36 +1329,20 @@ function App() {
   };
 
   /**
-   * Retry the failed phase of the Create pipeline. The store settles a failed
-   * pipeline permanently, so a retry re-runs the phase against a fresh
-   * pipeline; the failed one is dismissed.
+   * Retry a failed Create step by re-running its phase (ADR 0003). Completed
+   * steps keep their success state: a fetch retry restarts the workflow, an
+   * images retry re-confirms the categories, a create retry re-runs only
+   * create-listing.
    */
-  const handleRetryCreatePhase = (): void => {
-    const phase = createFailedPhaseRef.current;
-    if (createPipelineId != null) dismissPipeline(createPipelineId);
-    setCreatePipelineId(null);
-    createPipelineRef.current = null;
-    createFailedPhaseRef.current = null;
+  const handleRetryCreateStep = (id: CreateStepId): void => {
+    const phase = createRetryPhaseForStep(id);
     if (phase === "fetch") {
       // The listing id is still in the input (it is only cleared on success),
       // so retry the fetch directly.
       fetchListingPhotos();
-      return;
-    }
-    // Rebuild a pipeline reflecting the remaining phases so the tracker shows
-    // the retry's progress.
-    const remaining: string[] = [];
-    if (phase === "images") {
-      remaining.push(CREATE_STEP_IMAGE_GEN, CREATE_STEP_TEXT_GEN, CREATE_STEP_CREATE_LISTING);
-    } else {
-      remaining.push(CREATE_STEP_CREATE_LISTING);
-    }
-    const { id, handle } = startPipelineWithId("Create listing", remaining);
-    createPipelineRef.current = handle;
-    setCreatePipelineId(id);
-    if (phase === "images") {
+    } else if (phase === "images") {
       handleConfirmCategories();
-    } else if (phase === "create") {
+    } else {
       handleCreateListing();
     }
   };
@@ -1560,10 +1566,19 @@ function App() {
     console.log("Editable categories:", editableCategories);
     console.log("Skipped photos:", skippedPhotos);
 
-    const pipeline = createPipelineRef.current;
-    // The pipeline may still be on the bg-removal step (e.g. it was skipped);
-    // rest it on the image-generation step before reporting progress.
-    pipeline?.advancePast(CREATE_STEP_BG_REMOVAL);
+    const createStepSettings = {
+      classify: classifyImagesEnabled,
+      bgRemoval: autoBackgroundRemovalEnabled,
+    };
+    // The bg-removal step may still be open (e.g. it was skipped); complete
+    // it, then start the image-generation step.
+    setCreateSteps((prev) =>
+      startCreateStep(
+        succeedCreateStepsThrough(prev, "bgRemoval", createStepSettings),
+        "imageGen",
+        "Generating images…",
+      ),
+    );
 
     try {
       const hasBgRemoved =
@@ -1578,7 +1593,9 @@ function App() {
 
       if (photosToProcess.length === 0) {
         setCategories(editableCategories);
-        pipeline?.advancePast(CREATE_STEP_IMAGE_GEN);
+        setCreateSteps((prev) =>
+          succeedCreateStep(prev, "imageGen", "Nothing to generate"),
+        );
         handleCreateListing();
         return;
       }
@@ -1635,7 +1652,11 @@ function App() {
         throw new Error("No task ID returned from server");
       }
 
-      pipeline?.progress(0, totalImages);
+      setCreateSteps((prev) =>
+        patchCreateStep(prev, "imageGen", {
+          progress: { current: 0, total: totalImages },
+        }),
+      );
 
       setPendingImagePromptModifier("");
 
@@ -1680,11 +1701,18 @@ function App() {
                   .catch((err) => console.error("Failed to sync images to disk:", err));
               }
 
-              pipeline?.progress(totalImages, totalImages);
-              pipeline?.advancePast(CREATE_STEP_IMAGE_GEN);
-              if (textGenCompleteRef.current) {
-                pipeline?.advancePast(CREATE_STEP_TEXT_GEN);
-              }
+              setCreateSteps((prev) => {
+                const done = succeedCreateStep(
+                  patchCreateStep(prev, "imageGen", {
+                    progress: { current: totalImages, total: totalImages },
+                  }),
+                  "imageGen",
+                  `${aiGeneratedList.length} image${aiGeneratedList.length !== 1 ? "s" : ""} generated`,
+                );
+                return textGenCompleteRef.current
+                  ? succeedCreateStepsThrough(done, "textGen", createStepSettings)
+                  : done;
+              });
             } else {
               const aiGeneratedList = statusData.generated_images || [];
               const partialImages = mergeGeneratedImages(photosToProcess, aiGeneratedList, {
@@ -1710,26 +1738,36 @@ function App() {
                   ? `Image generation completed with errors: ${statusData.errors.join("; ")}`
                   : "Image generation failed";
               toast.error(errorMsg);
-              createFailedPhaseRef.current = "images";
-              pipeline?.fail(errorMsg);
+              setCreateSteps((prev) =>
+                patchCreateStep(prev, "imageGen", { status: "error", error: errorMsg }),
+              );
             }
           } else {
-            pipeline?.progress(statusData.completed || 0, totalImages);
+            setCreateSteps((prev) =>
+              patchCreateStep(prev, "imageGen", {
+                progress: { current: statusData.completed || 0, total: totalImages },
+              }),
+            );
           }
         } catch (pollErr) {
           console.error("Error polling status:", pollErr);
           clearInterval(pollInterval);
           toast.error("Error checking generation status");
-          createFailedPhaseRef.current = "images";
-          pipeline?.fail("Error checking generation status");
+          setCreateSteps((prev) =>
+            patchCreateStep(prev, "imageGen", {
+              status: "error",
+              error: "Error checking generation status",
+            }),
+          );
         }
       }, 500);
     } catch (err) {
       console.error("Error generating images:", err);
       const message = (err as Error).message || "An error occurred while generating images";
       toast.error(message);
-      createFailedPhaseRef.current = "images";
-      pipeline?.fail(message);
+      setCreateSteps((prev) =>
+        patchCreateStep(prev, "imageGen", { status: "error", error: message }),
+      );
     }
   };
   const handleAddToListing = useCallback((ebayUrl: string): void => {
@@ -2195,10 +2233,18 @@ function App() {
       return;
     }
 
-    const pipeline = createPipelineRef.current;
-    // Rest the pipeline on the create-listing step (image/text steps may have
-    // been skipped when there was nothing to generate).
-    pipeline?.advancePast(CREATE_STEP_TEXT_GEN);
+    // Complete the image/text steps (they may have been skipped when there
+    // was nothing to generate), then start the create-listing step.
+    setCreateSteps((prev) =>
+      startCreateStep(
+        succeedCreateStepsThrough(prev, "textGen", {
+          classify: classifyImagesEnabled,
+          bgRemoval: autoBackgroundRemovalEnabled,
+        }),
+        "createListing",
+        "Creating listing…",
+      ),
+    );
 
     try {
       console.log("Updating listing with images:", generatedImages);
@@ -2239,7 +2285,9 @@ function App() {
 
       console.log("Create listing response:", data);
 
-      pipeline?.succeed();
+      setCreateSteps((prev) =>
+        succeedCreateStep(prev, "createListing", "Listing created"),
+      );
 
       setListingData(data.listing_data ?? null);
       setEditableTitle(data.listing_data?.inventoryItem?.product?.title || "");
@@ -2255,8 +2303,9 @@ function App() {
       console.error("Error creating listing:", err);
       const message = (err as Error).message || "An error occurred while creating listing";
       toast.error(message);
-      createFailedPhaseRef.current = "create";
-      pipeline?.fail(message);
+      setCreateSteps((prev) =>
+        patchCreateStep(prev, "createListing", { status: "error", error: message }),
+      );
     }
   };
 
@@ -3518,6 +3567,7 @@ function App() {
     setTestTextGenComplete(false);
     setTestEditableTitle("");
     setTestEditableDescription("");
+    setTestCreateSteps((prev) => startCreateStep(prev, "textGen", "AI is writing…"));
 
     const fullTitle = MOCK_GENERATED_TITLE;
     const fullDesc = MOCK_GENERATED_DESCRIPTION;
@@ -3540,6 +3590,7 @@ function App() {
         setTestEditableDescription(fullDesc);
         setTestIsGeneratingText(false);
         setTestTextGenComplete(true);
+        setTestCreateSteps((prev) => succeedCreateStep(prev, "textGen", "Done"));
       }
     }, 16);
     void title;
@@ -3554,13 +3605,25 @@ function App() {
     setTestIsGeneratingText(false);
     setTestTextGenStatus("writing");
     setTestTextGenComplete(false);
+    setTestCreateSteps((prev) =>
+      patchCreateStep(prev, "textGen", { status: "pending" }),
+    );
   };
 
   const testHandleCreateListing = (): void => {
     setTestIsCreatingListing(true);
     setTestError(null);
-    const pipeline = testCreatePipelineRef.current;
-    pipeline?.advancePast(CREATE_STEP_TEXT_GEN);
+    const testStepSettings = {
+      classify: classifyImagesEnabled,
+      bgRemoval: autoBackgroundRemovalEnabled,
+    };
+    setTestCreateSteps((prev) =>
+      startCreateStep(
+        succeedCreateStepsThrough(prev, "textGen", testStepSettings),
+        "createListing",
+        "Creating listing…",
+      ),
+    );
     setTimeout(() => {
       const listingData = {
         ...MOCK_DATA.listingData,
@@ -3576,7 +3639,9 @@ function App() {
       };
       setTestListingData(listingData as unknown as Listing);
       setTestUploadResult(null);
-      pipeline?.succeed();
+      setTestCreateSteps((prev) =>
+        succeedCreateStep(prev, "createListing", "Listing created"),
+      );
       setTestIsCreatingListing(false);
     }, 1600);
   };
@@ -3592,22 +3657,23 @@ function App() {
     setTestListingLinkSubmitted(true);
     setTestLoading(true);
     setTestError(null);
-    if (testCreatePipelineId != null) dismissPipeline(testCreatePipelineId);
-    const { id: pipelineId, handle: pipeline } = startPipelineWithId(
-      "Create listing",
-      createPipelineSteps({
-        classify: classifyImagesEnabled,
-        bgRemoval: autoBackgroundRemovalEnabled,
-      }),
+    const testStepSettings = {
+      classify: classifyImagesEnabled,
+      bgRemoval: autoBackgroundRemovalEnabled,
+    };
+    setTestCreateSteps(
+      startCreateStep(initialCreateSteps(), "fetch", "Fetching listing from eBay…"),
     );
-    testCreatePipelineRef.current = pipeline;
-    setTestCreatePipelineId(pipelineId);
     setTimeout(() => {
-      pipeline.advancePast(CREATE_STEP_FETCH);
+      setTestCreateSteps((prev) =>
+        succeedCreateStepsThrough(prev, "fetch", testStepSettings),
+      );
     }, 400);
     if (classifyImagesEnabled) {
       setTimeout(() => {
-        pipeline.advancePast(CREATE_STEP_JSON);
+        setTestCreateSteps((prev) =>
+          succeedCreateStepsThrough(prev, "json", testStepSettings),
+        );
       }, 800);
     }
     setTimeout(() => {
@@ -3633,13 +3699,19 @@ function App() {
         }
       }
       setTestSkippedPhotos(autoSkip);
-      pipeline.advancePast(
-        classifyImagesEnabled ? CREATE_STEP_CATEGORIZE : CREATE_STEP_JSON,
+      setTestCreateSteps((prev) =>
+        succeedCreateStepsThrough(
+          prev,
+          classifyImagesEnabled ? "categorize" : "json",
+          testStepSettings,
+        ),
       );
       if (autoBackgroundRemovalEnabled && MOCK_DATA.photos?.length) {
         testTriggerAutoBackgroundRemoval(MOCK_DATA.photos);
       } else if (autoBackgroundRemovalEnabled) {
-        pipeline.advancePast(CREATE_STEP_BG_REMOVAL);
+        setTestCreateSteps((prev) =>
+          succeedCreateStep(prev, "bgRemoval", "Nothing to process"),
+        );
       }
       setTestLoading(false);
     }, 1500);
@@ -3671,22 +3743,39 @@ function App() {
       .map((url) =>
         hasBgRemoved ? testBgRemovedPhotos[url] || url : url,
       );
-    const pipeline = testCreatePipelineRef.current;
-    pipeline?.advancePast(CREATE_STEP_BG_REMOVAL);
+    const testStepSettings = {
+      classify: classifyImagesEnabled,
+      bgRemoval: autoBackgroundRemovalEnabled,
+    };
+    setTestCreateSteps((prev) =>
+      startCreateStep(
+        succeedCreateStepsThrough(prev, "bgRemoval", testStepSettings),
+        "imageGen",
+        "Generating images…",
+      ),
+    );
     if (photosToProcess.length === 0) {
       setTestCategories(testEditableCategories);
       setTestGeneratedImages([]);
-      pipeline?.advancePast(CREATE_STEP_IMAGE_GEN);
+      setTestCreateSteps((prev) =>
+        succeedCreateStep(prev, "imageGen", "Nothing to generate"),
+      );
       return;
     }
     setTestIsConfirming(true);
     setTestError(null);
     const total = photosToProcess.length;
-    pipeline?.progress(0, total);
+    setTestCreateSteps((prev) =>
+      patchCreateStep(prev, "imageGen", { progress: { current: 0, total } }),
+    );
     let completed = 0;
     const interval = setInterval(() => {
       completed += 1;
-      pipeline?.progress(completed, total);
+      setTestCreateSteps((prev) =>
+        patchCreateStep(prev, "imageGen", {
+          progress: { current: completed, total },
+        }),
+      );
       if (completed >= total) {
         clearInterval(interval);
         const merged = photosToProcess.map(
@@ -3694,7 +3783,9 @@ function App() {
         );
         setTestGeneratedImages(merged);
         setTestCategories(testEditableCategories);
-        pipeline?.advancePast(CREATE_STEP_IMAGE_GEN);
+        setTestCreateSteps((prev) =>
+          succeedCreateStep(prev, "imageGen", `${merged.length} images generated`),
+        );
         setTestIsConfirming(false);
       }
     }, 500);
@@ -4091,7 +4182,7 @@ function App() {
               editableDescription={testEditableDescription}
               uploadResult={testUploadResult as UploadResult | null}
               isEditorOpen={testIsEditorOpen}
-              createPipelineId={testCreatePipelineId}
+              createSteps={testCreateSteps}
               uploadPipelineId={testUploadPipelineId}
               uploadingSkus={testUploadingSkus}
               isTrimmingTitle={testIsTrimmingTitle}
@@ -5405,9 +5496,9 @@ function App() {
               editableDescription={editableDescription}
               uploadResult={uploadResult}
               isEditorOpen={isEditorOpen}
-              createPipelineId={createPipelineId}
+              createSteps={createSteps}
+              onRetryCreateStep={handleRetryCreateStep}
               uploadPipelineId={uploadPipelineId}
-              onRetryCreate={handleRetryCreatePhase}
               onRetryUpload={handleRetryUpload}
               uploadingSkus={uploadingSkus}
               isTrimmingTitle={isTrimmingTitle}
