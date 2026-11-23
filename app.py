@@ -5316,7 +5316,9 @@ def _free_port_from_stale_backend(port: int) -> None:
 
 
 if __name__ == '__main__':
-    _free_port_from_stale_backend(5000)
+    load_dotenv()
+    _backend_port = int(os.environ.get("AXIS_BACKEND_PORT", "5000"))
+    _free_port_from_stale_backend(_backend_port)
     try:
         # Create axis.db and, on first run, migrate all existing JSON data into it.
         _db.ensure_db()
@@ -5330,4 +5332,4 @@ if __name__ == '__main__':
     # background-removal request doesn't pay the ~2.5s import. Daemon thread:
     # never blocks shutdown, and warm_rembg swallows its own import errors.
     threading.Thread(target=warm_rembg, daemon=True).start()
-    app.run(debug=True, use_reloader=False, port=5000, request_handler=_QuietTokensRequestHandler)
+    app.run(debug=True, use_reloader=False, port=_backend_port, request_handler=_QuietTokensRequestHandler)

@@ -34,6 +34,36 @@ pip install -r requirements.txt
 
 Config: copy `env_template.txt` to `.env` (eBay creds, business policy IDs, `openrouter_api_key`, `bedrock_api_key`).
 
+## Worktrees: parallel dev stacks
+
+Ports are configurable via `AXIS_FRONTEND_PORT` / `AXIS_BACKEND_PORT` (env or repo-root `.env`,
+defaults 4000/5000), so every worktree can run its own dev stack without colliding.
+`npm run force-close` only kills the ports of the checkout it runs in.
+
+When you create a worktree (e.g. `/implement-spec` orchestrator worktrees under `.worktrees/`),
+bootstrap it once so it can run the app — or just run `npm run dev` inside it, which bootstraps
+itself automatically on first run (`scripts/ensure_dev_ports.py`) and prints its URL:
+
+```
+./wt boot <spec>          # = python scripts/bootstrap_worktree.py .worktrees/<spec>
+                          # add --with-db to also copy axis.db, --skip-install to skip npm install
+```
+
+This copies `.env`, allocates a unique port pair (registry: `.scratch/worktree-ports.json` in the
+main checkout), junctions `.venv`, and runs the frontend install. Switch between worktrees with:
+
+```
+./wt list                 # all worktrees: branch, ports, URL
+./wt dev <spec>           # run npm run dev in that worktree (its own ports)
+./wt open <spec>          # open its frontend URL in the browser
+./wt path <spec>          # print its path (cd "$(./wt path <spec>)")
+```
+
+(`./wt` is a bash wrapper around `scripts/bootstrap_worktree.py` and `scripts/wt.py`;
+those take the same arguments if you prefer full paths.)
+
+Ticket worktrees (`.worktrees/<spec>-<ticket>`) only run tests — don't bootstrap or run dev in them.
+
 ## Token scripts
 
 ```
