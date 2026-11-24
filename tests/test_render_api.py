@@ -256,18 +256,8 @@ def box_3mf_bytes():
 
 @pytest.fixture(scope="module")
 def box_step_bytes(tmp_path_factory):
-    import gmsh
-    path = tmp_path_factory.mktemp("meshes") / "box.step"
-    gmsh.initialize()
-    try:
-        gmsh.option.setNumber("General.Terminal", 0)
-        gmsh.model.add("box")
-        gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)
-        gmsh.model.occ.synchronize()
-        gmsh.write(str(path))
-    finally:
-        gmsh.finalize()
-    return path.read_bytes()
+    from conftest import make_box_step
+    return make_box_step(tmp_path_factory).read_bytes()
 
 
 def test_render_accepts_3mf_and_renders_the_converted_stl(client, fake_render, box_3mf_bytes):

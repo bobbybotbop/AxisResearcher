@@ -19,18 +19,8 @@ def box_3mf(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def box_step(tmp_path_factory):
-    import gmsh
-    path = tmp_path_factory.mktemp("meshes") / "box.step"
-    gmsh.initialize()
-    try:
-        gmsh.option.setNumber("General.Terminal", 0)
-        gmsh.model.add("box")
-        gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)
-        gmsh.model.occ.synchronize()
-        gmsh.write(str(path))
-    finally:
-        gmsh.finalize()
-    return path
+    from conftest import make_box_step
+    return make_box_step(tmp_path_factory)
 
 
 def _assert_valid_stl(path):

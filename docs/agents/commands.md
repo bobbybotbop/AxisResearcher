@@ -5,10 +5,13 @@ Run from the project root unless noted.
 ## Dev server
 
 ```
-npm run dev              # backend (python app.py) + frontend (vite), waits for backend on :5000 first.
-                         # Kills any stale python app.py process holding :5000 on startup.
+npm run dev              # backend (python app.py) + frontend (vite).
+                         # Kills any stale dev process holding ports 4000-4010/5000 on startup.
                          # --kill-others-on-fail tears down both if the backend dies.
                          # If Ctrl+C prompts "Terminate batch job (Y/N)?", answer Y.
+                         # Output is mirrored to latest_logs/backend.log and
+                         # latest_logs/frontend.log (truncated each run) — read those
+                         # to see what the servers are doing.
 npm run dev:backend      # python app.py only (Flask, port 5000)
 npm run dev:frontend     # cd frontend && npm run dev only (Vite, port 4000, proxies /api -> :5000)
 ```
@@ -18,6 +21,14 @@ npm run force-close     # kill stale backend/frontend dev processes and free por
                          # Catches orphaned Vite servers and npm/concurrently wrappers that a
                          # port-only scan misses. TIME_WAIT sockets (PID 0) cannot be killed —
                          # if it warns, wait ~1-2 minutes and retry.
+```
+
+## Checks
+
+```
+npm run check            # frontend type-check (tsc --noEmit) + full pytest suite.
+                         # Run this before reporting a change done. CI runs it on
+                         # push to main and on PRs (.github/workflows/check.yml).
 ```
 
 Frontend build/preview (run inside `frontend/`):
@@ -34,35 +45,14 @@ pip install -r requirements.txt
 
 Config: copy `env_template.txt` to `.env` (eBay creds, business policy IDs, `openrouter_api_key`, `bedrock_api_key`).
 
-## Worktrees: parallel dev stacks
+## Worktrees
 
-Ports are configurable via `AXIS_FRONTEND_PORT` / `AXIS_BACKEND_PORT` (env or repo-root `.env`,
-defaults 4000/5000), so every worktree can run its own dev stack without colliding.
+There is one dev stack, owned by the main checkout (ports 4000/5000). `/implement-spec`
+ticket worktrees under `.worktrees/` are tests-only — see `docs/agents/worktrees.md`.
+
+Ports default to 4000/5000 and can be overridden via `AXIS_FRONTEND_PORT` /
+`AXIS_BACKEND_PORT` (env or repo-root `.env`) if the defaults are ever taken.
 `npm run force-close` only kills the ports of the checkout it runs in.
-
-When you create a worktree (e.g. `/implement-spec` orchestrator worktrees under `.worktrees/`),
-bootstrap it once so it can run the app — or just run `npm run dev` inside it, which bootstraps
-itself automatically on first run (`scripts/ensure_dev_ports.py`) and prints its URL:
-
-```
-./wt boot <spec>          # = python scripts/bootstrap_worktree.py .worktrees/<spec>
-                          # add --with-db to also copy axis.db, --skip-install to skip npm install
-```
-
-This copies `.env`, allocates a unique port pair (registry: `.scratch/worktree-ports.json` in the
-main checkout), junctions `.venv`, and runs the frontend install. Switch between worktrees with:
-
-```
-./wt list                 # all worktrees: branch, ports, URL
-./wt dev <spec>           # run npm run dev in that worktree (its own ports)
-./wt open <spec>          # open its frontend URL in the browser
-./wt path <spec>          # print its path (cd "$(./wt path <spec>)")
-```
-
-(`./wt` is a bash wrapper around `scripts/bootstrap_worktree.py` and `scripts/wt.py`;
-those take the same arguments if you prefer full paths.)
-
-Ticket worktrees (`.worktrees/<spec>-<ticket>`) only run tests — don't bootstrap or run dev in them.
 
 ## Token scripts
 

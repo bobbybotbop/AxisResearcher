@@ -36,3 +36,28 @@ def config_file(tmp_path, monkeypatch):
     for key, value in BASE_CONFIG.items():
         db.set_preference(key, value)
     return path
+
+
+def make_box_step(tmp_path_factory):
+    """Write a 10mm box as a STEP file and return its path. Skips when the
+    gmsh native library can't load — it's optional outside the render pipeline."""
+    # importorskip only catches ImportError; the gmsh wheel loads its native
+    # library at import time and raises ctypes FileNotFoundError when absent.
+    try:
+        import gmsh
+    except Exception as e:
+        pytest.skip(f"gmsh native library unavailable: {e}")
+    path = tmp_path_factory.mktemp("meshes") / "box.step"
+    try:
+        gmsh.initialize()
+    except Exception as e:
+        pytest.skip(f"gmsh native library unavailable: {e}")
+    try:
+        gmsh.option.setNumber("General.Terminal", 0)
+        gmsh.model.add("box")
+        gmsh.model.occ.addBox(0, 0, 0, 10, 10, 10)
+        gmsh.model.occ.synchronize()
+        gmsh.write(str(path))
+    finally:
+        gmsh.finalize()
+    return path

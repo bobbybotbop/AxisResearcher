@@ -3,12 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "python scripts/ensure_dev_ports.py && npm run force-close && concurrently --kill-others-on-fail --names \"BACKEND,FRONTEND\" --prefix name --prefix-colors \"cyan,yellow\" \".venv\\\\Scripts\\\\python app.py\" \"cd frontend && npm run dev\"",
+    "dev": "npm run force-close && concurrently --kill-others-on-fail --names \"BACKEND,FRONTEND\" --prefix name --prefix-colors \"cyan,yellow\" \"python scripts/tee_log.py latest_logs/backend.log .venv\\\\Scripts\\\\python -u app.py\" \"python scripts/tee_log.py latest_logs/frontend.log npm --prefix frontend run dev\"",
     "dev:backend": ".venv\\Scripts\\python app.py",
     "dev:frontend": "cd frontend && npm run dev",
     "force-close": "python scripts/force_close_ports.py",
-    "bootstrap-worktree": "python scripts/bootstrap_worktree.py",
-    "wt": "python scripts/wt.py"
+    "check": "npm --prefix frontend run type-check && .venv\\Scripts\\python -m pytest tests/ -q"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",

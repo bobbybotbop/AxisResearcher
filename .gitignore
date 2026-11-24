@@ -17,6 +17,7 @@ docs/superpowers/
 *.venv
 backend/downloaders/cults3d_profile/
 backend/downloaders/makerworld_profile/
+backend/downloaders/thingiverse_profile/
 
 # Generated images (all timestamps)
 /generated-images/
@@ -54,3 +55,6 @@ backend_stdout.txt
 axis.db
 axis.db-wal
 axis.db-shm
+
+# Dev server logs (written by npm run dev)
+latest_logs/

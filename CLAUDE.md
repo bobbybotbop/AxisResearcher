@@ -22,6 +22,10 @@ See `docs/agents/constants.md`.
 
 See `docs/agents/progress-feedback.md`.
 
+## Browser automation
+
+Driving the built-in browser MCP (`mcp__desktop_browser__run`): see `docs/agents/browser-tool.md` before your first `page.wait_for` — the condition schema is strict.
+
 ## Agent skills
 
 ### Issue tracker
@@ -38,4 +42,4 @@ Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/ag
 
 ### Worktrees
 
-`/implement-spec` runs each spec in an orchestrator worktree under `.worktrees/` with its own dev stack on dedicated ports; `npm run dev` auto-bootstraps any worktree, and `./wt` switches between them. Ticket worktrees are tests-only. See `docs/agents/worktrees.md`.
+`/implement-spec` runs in the main checkout; implementer subagents get tests-only ticket worktrees under `.worktrees/`. See `docs/agents/worktrees.md`.
