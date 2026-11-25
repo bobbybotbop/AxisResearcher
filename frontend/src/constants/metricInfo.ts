@@ -1,4 +1,4 @@
-import type { MetricRangeFilters, SortMetric } from "../types/research";
+import type { SortMetric } from "../types/research";
 
 /**
  * Plain-English presentation info for the three Copy Seller metrics — the
@@ -14,8 +14,11 @@ export interface MetricInfo {
   calculation: string;
   /** Whether "higher" or "lower" values are better, in plain English. */
   direction: string;
-  /** Key of this metric's acceptable-range inputs in MetricRangeFilters. */
-  rangeKey: keyof MetricRangeFilters;
+  /**
+   * True when a lower value is better, so the sort orders best-first. Only
+   * "Listings selling this" is lower-is-better; the others sort descending.
+   */
+  sortAscending: boolean;
 }
 
 export const METRIC_INFO: Record<SortMetric, MetricInfo> = {
@@ -27,7 +30,7 @@ export const METRIC_INFO: Record<SortMetric, MetricInfo> = {
       '"Listings to check for demand"), then divide by the total number of ' +
       "active listings selling this.",
     direction: "Higher is better.",
-    rangeKey: "demand",
+    sortAscending: false,
   },
   competition: {
     label: "Listings selling this",
@@ -35,7 +38,7 @@ export const METRIC_INFO: Record<SortMetric, MetricInfo> = {
       "We search eBay for the product's search phrase and count the total " +
       "number of active listings that come up.",
     direction: "Fewer is better.",
-    rangeKey: "competition",
+    sortAscending: true,
   },
   velocity: {
     label: "Sells per day",
@@ -44,7 +47,7 @@ export const METRIC_INFO: Record<SortMetric, MetricInfo> = {
       "(today minus the date the listing was created; listings under a day " +
       "old count as one day).",
     direction: "Higher is better.",
-    rangeKey: "velocity",
+    sortAscending: false,
   },
 };
 

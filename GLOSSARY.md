@@ -81,17 +81,26 @@ A persisted record of one execution of a Research Pipeline: its input, a timesta
 ## Product Candidate
 A single product identified by a Research Pipeline, carrying: the seller's representative eBay listing link, a simplified search phrase, and its collected market metrics. The unit of a Pipeline Run's results.
 
+## Metric
+One measured signal about a Product Candidate. The three Metrics are the Demand Coefficient, the Competition Count, and the Sold Velocity. Metrics are independent: collecting or filtering on one does not require another. In the UI each Metric is shown under a plain-English display name (noted on each Metric's entry).
+
+## Metric Range Filter
+An optional user-set acceptable range (minimum and/or maximum) on one Metric. A Product Candidate whose Metric value falls outside the range is removed from the results. An unset bound means "any" — the Metric does not filter. Filtering operates on cached candidates, so editing a range re-filters live without re-running the pipeline.
+
+## Date-Posted Range
+An optional start-and-end date range applied to the seller's own listings by their posted date (itemCreationDate), before the top-N cut and before any Metric is computed. It narrows which listings become Product Candidates. Because it is a collection-time filter, applying it requires a pipeline re-run. No range set means "any date".
+
 ## Demand Coefficient
-The ratio of active listings to sold listings for a Product Candidate's simplified search phrase — a proxy for how saturated vs. in-demand a product is.
+The aggregate sold quantity summed over the top K search results for a Product Candidate's simplified search phrase, divided by the total number of active listings for that phrase — a proxy for how saturated vs. in-demand a product is. Collecting it costs K eBay API calls per product (one getItem per top-K result), so it is optional and independently toggleable from the Competition Count. Displayed in the UI as "Demand score".
 
 ## Competition Count
-The number of active listings also selling the same product (matching the Product Candidate's simplified search phrase). A standalone metric, separate from the Demand Coefficient.
+The number of active listings also selling the same product (matching the Product Candidate's simplified search phrase) — the search total. A standalone Metric, separate from the Demand Coefficient, and free to collect (no extra eBay API calls). Fewer competitors is better. Displayed in the UI as "Listings selling this".
 
 ## Sold Velocity
-A Product Candidate's total sold quantity divided by its listing age (estimatedSoldQuantity ÷ days since itemCreationDate, both from the eBay Browse API). A proxy for how fast a product sells. Caveat: estimatedSoldQuantity is an estimate, and itemCreationDate resets on relist.
+A Product Candidate's total sold quantity divided by its listing age (estimatedSoldQuantity ÷ days since itemCreationDate, both from the eBay Browse API). A proxy for how fast a product sells. Free to collect (derived from data already fetched). Caveat: estimatedSoldQuantity is an estimate, and itemCreationDate resets on relist. Displayed in the UI as "Sells per day".
 
 ## Sort Metric
-The single user-picked metric (Demand Coefficient, Competition Count, or Sold Velocity) by which a Pipeline Run's Product Candidates are ordered, greatest-to-least. Sorting operates on cached raw metrics, so changing the Sort Metric re-orders instantly without re-running the pipeline.
+The single user-picked Metric by which a Pipeline Run's Product Candidates are ordered, best-first (descending for every Metric except the Competition Count, where fewer is better, which sorts ascending). Sorting operates on cached raw metrics, so changing the Sort Metric re-orders instantly without re-running the pipeline.
 
 ## eBay API Budget
 The app's eBay API usage is capped at roughly 5,000 calls per day. Research Pipelines must be designed to bound their per-run call count (top-N listing cap, top-K sold-sum cap) so a run cannot blow the daily budget.

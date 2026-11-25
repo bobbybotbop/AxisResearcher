@@ -93,9 +93,10 @@ export default function ResearchPipeline() {
   const [sortBy, setSortBy] = useState<SortMetric>("demand");
   const [ranges, setRanges] = useState<MetricRangeFilters>(EMPTY_RANGES);
   // Date-Posted Range (ticket 12): collection-time filter on the seller's own
-  // listings. Default today→today; picking a past start day sets end to today.
-  const [datePostedStart, setDatePostedStart] = useState(todayIsoDate);
-  const [datePostedEnd, setDatePostedEnd] = useState(todayIsoDate);
+  // listings. Default is no filter (empty = any date) so a default run returns
+  // results; picking a past start day sets end to today.
+  const [datePostedStart, setDatePostedStart] = useState("");
+  const [datePostedEnd, setDatePostedEnd] = useState("");
 
   const handleDatePostedStartChange = (value: string): void => {
     setDatePostedStart(value);
@@ -186,21 +187,31 @@ export default function ResearchPipeline() {
 
   // Live filter + sort on cached candidates — no pipeline re-run. Filtering
   // drops candidates outside any set metric range; sorting then orders the
-  // survivors greatest-to-least by the chosen metric. A null metric (Sold
-  // Velocity missing, or Demand not collected) sorts last.
+  // survivors best-first by the chosen metric (descending, except "Listings
+  // selling this" where fewer is better). A null metric (Sold Velocity
+  // missing, or Demand not collected) sorts last regardless of direction.
   const visibleCandidates = useMemo(() => {
     const filtered = filterCandidates(candidates, ranges);
+    const ascending = METRIC_INFO[sortBy].sortAscending;
+    // Missing values always sort last: use the worst sentinel for the direction.
+    const missing = ascending
+      ? Number.POSITIVE_INFINITY
+      : Number.NEGATIVE_INFINITY;
     const metricValue = (c: ProductCandidate): number => {
       switch (sortBy) {
         case "demand":
-          return c.demand_coefficient ?? Number.NEGATIVE_INFINITY;
+          return c.demand_coefficient ?? missing;
         case "competition":
           return c.competition_count;
         case "velocity":
-          return c.sold_velocity ?? Number.NEGATIVE_INFINITY;
+          return c.sold_velocity ?? missing;
       }
     };
-    return filtered.sort((a, b) => metricValue(b) - metricValue(a));
+    return filtered.sort((a, b) =>
+      ascending
+        ? metricValue(a) - metricValue(b)
+        : metricValue(b) - metricValue(a),
+    );
   }, [candidates, ranges, sortBy]);
 
   const handleRun = async (): Promise<void> => {

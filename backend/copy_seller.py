@@ -39,10 +39,10 @@ _USAGE_FILE = os.path.join(_COLLECTED_DATA_DIR, "ebay_api_usage.json")
 # Pure metric functions
 # ---------------------------------------------------------------------------
 
-def compute_sold_velocity(estimated_sold, item_creation_date, now=None):
-    """estimatedSoldQuantity ÷ listing age in days (minimum age: 1 day).
+def _parse_item_creation_date(item_creation_date):
+    """Parse an eBay itemCreationDate ISO string to an aware datetime.
 
-    Returns None when the creation date is missing or unparseable.
+    Returns None when missing or unparseable.
     """
     if not item_creation_date:
         return None
@@ -52,6 +52,17 @@ def compute_sold_velocity(estimated_sold, item_creation_date, now=None):
         return None
     if created.tzinfo is None:
         created = created.replace(tzinfo=timezone.utc)
+    return created
+
+
+def compute_sold_velocity(estimated_sold, item_creation_date, now=None):
+    """estimatedSoldQuantity ÷ listing age in days (minimum age: 1 day).
+
+    Returns None when the creation date is missing or unparseable.
+    """
+    created = _parse_item_creation_date(item_creation_date)
+    if created is None:
+        return None
     now = now or datetime.now(timezone.utc)
     age_days = max((now - created).total_seconds() / 86400.0, 1.0)
     return estimated_sold / age_days
@@ -86,23 +97,6 @@ def select_top_listings(detailed_items, min_sold, top_n):
     ]
     eligible.sort(key=lambda item: _extract_sold_quantity(item) or 0, reverse=True)
     return eligible[:top_n]
-
-
-def _parse_item_creation_date(item_creation_date):
-    """Parse an eBay itemCreationDate ISO string to an aware datetime.
-
-    Same parsing approach as compute_sold_velocity. Returns None when missing
-    or unparseable.
-    """
-    if not item_creation_date:
-        return None
-    try:
-        created = datetime.fromisoformat(str(item_creation_date).replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    if created.tzinfo is None:
-        created = created.replace(tzinfo=timezone.utc)
-    return created
 
 
 def filter_listings_by_date_posted(detailed_items, date_posted_start=None, date_posted_end=None):
