@@ -28,6 +28,11 @@ import zipfile
 
 import requests
 
+try:
+    from .browser_reaper import BROWSER_SESSION_LOCK, is_browser_death, reap_stale_profile_chromes
+except ImportError:
+    from browser_reaper import BROWSER_SESSION_LOCK, is_browser_death, reap_stale_profile_chromes
+
 CULTS3D_BASE = "https://cults3d.com"
 
 # Persistent Chrome profile — carries the Cults3D session + Cloudflare
@@ -70,6 +75,16 @@ def _require_seleniumbase():
     try:
         from seleniumbase import SB
         return SB
+    except ImportError as exc:
+        raise RuntimeError(
+            "seleniumbase is not installed. Run: pip install seleniumbase"
+        ) from exc
+
+
+def _require_driver():
+    try:
+        from seleniumbase import Driver
+        return Driver
     except ImportError as exc:
         raise RuntimeError(
             "seleniumbase is not installed. Run: pip install seleniumbase"
@@ -186,7 +201,11 @@ def _dismiss_overlays(sb) -> None:
 
 
 def _do_login(sb, email: str, password: str) -> None:
-    sb.uc_open_with_reconnect(f"{CULTS3D_BASE}/en/users/sign-in", 4)
+    # Plain open, NOT uc_open_with_reconnect: the browser already carries
+    # Cloudflare clearance from the model page, and the reconnect dance
+    # (window.open + close + service restart) kills the headless browser —
+    # this was the source of mid-run "chrome not reachable" deaths.
+    sb.open(f"{CULTS3D_BASE}/en/users/sign-in")
     if not _wait_for_cloudflare(sb, 20):
         raise _CloudflareBlocked("Cloudflare challenge blocked the Cults3D sign-in page.")
     sb.wait_for_element("form", timeout=15)
@@ -247,11 +266,11 @@ def _ensure_logged_in(sb, email: str | None, password: str | None, link: str) ->
 
     if not email or not password:
         raise RuntimeError(
-            "Cults3D credentials required. "
-            "Add your email and password in Settings > 3D File Sites."
+            "Cults3D login required. "
+            "Open Settings > 3D File Sites and click 'Sign in' to log in via the browser."
         )
     _do_login(sb, email, password)
-    sb.uc_open_with_reconnect(link, 3)
+    sb.open(link)  # plain open — see _do_login for why uc_open_with_reconnect is unsafe here
     if not _wait_for_cloudflare(sb, 20):
         raise _CloudflareBlocked("Cloudflare challenge blocked the Cults3D model page after login.")
     _dismiss_overlays(sb)
@@ -296,13 +315,98 @@ def _place_free_order(sb, link: str) -> list[dict]:
     return _extract_file_links(sb.get_page_source())
 
 
-def load_cookies_from_browser() -> str:
-    """No longer used — the local persistent profile maintains the Cults3D session."""
-    raise RuntimeError(
-        "Auto-loading cookies from an installed browser is no longer needed. "
-        "The downloader keeps its own persistent profile, so once you are logged in "
-        "(via Settings > 3D File Sites) the session persists automatically."
-    )
+# --- Interactive session ("Sign in") ----------------------------------------
+# The human, not the script, decides when login is done. The browser stays
+# open until the user closes the window or the app calls close_session(); the
+# profile (cookies, Cloudflare clearance) persists either way. While the
+# session is open it holds _PROFILE_LOCK, so the download pipeline waits
+# rather than fighting over the profile.
+
+_session_lock = threading.Lock()
+_session: dict = {"driver": None}
+
+
+def open_session(url: str | None = None) -> tuple[bool, str]:
+    """
+    Open a headed browser on the Cults3D sign-in page (or a given Cults3D
+    page) and leave it open for the user to log in. Returns immediately.
+    """
+    if url and "cults3d.com" not in url:
+        return False, "Only cults3d.com URLs can be opened."
+    with _session_lock:
+        if _session["driver"] is not None:
+            return False, "A session browser is already open."
+        if not _PROFILE_LOCK.acquire(blocking=False):
+            return False, "The download pipeline is using the browser profile right now — try again shortly."
+        reap_stale_profile_chromes(_PROFILE_DIR)
+        driver = None
+        try:
+            Driver = _require_driver()
+            driver = Driver(uc=True, headless=False, user_data_dir=_PROFILE_DIR, locale_code="en", ad_block=True)
+            driver.uc_open_with_reconnect(url or f"{CULTS3D_BASE}/en/users/sign-in", 4)
+            _session["driver"] = driver
+        except Exception as e:
+            if driver is not None:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+            _PROFILE_LOCK.release()
+            return False, f"Could not open the browser: {e}"
+    return True, "Browser open — log in there, then close the window. The session is saved automatically."
+
+
+def _end_session_locked() -> None:
+    """Tear down the session browser. Caller must hold _session_lock."""
+    driver = _session["driver"]
+    _session["driver"] = None
+    if driver is not None:
+        try:
+            driver.quit()
+        except Exception:
+            # The user already closed the window — the session is gone, but
+            # Chrome flushed the profile to disk on exit.
+            pass
+    _PROFILE_LOCK.release()
+
+
+def session_status() -> dict:
+    """Report whether the session browser is still open, plus the current page
+    and a best-effort logged-in guess. Detects the user closing the window and
+    cleans up in that case."""
+    with _session_lock:
+        driver = _session["driver"]
+        if driver is None:
+            return {"open": False}
+        try:
+            if not driver.window_handles:
+                _end_session_locked()
+                return {"open": False, "ended": True}
+            url = driver.current_url
+        except Exception:
+            _end_session_locked()
+            return {"open": False, "ended": True}
+        logged_in = None
+        try:
+            # The navbar shows SIGN IN only when logged out.
+            sign_in_visible = driver.execute_script(
+                "const nav = document.querySelector('nav');"
+                "return nav ? nav.innerText.includes('SIGN IN') : null"
+            )
+            if sign_in_visible is not None:
+                logged_in = not sign_in_visible
+        except Exception:
+            logged_in = None
+        return {"open": True, "url": url, "logged_in": logged_in}
+
+
+def close_session() -> tuple[bool, str]:
+    """Close the session browser gracefully, saving cookies to the profile."""
+    with _session_lock:
+        if _session["driver"] is None:
+            return False, "No session browser is open."
+        _end_session_locked()
+    return True, "Browser closed — session saved to the local browser profile."
 
 
 def _extract_image_urls(html: str) -> list[str]:
@@ -330,6 +434,7 @@ def _scrape_images_attempt(link: str, headless: bool) -> list[str]:
         headless2=headless,
         user_data_dir=_PROFILE_DIR,
         locale_code="en",
+        ad_block=True,  # ad-heavy pages can crash the browser mid-run
     ) as sb:
         sb.uc_open_with_reconnect(link, 4)
         if not _wait_for_cloudflare(sb, 20):
@@ -355,12 +460,22 @@ def _scrape_images_attempt(link: str, headless: bool) -> list[str]:
 def scrape_images(link: str) -> list[str]:
     """Return the main gallery image URLs (fbi.cults3d.com originals) for a Cults3D model."""
     with _PROFILE_LOCK:
-        if not _HEADLESS:
-            return _scrape_images_attempt(link, headless=False)
-        try:
-            return _scrape_images_attempt(link, headless=True)
-        except _CloudflareBlocked:
-            return _scrape_images_attempt(link, headless=False)
+        with BROWSER_SESSION_LOCK:
+            for attempt in range(2):
+                reap_stale_profile_chromes(_PROFILE_DIR)
+                try:
+                    if not _HEADLESS:
+                        return _scrape_images_attempt(link, headless=False)
+                    try:
+                        return _scrape_images_attempt(link, headless=True)
+                    except _CloudflareBlocked:
+                        return _scrape_images_attempt(link, headless=False)
+                except Exception as e:
+                    if attempt == 0 and is_browser_death(e):
+                        print(f"[cults3d] browser died mid-run, retrying once: {e}")
+                        time.sleep(3)
+                        continue
+                    raise
 
 
 def probe_images() -> tuple[bool, str]:
@@ -374,19 +489,25 @@ def probe_images() -> tuple[bool, str]:
         return False, str(e)
 
 
+# A small free public model used to verify the full download pipeline.
+_PROBE_MODEL_URL = f"{CULTS3D_BASE}/en/3d-model/art/low-poly-fox"
+
+
 def probe() -> tuple[bool, str]:
+    """
+    Genuinely fetch a file through the real download pipeline (browser,
+    Cloudflare clearance, login session, order placement, file download).
+    A plain reachability check is meaningless here: the homepage answers
+    plain requests even when the browser pipeline is broken, which is how
+    this probe used to report "operational" while downloads hung.
+    """
     try:
-        r = requests.get(
-            CULTS3D_BASE,
-            headers={"User-Agent": _USER_AGENT},
-            timeout=10,
-        )
-        # Cloudflare may return 403 for plain requests — the site is still reachable
-        if r.status_code in (200, 403):
-            return True, "Cults3D reachable"
-        return False, f"HTTP {r.status_code}"
+        name, data = stream_zip(_PROBE_MODEL_URL)
     except Exception as e:
         return False, str(e)
+    if not data:
+        return False, "Pipeline returned an empty file"
+    return True, f"Downloaded {name} ({len(data) // 1024} KB)"
 
 
 def _stream_zip_attempt(
@@ -405,6 +526,7 @@ def _stream_zip_attempt(
         headless2=headless,
         user_data_dir=_PROFILE_DIR,
         locale_code="en",
+        ad_block=True,  # ad-heavy pages can crash the browser mid-run
     ) as sb:
         sb.uc_open_with_reconnect(link, 4)
         if not _wait_for_cloudflare(sb, 20):
@@ -489,17 +611,27 @@ def stream_zip(
     resolved_password = password or os.environ.get("CULTS3D_PASSWORD", "").strip() or None
 
     with _PROFILE_LOCK:
-        if not _HEADLESS:
-            return _stream_zip_attempt(
-                link, resolved_email, resolved_password, file_download_delay, headless=False
-            )
+        with BROWSER_SESSION_LOCK:
+            for attempt in range(2):
+                reap_stale_profile_chromes(_PROFILE_DIR)
+                try:
+                    if not _HEADLESS:
+                        return _stream_zip_attempt(
+                            link, resolved_email, resolved_password, file_download_delay, headless=False
+                        )
 
-        # Headless first; fall back to one headed attempt if Cloudflare blocks it.
-        try:
-            return _stream_zip_attempt(
-                link, resolved_email, resolved_password, file_download_delay, headless=True
-            )
-        except _CloudflareBlocked:
-            return _stream_zip_attempt(
-                link, resolved_email, resolved_password, file_download_delay, headless=False
-            )
+                    # Headless first; fall back to one headed attempt if Cloudflare blocks it.
+                    try:
+                        return _stream_zip_attempt(
+                            link, resolved_email, resolved_password, file_download_delay, headless=True
+                        )
+                    except _CloudflareBlocked:
+                        return _stream_zip_attempt(
+                            link, resolved_email, resolved_password, file_download_delay, headless=False
+                        )
+                except Exception as e:
+                    if attempt == 0 and is_browser_death(e):
+                        print(f"[cults3d] browser died mid-run, retrying once: {e}")
+                        time.sleep(3)
+                        continue
+                    raise

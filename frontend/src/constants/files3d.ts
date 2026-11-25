@@ -13,13 +13,27 @@ export interface ThreeDSiteInfo {
 export const THREE_D_SITES: ThreeDSiteInfo[] = [
   { site: "makerworld.com", supported: true, requiresAuth: true },
   { site: "printables.com", supported: true },
-  { site: "yeggi.com", supported: false },
   { site: "cults3d.com", supported: true, requiresAuth: true },
   { site: "thingiverse.com", supported: true },
   { site: "thangs.com", supported: true },
 ];
 
 export type ThreeDSiteStatus = Record<string, { ok: boolean; message: string }>;
+
+// Sites that require a login. The API route prefix used for their
+// session/probe endpoints: /api/{prefix}-session/* and /api/{prefix}-probe.
+export type ThreeDAuthSite = "makerworld.com" | "cults3d.com";
+export const THREE_D_AUTH_SITE_API_PREFIX: Record<ThreeDAuthSite, string> = {
+  "makerworld.com": "makerworld",
+  "cults3d.com": "cults3d",
+};
+
+export interface ThreeDCredentialStatus {
+  has_credentials: boolean;
+  auth_type: string | null;
+  email: string;
+  profile_present?: boolean;
+}
 
 // Download-capable sites are auto-tested on page load, at most once per the
 // shared operation cooldown (DEFAULT_OPERATION_COOLDOWN_HOURS in ./cooldown,

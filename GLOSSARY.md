@@ -17,7 +17,7 @@ A non-blocking step in the Title Search Pipeline after a candidate link is chose
 
 ## Site Image Scraper
 A per-site module (parallel to the per-site downloaders) that extracts the main model gallery images from a 3D file site page. Uses the most reliable deterministic method per site — data API where available, DOM scraping where necessary:
-- **Thingiverse**: v2 API `things/{id}/complete` → `images[].url`
+- **Thingiverse**: no public API returns the gallery anymore (the v2 `complete` endpoint dropped `images[]`), so the hydrated SPA's image carousel (`div.carousel-root`) is scraped with the UC browser, paging through slides to defeat lazy-loading; the v2 API's `default_image` is the fallback
 - **Printables**: GraphQL `images[].filePath` → `media.printables.com/{filePath}`
 - **Thangs**: `__NEXT_DATA__` JSON → `attachments[].imageUrl`
 - **MakerWorld**: SSR `div.swiper-slide > img.swiper-lazy` src (strip resize params) or design API `pictures[]`
@@ -31,7 +31,7 @@ A persisted record of a downloaded 3D file, stored in the SQLite database and br
 A new top-level tab in the app, laid out like the History tab: searchable, paginated list of Saved 3D File cards with title, source site, match label, timestamp, and a gallery of the source site's images. No 3D rendered images are stored here.
 
 ## Site Priority
-The user-defined ordering of 3D file sites (Thingiverse, Printables, MakerWorld, Cults3D, Thangs, Yeggi) that determines which candidate link is chosen when multiple whitelisted sites appear in search results. Editable via drag-and-drop in the Settings tab using `@hello-pangea/dnd` (the project's existing DnD library). Applies to both pipelines' result ranking. Stored in localStorage.
+The user-defined ordering of 3D file sites (Thingiverse, Printables, MakerWorld, Cults3D, Thangs) that determines which candidate link is chosen when multiple whitelisted sites appear in search results. Editable via drag-and-drop in the Settings tab using `@hello-pangea/dnd` (the project's existing DnD library). Applies to both pipelines' result ranking. Stored in localStorage.
 
 ## Studio Render (Step 4)
 The fourth step of the 3D File Finder: renders the downloaded 3D model into a professional product photo — pure white background, soft grounding shadow, "Amazon hero shot" look — via headless Blender on the backend. Exactly one camera angle per render (for now).
@@ -76,22 +76,31 @@ The Testing tab is a development sandbox: every control, threshold, and intermed
 A named, multi-step market-research workflow under the Testing tab, distinct from the 3D File Finder pipelines (which find 3D files). A Research Pipeline takes a typed input (e.g. an eBay seller), collects raw per-product metrics, and produces a ranked list of Product Candidates. "Copy Seller" is the first Research Pipeline.
 
 ## Pipeline Run
-A persisted record of one execution of a Research Pipeline: its input, the ranking weights used, a timestamp, and the resulting ranked Product Candidates. Runs are saved so different weight configurations can be compared.
+A persisted record of one execution of a Research Pipeline: its input (including the metric range filters, sort choice, and date-posted range), a timestamp, and the resulting Product Candidates. Runs are saved so different filter configurations can be compared.
 
 ## Product Candidate
-A single product identified by a Research Pipeline, carrying: the seller's representative eBay listing link, a simplified search phrase, and its collected market metrics. The ranked unit of a Pipeline Run.
+A single product identified by a Research Pipeline, carrying: the seller's representative eBay listing link, a simplified search phrase, and its collected market metrics. The unit of a Pipeline Run's output.
+
+## Metric
+One measured signal about a Product Candidate. The three Metrics are the Demand Coefficient, the Competition Count, and the Sold Velocity. Each Metric may carry an optional Metric Range Filter. Metrics are independent: collecting or filtering on one does not require another.
+
+## Metric Range Filter
+An optional user-set acceptable range (minimum and/or maximum) on one Metric. A Product Candidate whose Metric value falls outside the range is removed from the results. An unset bound means "any" — the Metric does not filter. Filtering is distinct from collection: a Metric can be collected and displayed without filtering on it.
+
+## Sort Metric
+The single Metric the user picks to order the surviving Product Candidates, greatest to least. There is no composite score and no ranking across Metrics — only filtering by Metric Range Filters, then sorting by the chosen Sort Metric.
+
+## Date-Posted Range
+An optional start-and-end date range applied to the seller's own listings by their posted date (itemCreationDate), before the top-N cut and before any Metric is computed. It narrows which listings become Product Candidates.
 
 ## Demand Coefficient
-The ratio of active listings to sold listings for a Product Candidate's simplified search phrase — a proxy for how saturated vs. in-demand a product is.
+The aggregate sold quantity summed over the top K search results for a Product Candidate's simplified search phrase, divided by the total number of active listings for that phrase — a proxy for how saturated vs. in-demand a product is. Collecting it costs K eBay API calls per product (one getItem per top-K result), so it is optional and independently toggleable from the Competition Count.
 
 ## Competition Count
-The number of active listings also selling the same product (matching the Product Candidate's simplified search phrase). A standalone metric, separate from the Demand Coefficient.
+The number of active listings also selling the same product (matching the Product Candidate's simplified search phrase) — the search total. A standalone Metric, separate from the Demand Coefficient, and free to collect (no extra eBay API calls).
 
 ## Sold Velocity
-A Product Candidate's total sold quantity divided by its listing age (estimatedSoldQuantity ÷ days since itemCreationDate, both from the eBay Browse API). A proxy for how fast a product sells. Caveat: estimatedSoldQuantity is an estimate, and itemCreationDate resets on relist.
-
-## Ranking Weights
-The user-adjustable importances applied to each metric to compute a Product Candidate's rank. Weights affect scoring only, not metric collection, so re-weighting re-ranks instantly from cached metrics. Each metric is min-max normalized to 0–1 across the run's products before weighting, so a given weight means the same thing on every slider; raw values are shown alongside normalized ones. All metrics are oriented "higher is better" (Competition Count is inverted during normalization).
+A Product Candidate's total sold quantity divided by its listing age (estimatedSoldQuantity ÷ days since itemCreationDate, both from the eBay Browse API). A proxy for how fast a product sells. Free to collect (derived from data already fetched). Caveat: estimatedSoldQuantity is an estimate, and itemCreationDate resets on relist.
 
 ## eBay API Budget
 The app's eBay API usage is capped at roughly 5,000 calls per day. Research Pipelines must be designed to bound their per-run call count (top-N listing cap, top-K sold-sum cap) so a run cannot blow the daily budget.

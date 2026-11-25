@@ -18,7 +18,7 @@ from backend.downloaders.cults3d import extract_slug as cults3d_slug
 
 # Per-site validators for whether a whitelisted link points to a specific
 # product page (parseable by the site's downloader) rather than a tag/search/
-# listing page. Yeggi is an aggregator with no downloader — always accepted.
+# listing page.
 _PRODUCT_ROUTE_VALIDATORS = {
     "thingiverse.com": extract_thing_id,
     "printables.com": printables_model_id,

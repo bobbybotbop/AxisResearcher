@@ -59,3 +59,22 @@ def test_test_3d_site_images_survives_probe_exception(client, monkeypatch):
     results = res.get_json()["results"]
     assert results["cults3d.com"]["ok"] is False
     assert "browser exploded" in results["cults3d.com"]["message"]
+
+
+def test_test_3d_site_images_times_out_hanging_probe(client, monkeypatch):
+    import time
+
+    _patch_all_probes(monkeypatch)
+    monkeypatch.setattr(app_module, "_PROBE_TIMEOUT", 1)
+
+    def hang():
+        time.sleep(5)
+        return (True, "too late")
+    monkeypatch.setattr(app_module, "probe_images_thangs", hang)
+
+    res = client.get("/api/test-3d-site-images")
+    assert res.status_code == 200
+    results = res.get_json()["results"]
+    assert results["thangs.com"]["ok"] is False
+    assert "timed out" in results["thangs.com"]["message"]
+    assert results["printables.com"]["ok"] is True

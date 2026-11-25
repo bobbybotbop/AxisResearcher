@@ -15,8 +15,12 @@ then the repo-root .env), defaulting to 4000/5000 — so a worktree with its
 own ports only ever kills its own dev servers, never the main checkout's
 or another worktree's.
 
-Sockets left in TIME_WAIT by Windows (PID 0) cannot be killed; the script
-reports them and waits for the bind to succeed instead.
+Sockets left behind by a dead process (zombie LISTENING / TIME_WAIT, often
+PID 0 or a PID that no longer exists) cannot be killed — only Windows can
+reap them. Instead of failing immediately, the script waits and retries the
+bind for up to WAIT_TIMEOUT_SECONDS, which is almost always enough for the
+OS to release the port. It only exits non-zero if the port is still blocked
+after the wait.
 
 Usage:
     python scripts/force_close_ports.py
@@ -54,6 +58,11 @@ def _project_ports() -> tuple[int, int]:
 FRONTEND_PORT, BACKEND_PORT = _project_ports()
 FRONTEND_PORTS = range(FRONTEND_PORT, FRONTEND_PORT + 11)  # Vite walks 4000, 4001, ... when busy
 ALL_PORTS = (BACKEND_PORT, *FRONTEND_PORTS)
+
+# How long to wait for Windows to reap a dead process's socket before giving
+# up. Windows releases these within ~2 minutes; 120s covers the worst case.
+WAIT_TIMEOUT_SECONDS = 120
+WAIT_POLL_SECONDS = 2
 
 
 def _run(cmd, timeout=20):
@@ -102,6 +111,32 @@ def _stale_project_pids() -> set[str]:
     return {line.strip() for line in result.stdout.splitlines() if line.strip().isdigit()}
 
 
+def _ancestor_pids() -> set[str]:
+    """PIDs of this process's whole parent chain (npm, concurrently, shell, ...).
+
+    The script must never kill these: killing our own launcher tears down the
+    very `npm run dev` tree that invoked us, so the run dies mid-way.
+    """
+    result = _run([
+        "powershell", "-NoProfile", "-Command",
+        "$p = Get-CimInstance Win32_Process -Filter \"ProcessId=$env:PID\" 2>$null; "
+        f"$id = {os.getpid()}; "
+        "$chain = @(); "
+        "while ($id) { "
+        "  $proc = Get-CimInstance Win32_Process -Filter \"ProcessId=$id\" 2>$null; "
+        "  if (-not $proc) { break }; "
+        "  $chain += $proc.ProcessId; "
+        "  $id = $proc.ParentProcessId "
+        "}; "
+        "$chain",
+    ])
+    if not result or not result.stdout:
+        return {str(os.getpid())}
+    chain = {line.strip() for line in result.stdout.splitlines() if line.strip().isdigit()}
+    chain.add(str(os.getpid()))
+    return chain
+
+
 def _port_is_free(port: int) -> bool:
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
@@ -114,13 +149,16 @@ def _port_is_free(port: int) -> bool:
 
 
 def force_close() -> None:
-    own_pid = str(os.getpid())
     killed: set[str] = set()
 
     port_hits = _pids_on_ports()
     stale = _stale_project_pids()
 
-    targets = (set(port_hits) | stale) - {own_pid}
+    # Never kill our own process or any ancestor (npm / concurrently / shell):
+    # doing so tears down the very `npm run dev` tree that launched us.
+    protected = _ancestor_pids()
+
+    targets = (set(port_hits) | stale) - protected
 
     if not targets:
         print("No stale project processes or port holders found.")
@@ -139,16 +177,35 @@ def force_close() -> None:
         time.sleep(1)
 
     blocked = [p for p in (FRONTEND_PORT, BACKEND_PORT) if not _port_is_free(p)]
-    if blocked:
-        print(
-            f"\nWARNING: port(s) {blocked} still refuse a bind — most likely "
-            "sockets stuck in TIME_WAIT (unowned, cannot be killed).\n"
-            "Windows releases them within ~2 minutes. Wait a moment and run "
-            "`npm run dev` again."
-        )
-        sys.exit(1)
+    if not blocked:
+        print(f"All project ports are free (backend :{BACKEND_PORT}, frontend :{FRONTEND_PORT}).")
+        return
 
-    print(f"All project ports are free (backend :{BACKEND_PORT}, frontend :{FRONTEND_PORT}).")
+    # A port is still blocked but there is no live process to kill: a dead
+    # process left its socket behind (zombie LISTENING / TIME_WAIT). Only
+    # Windows can reap it, so wait and retry the bind instead of failing.
+    print(
+        f"\nPort(s) {blocked} are held by a dead process's socket (no live PID to kill).\n"
+        f"Waiting up to {WAIT_TIMEOUT_SECONDS}s for Windows to release them ..."
+    )
+    deadline = time.monotonic() + WAIT_TIMEOUT_SECONDS
+    while True:
+        blocked = [p for p in (FRONTEND_PORT, BACKEND_PORT) if not _port_is_free(p)]
+        if not blocked:
+            print(f"All project ports are free (backend :{BACKEND_PORT}, frontend :{FRONTEND_PORT}).")
+            return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        print(f"  still blocked: {blocked} ({int(remaining)}s left) ...", end="\r")
+        time.sleep(min(WAIT_POLL_SECONDS, remaining))
+
+    print(
+        f"\nERROR: port(s) {blocked} still refuse a bind after {WAIT_TIMEOUT_SECONDS}s.\n"
+        "A process outside this project may be holding them. Check with:\n"
+        "  netstat -ano | findstr " + " ".join(f":{p}" for p in blocked)
+    )
+    sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -67,7 +67,8 @@ import type { ImageModelOption } from "./constants/models";
 import { TAB_PATHS } from "./constants/routes";
 import { createPlaceholderImageDataUrl, renderPlaceholderImagePngBlob } from "./constants/placeholder";
 import type { TabName } from "./constants/routes";
-import { THREE_D_SITES, THREE_D_SITE_STATUS_STORAGE_KEY, THREE_D_SITE_TESTED_AT_STORAGE_KEY, THREE_D_SITE_IMAGE_STATUS_STORAGE_KEY, THREE_D_SITES_ENABLED_STORAGE_KEY, THREE_D_SITE_PRIORITY_STORAGE_KEY, normalizeThreeDSitePriority, PIPELINE_IMAGE_SEARCH, PIPELINE_TITLE_SEARCH, MATCH_LABEL_CONFIRMED_IMAGE_MATCH, MATCH_LABEL_UNCONFIRMED_TITLE_MATCH } from "./constants/files3d";
+import { THREE_D_SITES, THREE_D_SITE_STATUS_STORAGE_KEY, THREE_D_SITE_TESTED_AT_STORAGE_KEY, THREE_D_SITE_IMAGE_STATUS_STORAGE_KEY, THREE_D_SITES_ENABLED_STORAGE_KEY, THREE_D_SITE_PRIORITY_STORAGE_KEY, normalizeThreeDSitePriority, PIPELINE_IMAGE_SEARCH, PIPELINE_TITLE_SEARCH, MATCH_LABEL_CONFIRMED_IMAGE_MATCH, MATCH_LABEL_UNCONFIRMED_TITLE_MATCH, THREE_D_AUTH_SITE_API_PREFIX } from "./constants/files3d";
+import type { ThreeDAuthSite, ThreeDCredentialStatus } from "./constants/files3d";
 import { DEFAULT_OPERATION_COOLDOWN_HOURS, EBAY_STARTUP_SYNCED_AT_STORAGE_KEY, EBAY_STARTUP_SYNC_EVENT, IMPORT_SYNC_COOLDOWN_MS, MS_PER_HOUR, STOCK_QUANTITIES_STORAGE_KEY, STOCK_REFRESHED_AT_STORAGE_KEY } from "./constants/cooldown";
 import type { EbayStartupSyncSummary } from "./constants/cooldown";
 import type { ThreeDSiteStatus, Pipeline, MatchLabel } from "./constants/files3d";
@@ -386,23 +387,13 @@ function App() {
     operationCooldownHoursRef.current = hours;
     setOperationCooldownHours(hours);
   };
-  const [cults3dCredStatus, setCults3dCredStatus] = useState<{ has_credentials: boolean; auth_type: string | null; email: string } | null>(null);
-  const [cults3dCredFormOpen, setCults3dCredFormOpen] = useState(false);
-  const [cults3dCookiesInput, setCults3dCookiesInput] = useState("");
-  const [cults3dEmailInput, setCults3dEmailInput] = useState("");
-  const [cults3dPasswordInput, setCults3dPasswordInput] = useState("");
-  const [cults3dCredSaving, setCults3dCredSaving] = useState(false);
-  const [cults3dCredMessage, setCults3dCredMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [makerworldCredStatus, setMakerworldCredStatus] = useState<{ has_credentials: boolean; auth_type: string | null; email: string; profile_present?: boolean } | null>(null);
-  const [makerworldCredFormOpen, setMakerworldCredFormOpen] = useState(false);
-  const [makerworldEmailInput, setMakerworldEmailInput] = useState("");
-  const [makerworldPasswordInput, setMakerworldPasswordInput] = useState("");
-  const [makerworldCredSaving, setMakerworldCredSaving] = useState(false);
-  const [makerworldCredMessage, setMakerworldCredMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [makerworldSessionOpen, setMakerworldSessionOpen] = useState(false);
-  const [makerworldSessionMessage, setMakerworldSessionMessage] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
-  const [makerworldRetesting, setMakerworldRetesting] = useState(false);
-  const makerworldSessionPollRef = useRef<number | null>(null);
+  const [cults3dCredStatus, setCults3dCredStatus] = useState<ThreeDCredentialStatus | null>(null);
+  const [makerworldCredStatus, setMakerworldCredStatus] = useState<ThreeDCredentialStatus | null>(null);
+  // Browser sign-in session state per auth site ("Sign in" button flow)
+  const [siteSessionOpen, setSiteSessionOpen] = useState<Partial<Record<ThreeDAuthSite, boolean>>>({});
+  const [siteSessionMessage, setSiteSessionMessage] = useState<Partial<Record<ThreeDAuthSite, { type: "success" | "error" | "info"; text: string } | null>>>({});
+  const [siteRetesting, setSiteRetesting] = useState<Partial<Record<ThreeDAuthSite, boolean>>>({});
+  const siteSessionPollRefs = useRef<Partial<Record<ThreeDAuthSite, number>>>({});
   const [autoPromoteEnabled, setAutoPromoteEnabled] = useState(true);
   const [promotedListingAdRate, setPromotedListingAdRate] = useState(7.0);
   const [bgRemovedPhotos, setBgRemovedPhotos] = useState<Record<string, string>>({});
@@ -3134,7 +3125,7 @@ function App() {
   const fetchCults3dCredStatus = useCallback(async (): Promise<void> => {
     try {
       const res = await fetch("/api/cults3d-credential-status");
-      const data = await res.json() as { has_credentials: boolean; auth_type: string | null; email: string };
+      const data = await res.json() as ThreeDCredentialStatus;
       setCults3dCredStatus(data);
     } catch {
       setCults3dCredStatus({ has_credentials: false, auth_type: null, email: "" });
@@ -3145,68 +3136,10 @@ function App() {
     if (activeTab === "settings") fetchCults3dCredStatus();
   }, [activeTab, fetchCults3dCredStatus]);
 
-  const handleSaveCults3dCreds = useCallback(async (): Promise<void> => {
-    const cookies = cults3dCookiesInput.trim();
-    if (!cookies) {
-      setCults3dCredMessage({ type: "error", text: "Cookie string is required." });
-      return;
-    }
-    setCults3dCredSaving(true);
-    setCults3dCredMessage(null);
-    try {
-      const res = await fetch("/api/cults3d-credentials", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cookies }),
-      });
-      const data = await res.json() as { error?: string };
-      if (!res.ok || data.error) throw new Error(data.error || "Failed to save cookies");
-      setCults3dCookiesInput("");
-      setCults3dCredFormOpen(false);
-      setCults3dCredMessage({ type: "success", text: "Cookies saved." });
-      await fetchCults3dCredStatus();
-    } catch (err) {
-      setCults3dCredMessage({ type: "error", text: (err as Error).message || "Failed to save cookies" });
-    } finally {
-      setCults3dCredSaving(false);
-    }
-  }, [cults3dCookiesInput, fetchCults3dCredStatus]);
-
-  const handleSaveCults3dEmailCreds = useCallback(async (): Promise<void> => {
-    const email = cults3dEmailInput.trim();
-    const password = cults3dPasswordInput.trim();
-    if (!email || !password) {
-      setCults3dCredMessage({ type: "error", text: "Email and password are required." });
-      return;
-    }
-    setCults3dCredSaving(true);
-    setCults3dCredMessage(null);
-    try {
-      const res = await fetch("/api/cults3d-email-credentials", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      const data = await res.json() as { error?: string };
-      if (!res.ok || data.error) throw new Error(data.error || "Failed to save credentials");
-      setCults3dEmailInput("");
-      setCults3dPasswordInput("");
-      setCults3dCredFormOpen(false);
-      setCults3dCredMessage({ type: "success", text: "Email credentials saved." });
-      await fetchCults3dCredStatus();
-    } catch (err) {
-      setCults3dCredMessage({ type: "error", text: (err as Error).message || "Failed to save credentials" });
-    } finally {
-      setCults3dCredSaving(false);
-    }
-  }, [cults3dEmailInput, cults3dPasswordInput, fetchCults3dCredStatus]);
-
-  const [cults3dAutoLoading, setCults3dAutoLoading] = useState(false);
-
   const fetchMakerworldCredStatus = useCallback(async (): Promise<void> => {
     try {
       const res = await fetch("/api/makerworld-credential-status");
-      const data = await res.json() as { has_credentials: boolean; auth_type: string | null; email: string; profile_present?: boolean };
+      const data = await res.json() as ThreeDCredentialStatus;
       setMakerworldCredStatus(data);
     } catch {
       setMakerworldCredStatus({ has_credentials: false, auth_type: null, email: "" });
@@ -3217,134 +3150,110 @@ function App() {
     if (activeTab === "settings") fetchMakerworldCredStatus();
   }, [activeTab, fetchMakerworldCredStatus]);
 
-  const handleSaveMakerworldEmailCreds = useCallback(async (): Promise<void> => {
-    const email = makerworldEmailInput.trim();
-    const password = makerworldPasswordInput.trim();
-    if (!email || !password) {
-      setMakerworldCredMessage({ type: "error", text: "Email and password are required." });
-      return;
-    }
-    setMakerworldCredSaving(true);
-    setMakerworldCredMessage(null);
-    try {
-      const res = await fetch("/api/makerworld-email-credentials", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-      const data = await res.json() as { error?: string };
-      if (!res.ok || data.error) throw new Error(data.error || "Failed to save credentials");
-      setMakerworldEmailInput("");
-      setMakerworldPasswordInput("");
-      setMakerworldCredFormOpen(false);
-      setMakerworldCredMessage({ type: "success", text: "Email credentials saved." });
-      await fetchMakerworldCredStatus();
-    } catch (err) {
-      setMakerworldCredMessage({ type: "error", text: (err as Error).message || "Failed to save credentials" });
-    } finally {
-      setMakerworldCredSaving(false);
-    }
-  }, [makerworldEmailInput, makerworldPasswordInput, fetchMakerworldCredStatus]);
+  // --- Browser sign-in flow for the auth 3D sites ---------------------------
+  // One "Sign in" button per site: opens a headed browser on the site's login
+  // page; the user logs in; closing the window saves the session (cookies,
+  // Cloudflare clearance) to the site's persistent browser profile, then the
+  // pipeline is re-tested automatically.
 
-  const stopMakerworldSessionPoll = useCallback((): void => {
-    if (makerworldSessionPollRef.current !== null) {
-      window.clearInterval(makerworldSessionPollRef.current);
-      makerworldSessionPollRef.current = null;
+  const setSiteSessionMsg = useCallback((site: ThreeDAuthSite, msg: { type: "success" | "error" | "info"; text: string } | null): void => {
+    setSiteSessionMessage(prev => ({ ...prev, [site]: msg }));
+  }, []);
+
+  const stopSiteSessionPoll = useCallback((site: ThreeDAuthSite): void => {
+    const id = siteSessionPollRefs.current[site];
+    if (id !== undefined) {
+      window.clearInterval(id);
+      siteSessionPollRefs.current[site] = undefined;
     }
   }, []);
 
-  const handleRetestMakerworld = useCallback(async (): Promise<void> => {
-    setMakerworldRetesting(true);
-    setMakerworldSessionMessage({ type: "info", text: "Re-testing the MakerWorld pipeline..." });
+  const refreshSiteCredStatus = useCallback(async (site: ThreeDAuthSite): Promise<void> => {
+    if (site === "cults3d.com") await fetchCults3dCredStatus();
+    else await fetchMakerworldCredStatus();
+  }, [fetchCults3dCredStatus, fetchMakerworldCredStatus]);
+
+  const handleRetestSite = useCallback(async (site: ThreeDAuthSite): Promise<void> => {
+    const api = THREE_D_AUTH_SITE_API_PREFIX[site];
+    setSiteRetesting(prev => ({ ...prev, [site]: true }));
+    setSiteSessionMsg(site, { type: "info", text: `Re-testing the ${site} pipeline...` });
     try {
-      const res = await fetch("/api/makerworld-probe", { method: "POST" });
+      const res = await fetch(`/api/${api}-probe`, { method: "POST" });
       const data = await res.json() as { ok: boolean; message: string };
       setThreeDSiteStatus((prev) => {
-        const next = { ...prev, "makerworld.com": { ok: data.ok, message: data.message } };
+        const next = { ...prev, [site]: { ok: data.ok, message: data.message } };
         try { localStorage.setItem(THREE_D_SITE_STATUS_STORAGE_KEY, JSON.stringify(next)); } catch { /* ignore */ }
         return next;
       });
-      setMakerworldSessionMessage({
+      setSiteSessionMsg(site, {
         type: data.ok ? "success" : "error",
         text: data.ok ? `Pipeline working — ${data.message}` : `Still broken: ${data.message}`,
       });
-      void fetchMakerworldCredStatus();
+      void refreshSiteCredStatus(site);
     } catch {
-      setMakerworldSessionMessage({ type: "error", text: "Re-test request failed" });
+      setSiteSessionMsg(site, { type: "error", text: "Re-test request failed" });
     } finally {
-      setMakerworldRetesting(false);
+      setSiteRetesting(prev => ({ ...prev, [site]: false }));
     }
-  }, [fetchMakerworldCredStatus]);
+  }, [setSiteSessionMsg, refreshSiteCredStatus]);
 
-  const handleOpenMakerworldBrowser = useCallback(async (): Promise<void> => {
-    setMakerworldSessionMessage(null);
+  const handleOpenSiteBrowser = useCallback(async (site: ThreeDAuthSite): Promise<void> => {
+    const api = THREE_D_AUTH_SITE_API_PREFIX[site];
+    setSiteSessionMsg(site, null);
     try {
-      const res = await fetch("/api/makerworld-session/open", {
+      const res = await fetch(`/api/${api}-session/open`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
       const data = await res.json() as { error?: string; message?: string };
       if (!res.ok || data.error) throw new Error(data.error || "Failed to open browser");
-      setMakerworldSessionOpen(true);
-      setMakerworldSessionMessage({ type: "info", text: data.message || "Browser open." });
-      stopMakerworldSessionPoll();
-      makerworldSessionPollRef.current = window.setInterval(() => {
+      setSiteSessionOpen(prev => ({ ...prev, [site]: true }));
+      setSiteSessionMsg(site, { type: "info", text: data.message || "Browser open." });
+      stopSiteSessionPoll(site);
+      siteSessionPollRefs.current[site] = window.setInterval(() => {
         void (async () => {
           try {
-            const sres = await fetch("/api/makerworld-session/status");
+            const sres = await fetch(`/api/${api}-session/status`);
             const sdata = await sres.json() as { open: boolean; logged_in?: boolean | null };
             if (sdata.open) {
               if (sdata.logged_in === true) {
-                setMakerworldSessionMessage({ type: "info", text: "Logged in — close the window (or click Done) to save the session and re-test." });
+                setSiteSessionMsg(site, { type: "info", text: "Logged in — close the window (or click Done) to save the session and re-test." });
               }
               return;
             }
             // The user closed the window — session ended; re-test the pipeline.
-            stopMakerworldSessionPoll();
-            setMakerworldSessionOpen(false);
-            void handleRetestMakerworld();
+            stopSiteSessionPoll(site);
+            setSiteSessionOpen(prev => ({ ...prev, [site]: false }));
+            void handleRetestSite(site);
           } catch {
             // transient poll failure — keep polling
           }
         })();
       }, 2000);
     } catch (err) {
-      setMakerworldSessionMessage({ type: "error", text: (err as Error).message || "Failed to open browser" });
+      setSiteSessionMsg(site, { type: "error", text: (err as Error).message || "Failed to open browser" });
     }
-  }, [stopMakerworldSessionPoll, handleRetestMakerworld]);
+  }, [setSiteSessionMsg, stopSiteSessionPoll, handleRetestSite]);
 
-  const handleCloseMakerworldBrowser = useCallback(async (): Promise<void> => {
+  const handleCloseSiteBrowser = useCallback(async (site: ThreeDAuthSite): Promise<void> => {
+    const api = THREE_D_AUTH_SITE_API_PREFIX[site];
     try {
-      await fetch("/api/makerworld-session/close", { method: "POST" });
+      await fetch(`/api/${api}-session/close`, { method: "POST" });
     } catch { /* ignore */ }
-    stopMakerworldSessionPoll();
-    setMakerworldSessionOpen(false);
-    void handleRetestMakerworld();
-  }, [stopMakerworldSessionPoll, handleRetestMakerworld]);
+    stopSiteSessionPoll(site);
+    setSiteSessionOpen(prev => ({ ...prev, [site]: false }));
+    void handleRetestSite(site);
+  }, [stopSiteSessionPoll, handleRetestSite]);
 
   useEffect(() => {
+    const refs = siteSessionPollRefs.current;
     return () => {
-      if (makerworldSessionPollRef.current !== null) window.clearInterval(makerworldSessionPollRef.current);
+      for (const id of Object.values(refs)) {
+        if (id !== undefined) window.clearInterval(id);
+      }
     };
   }, []);
-
-  const handleAutoLoadCults3dCookies = useCallback(async (): Promise<void> => {
-    setCults3dAutoLoading(true);
-    setCults3dCredMessage(null);
-    try {
-      const res = await fetch("/api/cults3d-auto-load-cookies", { method: "POST" });
-      const data = await res.json() as { error?: string; message?: string };
-      if (!res.ok || data.error) throw new Error(data.error || "Failed to auto-load cookies");
-      setCults3dCredFormOpen(false);
-      setCults3dCredMessage({ type: "success", text: data.message || "Cookies loaded from browser." });
-      await fetchCults3dCredStatus();
-    } catch (err) {
-      setCults3dCredMessage({ type: "error", text: (err as Error).message || "Auto-load failed" });
-    } finally {
-      setCults3dAutoLoading(false);
-    }
-  }, [fetchCults3dCredStatus]);
 
   const openPromptModal = useCallback((type: string, slot: string | null = null): void => {
     setPromptModalType(type);
@@ -5025,169 +4934,32 @@ function App() {
                                           <span className="rounded bg-surface-hover px-2 py-0.5 text-xs font-semibold text-text-muted">Images: Not tested</span>
                                         )}
                               {requiresAuth && credStatus !== null && (
-                                <span className={`rounded px-2 py-0.5 text-xs font-semibold ${credStatus.has_credentials ? "bg-emerald-100 text-emerald-900" : "bg-amber-100 text-amber-900"}`}>
-                                  {credStatus.has_credentials
-                                    ? credStatus.auth_type === "email"
-                                      ? `Email: ${credStatus.email}`
-                                      : "Cookies set"
-                                    : "Not configured"}
+                                <span className={`rounded px-2 py-0.5 text-xs font-semibold ${(credStatus.has_credentials || credStatus.profile_present) ? "bg-emerald-100 text-emerald-900" : "bg-amber-100 text-amber-900"}`}>
+                                  {(credStatus.has_credentials || credStatus.profile_present) ? "Sign-in saved" : "Not configured"}
                                 </span>
                               )}
                               {(isCults3d || isMakerworld) && (
                                 <button
                                   type="button"
-                                  className="cursor-pointer rounded px-2 py-0.5 text-xs font-semibold text-text-secondary underline-offset-2 hover:text-text-primary hover:underline"
-                                  onClick={() => {
-                                    if (isCults3d) {
-                                      setCults3dCredFormOpen((v) => !v);
-                                      setCults3dCredMessage(null);
-                                    } else {
-                                      setMakerworldCredFormOpen((v) => !v);
-                                      setMakerworldCredMessage(null);
-                                    }
-                                  }}
-                                >
-                                  {(isCults3d ? cults3dCredFormOpen : makerworldCredFormOpen) ? "Cancel" : credStatus?.has_credentials ? "Update" : "Configure"}
-                                </button>
-                              )}
-                              {isMakerworld && (
-                                <button
-                                  type="button"
                                   className="cursor-pointer rounded px-2 py-0.5 text-xs font-semibold text-text-secondary underline-offset-2 hover:text-text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-50"
-                                  onClick={() => void (makerworldSessionOpen ? handleCloseMakerworldBrowser() : handleOpenMakerworldBrowser())}
-                                  disabled={makerworldRetesting}
-                                  title="Opens a headed browser at the step the pipeline is stuck on so you can fix it yourself — the session is saved when you close it"
+                                  onClick={() => void (siteSessionOpen[site as ThreeDAuthSite] ? handleCloseSiteBrowser(site as ThreeDAuthSite) : handleOpenSiteBrowser(site as ThreeDAuthSite))}
+                                  disabled={siteRetesting[site as ThreeDAuthSite]}
+                                  title="Opens a browser on the site's login page — log in there and the session is saved automatically when you close it"
                                 >
-                                  {makerworldRetesting ? "Re-testing..." : makerworldSessionOpen ? "Done — close & re-test" : "Open browser"}
+                                  {siteRetesting[site as ThreeDAuthSite]
+                                    ? "Re-testing..."
+                                    : siteSessionOpen[site as ThreeDAuthSite]
+                                      ? "Done — close & re-test"
+                                      : (credStatus?.has_credentials || credStatus?.profile_present)
+                                        ? "Re-sign in"
+                                        : "Sign in"}
                                 </button>
                               )}
                             </div>
                           </div>
-                          {isCults3d && cults3dCredFormOpen && (
-                            <div className="flex flex-col gap-4 border-t border-border-default pt-3">
-                              {/* Email / password — recommended */}
-                              <div className="flex flex-col gap-1.5">
-                                <p className="text-xs font-semibold text-text-primary">Email &amp; password <span className="font-normal text-text-muted">(recommended — stays working without any manual steps)</span></p>
-                                <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-                                  <input
-                                    type="email"
-                                    placeholder="Email"
-                                    value={cults3dEmailInput}
-                                    onChange={(e) => setCults3dEmailInput(e.target.value)}
-                                    disabled={cults3dCredSaving || cults3dAutoLoading}
-                                    className="flex-1 rounded border border-border-default bg-surface-hover px-2 py-1 text-sm text-text-primary focus:border-primary focus:outline-none disabled:opacity-50"
-                                    autoComplete="username"
-                                  />
-                                  <input
-                                    type="password"
-                                    placeholder="Password"
-                                    value={cults3dPasswordInput}
-                                    onChange={(e) => setCults3dPasswordInput(e.target.value)}
-                                    disabled={cults3dCredSaving || cults3dAutoLoading}
-                                    className="flex-1 rounded border border-border-default bg-surface-hover px-2 py-1 text-sm text-text-primary focus:border-primary focus:outline-none disabled:opacity-50"
-                                    autoComplete="current-password"
-                                    onKeyDown={(e) => { if (e.key === "Enter") void handleSaveCults3dEmailCreds(); }}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => void handleSaveCults3dEmailCreds()}
-                                    disabled={cults3dCredSaving || cults3dAutoLoading}
-                                    className="cursor-pointer rounded bg-primary px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    {cults3dCredSaving ? "Saving..." : "Save"}
-                                  </button>
-                                </div>
-                              </div>
-                              {/* Cookie options */}
-                              <div className="flex flex-col gap-2">
-                                <p className="text-xs font-semibold text-text-primary">Browser cookies <span className="font-normal text-text-muted">(manual — must re-paste when session expires)</span></p>
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    type="button"
-                                    onClick={() => void handleAutoLoadCults3dCookies()}
-                                    disabled={cults3dAutoLoading || cults3dCredSaving}
-                                    className="cursor-pointer rounded border border-border-default bg-surface-panel px-3 py-1 text-xs font-semibold text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    {cults3dAutoLoading ? "Loading..." : "Auto-load from browser"}
-                                  </button>
-                                  <span className="text-xs text-text-muted">Firefox only — Chrome 127+ requires admin</span>
-                                </div>
-                                <p className="text-xs text-text-muted">Or paste manually: DevTools (F12) &gt; Network &gt; any request &gt; <code>Cookie:</code> header</p>
-                                <textarea
-                                  placeholder="_cult_session=...; ..."
-                                  value={cults3dCookiesInput}
-                                  onChange={(e) => setCults3dCookiesInput(e.target.value)}
-                                  disabled={cults3dCredSaving || cults3dAutoLoading}
-                                  rows={2}
-                                  className="w-full rounded border border-border-default bg-surface-hover px-2 py-1 font-mono text-xs text-text-primary focus:border-primary focus:outline-none disabled:opacity-50"
-                                  spellCheck={false}
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => void handleSaveCults3dCreds()}
-                                  disabled={cults3dCredSaving || cults3dAutoLoading}
-                                  className="self-start cursor-pointer rounded border border-border-default bg-surface-panel px-3 py-1 text-xs font-semibold text-text-primary transition-colors hover:bg-surface-hover disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  {cults3dCredSaving ? "Saving..." : "Save cookies"}
-                                </button>
-                              </div>
-                              {cults3dCredMessage && (
-                                <span className={`text-xs font-medium ${cults3dCredMessage.type === "success" ? "text-emerald-600" : "text-red-600"}`}>
-                                  {cults3dCredMessage.text}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          {isCults3d && !cults3dCredFormOpen && cults3dCredMessage?.type === "success" && (
-                            <span className="text-xs font-medium text-emerald-600">{cults3dCredMessage.text}</span>
-                          )}
-                          {isMakerworld && makerworldCredFormOpen && (
-                            <div className="flex flex-col gap-4 border-t border-border-default pt-3">
-                              <div className="flex flex-col gap-1.5">
-                                <p className="text-xs font-semibold text-text-primary">Email &amp; password <span className="font-normal text-text-muted">(Bambu Lab account — the session persists in a local browser profile, no manual steps after first login)</span></p>
-                                <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:gap-2">
-                                  <input
-                                    type="email"
-                                    placeholder="Email"
-                                    value={makerworldEmailInput}
-                                    onChange={(e) => setMakerworldEmailInput(e.target.value)}
-                                    disabled={makerworldCredSaving}
-                                    className="flex-1 rounded border border-border-default bg-surface-hover px-2 py-1 text-sm text-text-primary focus:border-primary focus:outline-none disabled:opacity-50"
-                                    autoComplete="username"
-                                  />
-                                  <input
-                                    type="password"
-                                    placeholder="Password"
-                                    value={makerworldPasswordInput}
-                                    onChange={(e) => setMakerworldPasswordInput(e.target.value)}
-                                    disabled={makerworldCredSaving}
-                                    className="flex-1 rounded border border-border-default bg-surface-hover px-2 py-1 text-sm text-text-primary focus:border-primary focus:outline-none disabled:opacity-50"
-                                    autoComplete="current-password"
-                                    onKeyDown={(e) => { if (e.key === "Enter") void handleSaveMakerworldEmailCreds(); }}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={() => void handleSaveMakerworldEmailCreds()}
-                                    disabled={makerworldCredSaving}
-                                    className="cursor-pointer rounded bg-primary px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    {makerworldCredSaving ? "Saving..." : "Save"}
-                                  </button>
-                                </div>
-                              </div>
-                              {makerworldCredMessage && (
-                                <span className={`text-xs font-medium ${makerworldCredMessage.type === "success" ? "text-emerald-600" : "text-red-600"}`}>
-                                  {makerworldCredMessage.text}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          {isMakerworld && !makerworldCredFormOpen && makerworldCredMessage?.type === "success" && (
-                            <span className="text-xs font-medium text-emerald-600">{makerworldCredMessage.text}</span>
-                          )}
-                          {isMakerworld && makerworldSessionMessage && (
-                            <span className={`text-xs font-medium ${makerworldSessionMessage.type === "success" ? "text-emerald-600" : makerworldSessionMessage.type === "error" ? "text-red-600" : "text-text-muted"}`}>
-                              {makerworldSessionMessage.text}
+                          {(isCults3d || isMakerworld) && siteSessionMessage[site as ThreeDAuthSite] && (
+                            <span className={`text-xs font-medium ${siteSessionMessage[site as ThreeDAuthSite]!.type === "success" ? "text-emerald-600" : siteSessionMessage[site as ThreeDAuthSite]!.type === "error" ? "text-red-600" : "text-text-muted"}`}>
+                              {siteSessionMessage[site as ThreeDAuthSite]!.text}
                             </span>
                           )}
                                   </div>

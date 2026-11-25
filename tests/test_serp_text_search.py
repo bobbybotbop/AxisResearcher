@@ -127,8 +127,8 @@ def test_classify_site_product_route_validation():
     assert _classify_site("https://thangs.com/designer/foo/3d-model/Foo-1412046") == SITE_TYPE_WHITELISTED
     assert _classify_site("https://makerworld.com/en/models/2462393") == SITE_TYPE_WHITELISTED
     assert _classify_site("https://cults3d.com/en/3d-model/tool/benchy") == SITE_TYPE_WHITELISTED
-    # Yeggi has no downloader — always accepted
-    assert _classify_site("https://www.yeggi.com/q/benchy/") == SITE_TYPE_WHITELISTED
+    # Yeggi was removed from the whitelist — its aggregator links are neutral
+    assert _classify_site("https://www.yeggi.com/q/benchy/") == "neutral"
     # Whitelisted domains on non-product routes become blacklisted
     assert _classify_site("https://www.printables.com/tag/dillon") == "blacklisted"
     assert _classify_site("https://www.thingiverse.com/tag:benchy") == "blacklisted"

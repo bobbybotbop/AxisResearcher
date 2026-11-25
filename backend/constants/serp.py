@@ -5,7 +5,6 @@ SITE_TYPE_NEUTRAL = "neutral"
 WHITELISTED_SITES = [
     "makerworld.com",
     "printables.com",
-    "yeggi.com",
     "cults3d.com",
     "thingiverse.com",
     "thangs.com",
@@ -24,7 +23,7 @@ BLACKLISTED_SITES = [
 ]
 
 # Domains excluded from the text-search query itself via -site: clauses.
-# Includes every blacklisted domain plus yeggi: yeggi stays whitelisted as a
-# result source (its aggregator links are valid), but its own pages tend to
-# crowd out the source sites it aggregates, so it's excluded from the query.
+# Includes every blacklisted domain plus yeggi: yeggi is an aggregator whose
+# pages crowd out the source sites it aggregates and have no downloader, so
+# it's excluded from the query entirely.
 QUERY_EXCLUDED_SITES = BLACKLISTED_SITES + ["yeggi.com"]

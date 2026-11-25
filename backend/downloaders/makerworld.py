@@ -38,6 +38,11 @@ from urllib.parse import quote
 import requests
 from dotenv import load_dotenv
 
+try:
+    from .browser_reaper import BROWSER_SESSION_LOCK, is_browser_death, reap_stale_profile_chromes
+except ImportError:
+    from browser_reaper import BROWSER_SESSION_LOCK, is_browser_death, reap_stale_profile_chromes
+
 # Load .env so MAKERWORLD_EMAIL / MAKERWORLD_PASSWORD are available when the
 # downloader is used outside the Flask app (CLI, tests).
 load_dotenv()
@@ -242,7 +247,7 @@ def _do_login(sb, email: str, password: str, headless: bool) -> None:
                 if headless:
                     raise RuntimeError(
                         "MakerWorld requires an email verification code for this login. "
-                        "Open Settings > 3D File Sites and click 'Open browser' to type "
+                        "Open Settings > 3D File Sites and click 'Sign in' to type "
                         "the code into a headed browser window; the session then persists."
                     )
                 if not verification_seen:
@@ -256,7 +261,10 @@ def _do_login(sb, email: str, password: str, headless: bool) -> None:
         sb.sleep(1)
 
     if not _is_logged_in(sb):
-        raise RuntimeError("MakerWorld login failed. Check your credentials in Settings > 3D File Sites.")
+        raise RuntimeError(
+            "MakerWorld login failed. "
+            "Open Settings > 3D File Sites and click 'Sign in' to log in via the browser."
+        )
 
 
 def _ensure_logged_in(sb, email: str | None, password: str | None, headless: bool) -> None:
@@ -265,7 +273,7 @@ def _ensure_logged_in(sb, email: str | None, password: str | None, headless: boo
     if not email or not password:
         raise RuntimeError(
             "MakerWorld login required to download models. "
-            "Add your email and password in Settings > 3D File Sites."
+            "Open Settings > 3D File Sites and click 'Sign in' to log in via the browser."
         )
     _do_login(sb, email, password, headless)
 
@@ -322,6 +330,7 @@ def _download_attempt(
         headless2=headless,
         user_data_dir=_PROFILE_DIR,
         locale_code="en",
+        ad_block=True,  # ad-heavy pages can crash the browser mid-run
     ) as sb:
         sb.uc_open_with_reconnect(link, 4)
         if not _wait_for_cloudflare(sb, 20):
@@ -377,14 +386,24 @@ def download_3mf(link_or_design_id: str, instance_id: str | None = None) -> tupl
     password = os.environ.get("MAKERWORLD_PASSWORD", "").strip() or None
 
     with _PROFILE_LOCK:
-        if not _HEADLESS:
-            return _download_attempt(link, instance_id, email, password, headless=False)
+        with BROWSER_SESSION_LOCK:
+            for attempt in range(2):
+                reap_stale_profile_chromes(_PROFILE_DIR)
+                try:
+                    if not _HEADLESS:
+                        return _download_attempt(link, instance_id, email, password, headless=False)
 
-        # Headless first; fall back to one headed attempt if Cloudflare blocks it.
-        try:
-            return _download_attempt(link, instance_id, email, password, headless=True)
-        except _CloudflareBlocked:
-            return _download_attempt(link, instance_id, email, password, headless=False)
+                    # Headless first; fall back to one headed attempt if Cloudflare blocks it.
+                    try:
+                        return _download_attempt(link, instance_id, email, password, headless=True)
+                    except _CloudflareBlocked:
+                        return _download_attempt(link, instance_id, email, password, headless=False)
+                except Exception as e:
+                    if attempt == 0 and is_browser_death(e):
+                        print(f"[makerworld] browser died mid-run, retrying once: {e}")
+                        time.sleep(3)
+                        continue
+                    raise
 
 
 def _strip_oss_params(url: str) -> str:
@@ -433,7 +452,8 @@ def scrape_images(link: str) -> list[str]:
 
     add(design.get("coverUrl"))
     for pic in (instance or {}).get("pictures") or []:
-        add(pic)
+        # pictures entries are objects: {"name", "url", "isRealLifePhoto", ...}
+        add(pic.get("url") if isinstance(pic, dict) else pic)
     return urls
 
 
@@ -492,10 +512,11 @@ def open_session(url: str | None = None) -> tuple[bool, str]:
             return False, "A session browser is already open."
         if not _PROFILE_LOCK.acquire(blocking=False):
             return False, "The download pipeline is using the browser profile right now — try again shortly."
+        reap_stale_profile_chromes(_PROFILE_DIR)
         driver = None
         try:
             Driver = _require_driver()
-            driver = Driver(uc=True, headless=False, user_data_dir=_PROFILE_DIR, locale_code="en")
+            driver = Driver(uc=True, headless=False, user_data_dir=_PROFILE_DIR, locale_code="en", ad_block=True)
             driver.uc_open_with_reconnect(url or MAKERWORLD_BASE + "/en", 4)
             _session["driver"] = driver
         except Exception as e:

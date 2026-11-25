@@ -88,15 +88,6 @@ def test_scrape_site_images_thangs(client, monkeypatch):
     assert res.get_json()["images"] == ["https://thangs.com/a.jpg"]
 
 
-def test_scrape_site_images_yeggi_returns_empty(client):
-    res = client.post(
-        "/api/scrape-site-images",
-        json={"link": "https://www.yeggi.com/q/some-search/"},
-    )
-    assert res.status_code == 200
-    assert res.get_json()["images"] == []
-
-
 def test_scrape_site_images_unsupported_site(client):
     res = client.post(
         "/api/scrape-site-images",

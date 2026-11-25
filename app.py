@@ -43,7 +43,7 @@ from backend.serp import search_by_image, extract_top_links, filter_links_by_ena
 from backend.downloaders.thingiverse import extract_thing_id, stream_zip as tv_stream_zip, probe as probe_thingiverse, scrape_images as tv_scrape_images, probe_images as probe_images_thingiverse
 from backend.downloaders.printables import extract_model_id as printables_model_id, build_zip as printables_build_zip, probe as probe_printables, scrape_images as printables_scrape_images, probe_images as probe_images_printables
 from backend.downloaders.makerworld import extract_model_info as mw_extract_model_info, download_3mf as mw_download_3mf, probe as probe_makerworld, open_session as mw_open_session, session_status as mw_session_status, close_session as mw_close_session, scrape_images as mw_scrape_images, probe_images as probe_images_makerworld
-from backend.downloaders.cults3d import extract_slug as cults3d_extract_slug, stream_zip as cults3d_stream_zip, probe as probe_cults3d, PaidModelError as Cults3DPaidModelError, load_cookies_from_browser as cults3d_load_cookies_from_browser, scrape_images as cults3d_scrape_images, probe_images as probe_images_cults3d
+from backend.downloaders.cults3d import extract_slug as cults3d_extract_slug, stream_zip as cults3d_stream_zip, probe as probe_cults3d, PaidModelError as Cults3DPaidModelError, open_session as cults3d_open_session, session_status as cults3d_session_status, close_session as cults3d_close_session, scrape_images as cults3d_scrape_images, probe_images as probe_images_cults3d
 from backend.downloaders.thangs import extract_model_id as thangs_extract_model_id, build_zip as thangs_build_zip, probe as probe_thangs, PaidModelError as ThangsPaidModelError, scrape_images as thangs_scrape_images, probe_images as probe_images_thangs
 from backend.constants.files_3d import DOWNLOAD_MODE_FULL_ZIP, DOWNLOAD_MODE_SINGLE_FILE, DOWNLOAD_MODES
 from backend.downloaders.zip_utils import extract_best_3d_file
@@ -71,7 +71,7 @@ import time
 from datetime import datetime, timezone
 import uuid
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait
 from backend.copyScripts.create_text import create_text, create_text_stream
 from backend.ebay_cli import call_text_llm, get_seller_list, revise_inventory_status_batch, get_item_available_quantity
 from backend.copyScripts.imageEditing import remove_background, compile_images, downscale_image_bytes, warm_rembg
@@ -3398,29 +3398,97 @@ def serp_text_search():
         return jsonify({"error": f"SerpAPI search failed: {str(e)}"}), 500
 
 
-@app.route('/api/test-3d-sites', methods=['GET'])
-def test_3d_sites():
-    """Probe each supported 3D download site by genuinely fetching a file
-    through its real download pipeline. Probes run concurrently — the
-    MakerWorld probe launches a browser and can take a minute or more."""
-    probes = [("printables.com", probe_printables), ("thingiverse.com", probe_thingiverse), ("makerworld.com", probe_makerworld), ("cults3d.com", probe_cults3d), ("thangs.com", probe_thangs)]
+_PROBE_TIMEOUT = 180  # seconds; one hanging site must never hang Re-test
 
+# Browser-backed sites: when a probe times out, kill its stuck Chrome so the
+# orphaned probe thread errors out and releases the global browser lock.
+_PROBE_PROFILE_DIRS = {}
+try:
+    from backend.downloaders.browser_reaper import reap_stale_profile_chromes as _reap_profile_chromes
+    from backend.downloaders import cults3d as _cults3d_mod, makerworld as _mw_mod, thingiverse as _tv_mod
+    _PROBE_PROFILE_DIRS = {
+        "cults3d.com": _cults3d_mod._PROFILE_DIR,
+        "makerworld.com": _mw_mod._PROFILE_DIR,
+        "thingiverse.com": _tv_mod._PROFILE_DIR,
+    }
+except Exception:
+    pass
+
+
+def _run_probes_with_timeout(probes, log_prefix):
+    """Run (site, probe_fn) pairs concurrently and return {site: {"ok", "message"}}.
+    Every site gets a verdict within _PROBE_TIMEOUT seconds even if its probe
+    thread hangs (e.g. a stuck browser launch)."""
     def run_probe(site, probe_fn):
         try:
             ok, message = probe_fn()
         except Exception as e:
             ok, message = False, str(e)
         if not ok:
-            print(f"[test-3d-sites] {site} FAILED: {message}")
+            print(f"[{log_prefix}] {site} FAILED: {message}")
         return site, {"ok": ok, "message": message}
 
     results = {}
-    with ThreadPoolExecutor(max_workers=len(probes)) as executor:
-        futures = [executor.submit(run_probe, site, fn) for site, fn in probes]
-        for future in as_completed(futures):
+    executor = ThreadPoolExecutor(max_workers=len(probes))
+    try:
+        futures = {executor.submit(run_probe, site, fn): site for site, fn in probes}
+        done, not_done = wait(futures, timeout=_PROBE_TIMEOUT)
+        for future in done:
             site, result = future.result()
             results[site] = result
-    return jsonify({"results": results})
+        for future in not_done:
+            site = futures[future]
+            print(f"[{log_prefix}] {site} TIMED OUT after {_PROBE_TIMEOUT}s")
+            profile_dir = _PROBE_PROFILE_DIRS.get(site)
+            if profile_dir:
+                _reap_profile_chromes(profile_dir)
+            results[site] = {"ok": False, "message": f"Probe timed out after {_PROBE_TIMEOUT}s — likely a stuck browser session; try again or re-sign in."}
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+    return results
+
+
+# Overlapping probe runs (auto-test on page load + a manual Re-test, or two
+# open tabs) share a single run: browser probes are serialized process-wide,
+# so a duplicate run would only queue behind the first and time out.
+_probe_runs = {}
+_probe_runs_lock = threading.Lock()
+
+
+def _run_probes_deduped(run_name, probes, log_prefix):
+    with _probe_runs_lock:
+        run = _probe_runs.get(run_name)
+        owner = run is None
+        if owner:
+            run = {"event": threading.Event(), "results": None}
+            _probe_runs[run_name] = run
+    if not owner:
+        run["event"].wait(timeout=_PROBE_TIMEOUT + 60)
+        if run["results"] is not None:
+            return run["results"]
+        # The in-flight run never produced results — give up on it and start fresh.
+        with _probe_runs_lock:
+            if _probe_runs.get(run_name) is run:
+                del _probe_runs[run_name]
+        return _run_probes_deduped(run_name, probes, log_prefix)
+    try:
+        results = _run_probes_with_timeout(probes, log_prefix)
+        run["results"] = results
+        return results
+    finally:
+        run["event"].set()
+        with _probe_runs_lock:
+            if _probe_runs.get(run_name) is run:
+                del _probe_runs[run_name]
+
+
+@app.route('/api/test-3d-sites', methods=['GET'])
+def test_3d_sites():
+    """Probe each supported 3D download site by genuinely fetching a file
+    through its real download pipeline. Probes run concurrently — the
+    MakerWorld probe launches a browser and can take a minute or more."""
+    probes = [("printables.com", probe_printables), ("thingiverse.com", probe_thingiverse), ("makerworld.com", probe_makerworld), ("cults3d.com", probe_cults3d), ("thangs.com", probe_thangs)]
+    return jsonify({"results": _run_probes_deduped("downloads", probes, "test-3d-sites")})
 
 
 @app.route('/api/scrape-site-images', methods=['POST'])
@@ -3431,7 +3499,6 @@ def scrape_site_images():
     Expects JSON: {"link": "https://..."}
     Returns JSON: {"images": ["https://...", ...]}
     Supported: thingiverse.com, printables.com, makerworld.com, cults3d.com, thangs.com
-    Yeggi has no scraper and always returns an empty list.
     """
     try:
         data = request.get_json()
@@ -3475,9 +3542,7 @@ def _scrape_site_image_urls(link):
         return cults3d_scrape_images(link)
     if "thangs.com" in link:
         return thangs_scrape_images(link)
-    if "yeggi.com" in link:
-        return []
-    raise ValueError("Unsupported site — supported: thingiverse.com, printables.com, makerworld.com, cults3d.com, thangs.com, yeggi.com")
+    raise ValueError("Unsupported site — supported: thingiverse.com, printables.com, makerworld.com, cults3d.com, thangs.com")
 
 
 def _download_images_as_pil(urls):
@@ -3550,23 +3615,7 @@ def test_3d_site_images():
         ("cults3d.com", probe_images_cults3d),
         ("thangs.com", probe_images_thangs),
     ]
-
-    def run_probe(site, probe_fn):
-        try:
-            ok, message = probe_fn()
-        except Exception as e:
-            ok, message = False, str(e)
-        if not ok:
-            print(f"[test-3d-site-images] {site} FAILED: {message}")
-        return site, {"ok": ok, "message": message}
-
-    results = {}
-    with ThreadPoolExecutor(max_workers=len(probes)) as executor:
-        futures = [executor.submit(run_probe, site, fn) for site, fn in probes]
-        for future in as_completed(futures):
-            site, result = future.result()
-            results[site] = result
-    return jsonify({"results": results})
+    return jsonify({"results": _run_probes_deduped("images", probes, "test-3d-site-images")})
 
 
 @app.route('/api/makerworld-session/open', methods=['POST'])
@@ -3607,71 +3656,61 @@ def makerworld_probe_endpoint():
 
 @app.route('/api/cults3d-credential-status', methods=['GET'])
 def cults3d_credential_status():
-    """Return the auth state for Cults3D (email/password or cookies)."""
-    cookies = os.environ.get("CULTS3D_COOKIES", "").strip()
+    """Return the auth state for Cults3D (email/password or existing session profile)."""
     email = os.environ.get("CULTS3D_EMAIL", "").strip()
     password = os.environ.get("CULTS3D_PASSWORD", "").strip()
-    has_credentials = bool(cookies or (email and password))
-    auth_type = "cookies" if cookies else ("email" if (email and password) else None)
+    has_credentials = bool(email and password)
     masked_email = ""
     if email:
         at = email.find("@")
         local = email[:at] if at > 0 else email
         domain = email[at:] if at > 0 else ""
         masked_email = local[:2] + "*" * max(0, len(local) - 2) + domain
+    profile_present = os.path.isdir(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     'backend', 'downloaders', 'cults3d_profile')
+    )
     return jsonify({
         "has_credentials": has_credentials,
-        "auth_type": auth_type,
+        "auth_type": "email" if has_credentials else None,
         "email": masked_email,
+        "profile_present": profile_present,
     })
 
 
-@app.route('/api/cults3d-credentials', methods=['POST'])
-def update_cults3d_credentials():
-    """Save CULTS3D_COOKIES to the .env file."""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "No data provided"}), 400
+@app.route('/api/cults3d-session/open', methods=['POST'])
+def cults3d_session_open():
+    """Open a headed Cults3D browser on the sign-in page and leave it open so
+    the user can log in (and clear any Cloudflare challenge). The session
+    persists in the local browser profile when the window closes."""
+    data = request.get_json(silent=True) or {}
+    url = data.get('url') or None
+    ok, message = cults3d_open_session(url)
+    if not ok:
+        return jsonify({"error": message}), 409
+    return jsonify({"ok": True, "message": message})
 
-        cookies = str(data.get('cookies', '')).strip()
 
-        if not cookies:
-            return jsonify({"error": "Cookie string is required"}), 400
+@app.route('/api/cults3d-session/status', methods=['GET'])
+def cults3d_session_status_endpoint():
+    """Report whether the session browser is still open (detects the user
+    closing the window), the current page, and a best-effort logged-in guess."""
+    return jsonify(cults3d_session_status())
 
-        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
 
-        try:
-            with open(env_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-        except FileNotFoundError:
-            lines = []
+@app.route('/api/cults3d-session/close', methods=['POST'])
+def cults3d_session_close():
+    """Close the session browser gracefully, saving cookies to the profile."""
+    ok, message = cults3d_close_session()
+    return jsonify({"ok": ok, "message": message})
 
-        new_lines = []
-        found = False
-        for line in lines:
-            if line.strip().startswith('CULTS3D_COOKIES='):
-                new_lines.append(f'CULTS3D_COOKIES={cookies}\n')
-                found = True
-            else:
-                new_lines.append(line)
 
-        if not found:
-            if new_lines and not new_lines[-1].endswith('\n'):
-                new_lines.append('\n')
-            new_lines.append(f'CULTS3D_COOKIES={cookies}\n')
-
-        with open(env_path, 'w', encoding='utf-8') as f:
-            f.writelines(new_lines)
-
-        load_dotenv(env_path, override=True)
-        print("[API] Cults3D cookies updated in .env")
-        return jsonify({"success": True, "message": "Cults3D cookies saved."})
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": f"Failed to save cookies: {str(e)}"}), 500
+@app.route('/api/cults3d-probe', methods=['POST'])
+def cults3d_probe_endpoint():
+    """Re-test the Cults3D pipeline after the user signed in via the headed
+    browser. Runs the genuine download probe."""
+    ok, message = probe_cults3d()
+    return jsonify({"ok": ok, "message": message})
 
 
 @app.route('/api/cults3d-email-credentials', methods=['POST'])
@@ -3727,45 +3766,6 @@ def update_cults3d_email_credentials():
         import traceback
         traceback.print_exc()
         return jsonify({"error": f"Failed to save credentials: {str(e)}"}), 500
-
-
-@app.route('/api/cults3d-auto-load-cookies', methods=['POST'])
-def cults3d_auto_load_cookies():
-    """Read Cults3D cookies from the user's installed browser and save them to .env."""
-    try:
-        cookies = cults3d_load_cookies_from_browser()
-
-        env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
-
-        try:
-            with open(env_path, 'r', encoding='utf-8') as f:
-                lines = f.readlines()
-        except FileNotFoundError:
-            lines = []
-
-        new_lines = []
-        found = False
-        for line in lines:
-            if line.strip().startswith('CULTS3D_COOKIES='):
-                new_lines.append(f'CULTS3D_COOKIES={cookies}\n')
-                found = True
-            else:
-                new_lines.append(line)
-
-        if not found:
-            if new_lines and not new_lines[-1].endswith('\n'):
-                new_lines.append('\n')
-            new_lines.append(f'CULTS3D_COOKIES={cookies}\n')
-
-        with open(env_path, 'w', encoding='utf-8') as f:
-            f.writelines(new_lines)
-
-        load_dotenv(env_path, override=True)
-        print("[API] Cults3D cookies auto-loaded from browser")
-        return jsonify({"success": True, "message": "Cookies loaded from browser and saved."})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 def _update_env_vars(updates: dict) -> None:
@@ -3856,7 +3856,7 @@ def update_makerworld_email_credentials():
 SAVED_3D_FILES_DIR = _SAVED_3D_FILES_DIR_NAME
 
 # Source-site label for a 3D file page URL (the first whitelisted host that appears)
-_SOURCE_SITE_HOSTS = ("thingiverse.com", "printables.com", "makerworld.com", "cults3d.com", "thangs.com", "yeggi.com")
+_SOURCE_SITE_HOSTS = ("thingiverse.com", "printables.com", "makerworld.com", "cults3d.com", "thangs.com")
 
 
 def _source_site_from_link(link):

@@ -42,6 +42,12 @@ COMPLETE_PAYLOAD = {
 
 
 def test_thingiverse_scrape_images_returns_gallery_urls(monkeypatch):
+    # Force the API fallback: the browser scrape must not launch in tests.
+    monkeypatch.setattr(
+        thingiverse,
+        "_scrape_images_browser",
+        lambda link: (_ for _ in ()).throw(RuntimeError("no browser in tests")),
+    )
     monkeypatch.setattr(
         thingiverse, "_make_session", lambda: _FakeSession(COMPLETE_PAYLOAD)
     )
@@ -52,7 +58,28 @@ def test_thingiverse_scrape_images_returns_gallery_urls(monkeypatch):
     ]
 
 
+def test_thingiverse_scrape_images_prefers_browser_results(monkeypatch):
+    monkeypatch.setattr(
+        thingiverse,
+        "_scrape_images_browser",
+        lambda link: ["https://cdn.thingiverse.com/browser1.jpg", "https://cdn.thingiverse.com/browser2.jpg"],
+    )
+    monkeypatch.setattr(
+        thingiverse, "_make_session", lambda: _FakeSession(COMPLETE_PAYLOAD)
+    )
+    urls = thingiverse.scrape_images("https://www.thingiverse.com/thing:3539464")
+    assert urls == [
+        "https://cdn.thingiverse.com/browser1.jpg",
+        "https://cdn.thingiverse.com/browser2.jpg",
+    ]
+
+
 def test_thingiverse_scrape_images_skips_entries_without_url(monkeypatch):
+    monkeypatch.setattr(
+        thingiverse,
+        "_scrape_images_browser",
+        lambda link: (_ for _ in ()).throw(RuntimeError("no browser in tests")),
+    )
     payload = {"images": [{"url": "https://cdn.thingiverse.com/a.jpg"}, {"name": "no-url"}, {}]}
     monkeypatch.setattr(thingiverse, "_make_session", lambda: _FakeSession(payload))
     urls = thingiverse.scrape_images("https://www.thingiverse.com/thing:3539464")
