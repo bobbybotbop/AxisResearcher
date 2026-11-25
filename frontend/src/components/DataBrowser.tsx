@@ -8,7 +8,7 @@ import {
   Table2,
 } from "lucide-react";
 import { DATA_BROWSER_TABLES, type DataBrowserTableName } from "../constants/dataBrowser";
-import { startTask } from "../utils/statusStore";
+import { toast } from "../utils/toasts";
 import LoadingBar from "./LoadingBar";
 
 const TABLES = DATA_BROWSER_TABLES;
@@ -261,7 +261,6 @@ export default function DataBrowser() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     setFetchError(null);
-    const task = startTask(`Load ${selectedTable} table`);
     try {
       const res = await fetch(
         `/api/data-browser/${selectedTable}?page=${page}&page_size=${pageSize}`,
@@ -272,11 +271,10 @@ export default function DataBrowser() {
       }
       const json = (await res.json()) as DataBrowserResponse;
       setData(json);
-      task.succeed();
     } catch (err) {
       const message = (err as Error).message;
       setFetchError(message);
-      task.fail(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }

@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
-import PipelineTracker from "./PipelineTracker";
+import StepCard from "./StepCard";
 import ProductCandidateRow from "./ProductCandidateRow";
 import NumberInput from "./NumberInput";
 import { btnPill } from "../styles/buttonPill";
 import { rankCandidates } from "../utils/ranking";
 import { estimateApiCallCost } from "../constants/research";
+import { toast } from "../utils/toasts";
 import {
-  dismissPipeline,
-  startPipelineWithId,
-  toast,
-  type PipelineHandle,
-} from "../utils/statusStore";
+  applyResearchProgressEvent,
+  createResearchSteps,
+  failRunningResearchStep,
+  RESEARCH_STEP_TITLES,
+  type ResearchProgressEvent,
+  type ResearchStepState,
+} from "../utils/researchSteps";
 import type {
   CopySellerResult,
   PipelineRun,
@@ -19,21 +22,9 @@ import type {
   ProductCandidate,
 } from "../types/research";
 
-const STEP_BUDGET = "Checking API budget";
-const STEP_COLLECT = "Collecting seller listings";
-const STEP_DETAILS = "Fetching listing details";
-const STEP_METRICS = "Computing metrics";
-const PIPELINE_STEPS = [STEP_BUDGET, STEP_COLLECT, STEP_DETAILS, STEP_METRICS];
-
 const sliderClass = "w-full accent-primary";
 const inputClass =
   "rounded-lg border-2 border-border-default bg-surface-panel px-4 py-2 text-text-primary transition-colors focus:border-primary focus:outline-none disabled:bg-surface-hover";
-
-interface MetricsProgress {
-  current: number;
-  total: number;
-  title: string;
-}
 
 export default function ResearchPipeline() {
   const [seller, setSeller] = useState("");
@@ -45,12 +36,10 @@ export default function ResearchPipeline() {
   const [weightVelocity, setWeightVelocity] = useState(1);
 
   const [isRunning, setIsRunning] = useState(false);
-  // Waiting state lives in the Status Store as a Pipeline (ADR 0002); only the
-  // pipeline id is local. The metrics sub-progress title stays local as a
-  // bespoke detail rendered below the PipelineTracker.
-  const [pipelineId, setPipelineId] = useState<number | null>(null);
-  const pipelineRef = useRef<PipelineHandle | null>(null);
-  const [metricsProgress, setMetricsProgress] = useState<MetricsProgress | null>(null);
+  // Waiting state: each StepCard owns its status display (ADR 0003). Step state
+  // lives here in local useState; the stream's progress events drive it through
+  // the researchSteps reducer. No Status Store, no PipelineTracker.
+  const [steps, setSteps] = useState<ResearchStepState[]>(createResearchSteps);
   const [candidates, setCandidates] = useState<ProductCandidate[]>([]);
   const [runSummary, setRunSummary] = useState<CopySellerResult | null>(null);
 
@@ -132,17 +121,10 @@ export default function ResearchPipeline() {
       return;
     }
     setIsRunning(true);
-    setMetricsProgress(null);
+    setSteps(createResearchSteps());
     setCandidates([]);
     setRunSummary(null);
     setLoadedRunId(null);
-    if (pipelineId != null) dismissPipeline(pipelineId);
-    const { id: newPipelineId, handle: pipeline } = startPipelineWithId(
-      "Copy Seller",
-      PIPELINE_STEPS,
-    );
-    pipelineRef.current = pipeline;
-    setPipelineId(newPipelineId);
 
     try {
       const data = (await fetchWithProgress(
@@ -162,36 +144,13 @@ export default function ResearchPipeline() {
             },
           }),
         },
+        // The backend streams friendly per-step progress events (incl. the
+        // per-listing "Computing metrics (i/N)" sub-progress); the reducer
+        // turns them into each StepCard's status line and header counts.
         (event) => {
-          const step = typeof event.step === "string" ? event.step : "";
-          const status = event.status;
-          // The backend streams "Computing metrics (i/N)" as one step per
-          // listing; the Pipeline shows it as a single named step whose
-          // determinate progress is the (i/N) count.
-          const baseStep = step.startsWith(STEP_METRICS) ? STEP_METRICS : step;
-
-          if (step.startsWith(STEP_METRICS)) {
-            const match = step.match(/\((\d+)\/(\d+)\)/);
-            if (match) {
-              const current = Number(match[1]);
-              const total = Number(match[2]);
-              setMetricsProgress({
-                current,
-                total,
-                title: typeof event.title === "string" ? event.title : "",
-              });
-              pipeline.progress(current, total);
-            }
-          }
-
-          // Metrics streams one completed event per listing — those only carry
-          // determinate progress; the step itself completes when the run's
-          // result arrives (pipeline.succeed below).
-          if (status === "completed" && baseStep && baseStep !== STEP_METRICS) {
-            // Steps may complete while the pipeline rests on an earlier step —
-            // advancePast marks everything up to it done.
-            pipeline.advancePast(baseStep);
-          }
+          setSteps((prev) =>
+            applyResearchProgressEvent(prev, event as ResearchProgressEvent),
+          );
         },
       )) as CopySellerResult;
 
@@ -200,17 +159,18 @@ export default function ResearchPipeline() {
         Array.isArray(data?.product_candidates) ? data.product_candidates : [],
       );
       setLoadedRunId(data?.run_id ?? null);
-      pipeline.succeed();
-      toast.success(`Copy Seller run complete: ${data?.product_candidates?.length ?? 0} Product Candidates`,
-      );
+      // Success is inline-only (ADR 0003) — the steps' persistent checks and
+      // the results below report completion; no success toast.
       // The run was persisted on the backend; refresh the past-runs list.
       void fetchPastRuns();
     } catch (err) {
-      pipeline.fail((err as Error).message || "Copy Seller run failed");
-      toast.error((err as Error).message || "Copy Seller run failed");
+      const message = (err as Error).message || "Copy Seller run failed";
+      // The failure lands on the step that was running when the stream
+      // errored; its card shows the error + Retry, and a toast backs it up.
+      setSteps((prev) => failRunningResearchStep(prev, message));
+      toast.error(message);
     } finally {
       setIsRunning(false);
-      setMetricsProgress(null);
     }
   };
 
@@ -401,16 +361,20 @@ export default function ResearchPipeline() {
         </div>
       )}
 
-      {/* Waiting state: the run's Pipeline from the Status Store (ADR 0002);
-          the metrics sub-progress title stays as a bespoke detail below it. */}
-      <div>
-        <PipelineTracker pipelineId={pipelineId} onRetry={() => void handleRun()} />
-        {metricsProgress && isRunning && (
-          <p className="-mt-3 text-sm text-text-muted">
-            Metrics {metricsProgress.current} of {metricsProgress.total}
-            {metricsProgress.title ? ` — ${metricsProgress.title}` : ""}
-          </p>
-        )}
+      {/* Waiting state: each step owns its status display in its own card
+          (ADR 0003); a failure shows the error + Retry at the failed step. */}
+      <div className="flex flex-col gap-3">
+        {RESEARCH_STEP_TITLES.map((title, index) => (
+          <StepCard
+            key={title}
+            title={title}
+            status={steps[index].status}
+            statusText={steps[index].statusText}
+            progress={steps[index].progress}
+            error={steps[index].error}
+            onRetry={() => void handleRun()}
+          />
+        ))}
       </div>
 
       {/* Results */}

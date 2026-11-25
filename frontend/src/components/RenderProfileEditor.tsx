@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import StudioRenderPreview, { type StudioRenderPreviewHandle } from "./StudioRenderPreview";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { fetchWithProgress } from "../utils/fetchWithProgress";
-import { toast } from "../utils/statusStore";
+import { toast } from "../utils/toasts";
 import {
   RENDER_AMBIENT_MAX,
   RENDER_ANGLE_PRESETS,

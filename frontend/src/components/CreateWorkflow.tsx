@@ -5,7 +5,7 @@ import ImageUploadModal from "./ImageUploadModal";
 import type { PendingImage } from "./ImageUploadModal";
 import MessageBarInput from "./MessageBarInput";
 import Lightbox from "./Lightbox";
-import PipelineTracker from "./PipelineTracker";
+import StepCard from "./StepCard";
 import ImageCanvas from "./ImageCanvas";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import type { DropResult } from "@hello-pangea/dnd";
@@ -19,6 +19,16 @@ import {
   formatListingDateTime,
   formatCategoryShort,
 } from "../utils/listingDisplay";
+import {
+  CREATE_STEP_TITLES,
+  initialCreateSteps,
+  type CreateStepId,
+  type CreateStepsState,
+} from "../utils/createPipeline";
+import {
+  UPLOAD_STEP_TITLES,
+  type UploadStepsState,
+} from "../utils/uploadPipeline";
 
 interface AutoSaveStatus {
   title: "idle" | "saving" | "saved";
@@ -73,13 +83,13 @@ interface CreateWorkflowProps {
   editableDescription?: string;
   uploadResult?: UploadResult | null;
   isEditorOpen?: boolean;
-  /** Id of the Create workflow Pipeline in the Status Store. */
-  createPipelineId?: number | null;
-  /** Id of the upload-to-eBay Pipeline in the Status Store. */
-  uploadPipelineId?: number | null;
-  /** Retries the failed phase of the Create pipeline. */
-  onRetryCreate?: () => void;
-  /** Retries a failed upload-to-eBay pipeline run. */
+  /** Per-step waiting state for the Create workflow (ADR 0003), owned by the parent. */
+  createSteps?: CreateStepsState;
+  /** Retries the failed Create step (re-runs its phase without restarting completed steps). */
+  onRetryCreateStep?: (id: CreateStepId) => void;
+  /** Per-step waiting state for the Upload-to-eBay flow (ADR 0003), owned by the parent. Null until the first upload run. */
+  uploadSteps?: UploadStepsState | null;
+  /** Retries a failed upload-to-eBay run (re-runs the whole upload request). */
   onRetryUpload?: () => void;
   uploadingSkus?: Set<string>;
   isTrimmingTitle?: boolean;
@@ -143,6 +153,8 @@ interface CreateWorkflowProps {
   onCustomPromptChange?: (value: string) => void;
 }
 
+const IDLE_CREATE_STEPS = initialCreateSteps();
+
 function CreateWorkflow({
   listingId,
   listingLinkSubmitted = false,
@@ -162,9 +174,9 @@ function CreateWorkflow({
   editableDescription,
   uploadResult,
   isEditorOpen,
-  createPipelineId = null,
-  uploadPipelineId = null,
-  onRetryCreate,
+  createSteps,
+  onRetryCreateStep,
+  uploadSteps = null,
   onRetryUpload,
   uploadingSkus,
   isTrimmingTitle,
@@ -282,6 +294,16 @@ function CreateWorkflow({
 
   const [expandedPromptIndex, setExpandedPromptIndex] = useState<number | null>(null);
 
+  // Every Create step owns its waiting state in a StepCard (ADR 0003). The
+  // state itself is parent-owned and passed down; skipped optional steps
+  // (categorize, bg removal) stay pending and render disabled.
+  const steps = createSteps ?? IDLE_CREATE_STEPS;
+  const createWorkflowActive = (loading ?? false) || listingLinkSubmitted;
+  const categorizeSkipped = !classifyImagesEnabled;
+  const bgRemovalSkipped = !autoBackgroundRemovalEnabled;
+  const retryCreateStep = (id: CreateStepId) =>
+    onRetryCreateStep ? () => onRetryCreateStep(id) : undefined;
+
   const sidebarLeft = sidebarCollapsed ? "4.25rem" : "15rem";
   const barWrapperClassName = listingLinkSubmitted
     ? "pointer-events-none fixed bottom-0 right-0 z-50 flex w-auto flex-col items-center justify-center bg-transparent px-6 py-4 md:px-8 transition-[left,padding] duration-500 ease-in-out"
@@ -355,12 +377,49 @@ function CreateWorkflow({
         </div>
       )}
 
-      {/* The whole Create workflow as one Pipeline: fetch → categorize →
-          bg removal → image generation → text generation → create listing. */}
-      <PipelineTracker pipelineId={createPipelineId} onRetry={onRetryCreate} />
+      {/* Steps 1–3 run inside the single /api/photos request; their cards
+          report the stream's step messages. */}
+      {createWorkflowActive && (
+        <div className="mt-4 flex flex-col gap-3">
+          <StepCard
+            title={CREATE_STEP_TITLES.fetch}
+            status={steps.fetch.status}
+            statusText={steps.fetch.statusText}
+            error={steps.fetch.error}
+            onRetry={retryCreateStep("fetch")}
+          />
+          <StepCard
+            title={CREATE_STEP_TITLES.json}
+            status={steps.json.status}
+            statusText={steps.json.statusText}
+            error={steps.json.error}
+            onRetry={retryCreateStep("json")}
+          />
+          <StepCard
+            title={CREATE_STEP_TITLES.categorize}
+            status={steps.categorize.status}
+            statusText={
+              categorizeSkipped ? "Skipped in settings" : steps.categorize.statusText
+            }
+            error={steps.categorize.error}
+            onRetry={retryCreateStep("categorize")}
+            disabled={categorizeSkipped}
+          />
+        </div>
+      )}
 
+      {/* Step 6 narrates the streamed text generation; the stream keeps
+          writing into the title/description inputs as before. */}
+      {createWorkflowActive && (
+        <StepCard
+          title={CREATE_STEP_TITLES.textGen}
+          status={steps.textGen.status}
+          statusText={steps.textGen.statusText}
+          error={steps.textGen.error}
+          onRetry={retryCreateStep("textGen")}
+        >
       {listing && (isGeneratingText || editableTitle !== "") && (
-        <div className="mt-8 rounded-xl border border-border-default bg-surface-panel px-4 pb-4 pt-5 shadow-sm sm:px-5 sm:pb-5 sm:pt-6">
+        <div>
           {/* Metadata row */}
           <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-1.5">
@@ -641,6 +700,8 @@ function CreateWorkflow({
           )}
         </div>
       )}
+        </StepCard>
+      )}
 
       {/* Skeleton thumbnails while the listing's photos are being fetched. */}
       {loading && (photos?.length ?? 0) === 0 && (
@@ -694,8 +755,26 @@ function CreateWorkflow({
               </button>
             </div>
           )}
-          {autoBackgroundRemovalEnabled && (
-            <div className="my-5 rounded-lg border border-border-default bg-surface-muted p-4">
+        </>
+      )}
+
+      {/* Step 4 — background removal (optional; disabled when off in
+          settings). Wraps the bg-removed photos and the confirm button. */}
+      {createWorkflowActive && (
+        <StepCard
+          title={CREATE_STEP_TITLES.bgRemoval}
+          status={steps.bgRemoval.status}
+          statusText={
+            bgRemovalSkipped ? "Skipped in settings" : steps.bgRemoval.statusText
+          }
+          progress={steps.bgRemoval.progress}
+          error={steps.bgRemoval.error}
+          onRetry={retryCreateStep("bgRemoval")}
+          disabled={bgRemovalSkipped}
+        >
+          {autoBackgroundRemovalEnabled && (photos?.length ?? 0) > 0 && (
+            <>
+            <div className="rounded-lg border border-border-default bg-surface-muted p-4">
               <h3 className="mb-2.5 text-lg text-text-primary">
                 Background Removed Photos
               </h3>
@@ -722,9 +801,7 @@ function CreateWorkflow({
                 </p>
               )}
             </div>
-          )}
-          {autoBackgroundRemovalEnabled && (
-            <div className="mt-8 flex justify-center">
+            <div className="mt-4 flex justify-center">
               <button
                 type="button"
                 className={btnPillLg}
@@ -738,12 +815,24 @@ function CreateWorkflow({
                 {isConfirming ? "Generating Images..." : "Confirm Categories"}
               </button>
             </div>
+            </>
           )}
-        </>
+        </StepCard>
       )}
 
+      {/* Step 5 — image generation. Determinate "N of M" progress shows in
+          the card header; the generated grid lives inside the card. */}
+      {createWorkflowActive && (
+        <StepCard
+          title={CREATE_STEP_TITLES.imageGen}
+          status={steps.imageGen.status}
+          statusText={steps.imageGen.statusText}
+          progress={steps.imageGen.progress}
+          error={steps.imageGen.error}
+          onRetry={retryCreateStep("imageGen")}
+        >
       {(generatedImages?.length ?? 0) > 0 && (
-        <div className="mt-8 rounded-2xl border border-border-default bg-surface-panel p-6">
+        <div>
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-xl font-semibold text-text-primary">New Listing Photos</h2>
             <div className="flex flex-wrap items-center gap-2">
@@ -953,9 +1042,6 @@ function CreateWorkflow({
               </button>
             </div>
           )}
-          {(uploadingSkus?.has(listingData?.sku ?? "") || uploadPipelineId != null) && (
-            <PipelineTracker pipelineId={uploadPipelineId} onRetry={onRetryUpload} />
-          )}
           {onAddToGeneratedImages && (
             <ImageUploadModal
               isOpen={showGenUploadModal}
@@ -971,6 +1057,42 @@ function CreateWorkflow({
             />
           )}
         </div>
+      )}
+        </StepCard>
+      )}
+
+      {/* Upload to eBay — kicked off by the button in the images card above;
+          both steps run inside one /api/upload-listing request and report
+          the stream's step messages in their own cards (ADR 0003). */}
+      {uploadSteps && (
+        <div className="mt-4 flex flex-col gap-3">
+          <StepCard
+            title={UPLOAD_STEP_TITLES.prepare}
+            status={uploadSteps.prepare.status}
+            statusText={uploadSteps.prepare.statusText}
+            error={uploadSteps.prepare.error}
+            onRetry={onRetryUpload}
+          />
+          <StepCard
+            title={UPLOAD_STEP_TITLES.upload}
+            status={uploadSteps.upload.status}
+            statusText={uploadSteps.upload.statusText}
+            error={uploadSteps.upload.error}
+            onRetry={onRetryUpload}
+          />
+        </div>
+      )}
+
+      {/* Step 7 — create listing. Runs automatically once images and text
+          are ready; its Retry re-runs only this phase. */}
+      {createWorkflowActive && (
+        <StepCard
+          title={CREATE_STEP_TITLES.createListing}
+          status={steps.createListing.status}
+          statusText={steps.createListing.statusText}
+          error={steps.createListing.error}
+          onRetry={retryCreateStep("createListing")}
+        />
       )}
 
       {lightboxOpen && (photos?.length ?? 0) > 0 && (

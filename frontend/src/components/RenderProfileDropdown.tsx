@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { btnPillSm } from "../styles/buttonPill";
 import { CURRENT_SETTINGS_LABEL, type RenderProfilesResponse, type RenderProfileSettings } from "../constants/render";
-import { toast } from "../utils/statusStore";
+import { toast } from "../utils/toasts";
 
 interface RenderProfileDropdownProps {
   // Selecting a profile copies its settings into the flat settings; the parent

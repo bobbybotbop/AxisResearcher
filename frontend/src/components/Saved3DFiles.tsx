@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, RefreshCw, Search, X } from "lucide-react";
 import Lightbox from "./Lightbox";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { formatListingDateTime } from "../utils/listingDisplay";
-import { startTask, startTaskWithId, useTaskRunning } from "../utils/statusStore";
+import { startTaskToast, toast } from "../utils/toasts";
 import {
   PIPELINE_IMAGE_SEARCH,
   PIPELINE_TITLE_SEARCH,
@@ -361,8 +361,7 @@ function Saved3DFileDetailModal({
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [deleteTaskId, setDeleteTaskId] = useState<number | null>(null);
-  const deletePending = useTaskRunning(deleteTaskId);
+  const [deletePending, setDeletePending] = useState(false);
 
   const urls = entry.images.map((name) => imageUrl(entry, name));
   const safeHero = urls.length ? heroIndex % urls.length : 0;
@@ -370,8 +369,8 @@ function Saved3DFileDetailModal({
 
   const handleDelete = async () => {
     setDeleteError(null);
-    const { id, handle: task } = startTaskWithId(`Deleting saved 3D file #${entry.id}`);
-    setDeleteTaskId(id);
+    setDeletePending(true);
+    const task = startTaskToast(`Deleting saved 3D file #${entry.id}`);
     try {
       const res = await fetch(`/api/saved-3d-files/${entry.id}`, { method: "DELETE" });
       if (!res.ok) {
@@ -386,6 +385,8 @@ function Saved3DFileDetailModal({
       task.fail(message);
       setDeleteError(message);
       setConfirmDelete(false);
+    } finally {
+      setDeletePending(false);
     }
   };
 
@@ -590,9 +591,6 @@ export default function Saved3DFiles() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     setFetchError(null);
-    // Report the load through the Status Store (ADR 0002); the skeleton cards
-    // stay gated on the local loading flag as their local trigger.
-    const task = startTask("Load saved 3D files");
     try {
       const res = await fetch(`/api/saved-3d-files?page=${page}&page_size=${pageSize}`);
       if (!res.ok) {
@@ -600,11 +598,10 @@ export default function Saved3DFiles() {
         throw new Error(err.error || `HTTP ${res.status}`);
       }
       setData((await res.json()) as Saved3DFilesResponse);
-      task.succeed();
     } catch (err) {
       const message = (err as Error).message;
       setFetchError(message);
-      task.fail(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
