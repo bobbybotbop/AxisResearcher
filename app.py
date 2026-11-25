@@ -261,7 +261,12 @@ def research_copy_seller():
     """
     Run the Copy Seller research pipeline for an eBay seller.
     Streams progress events and the final raw (unranked) Product Candidates as NDJSON.
-    Body: { seller, top_n?, k?, min_sold? }
+    Body: { seller, top_n?, k?, min_sold?, collect_demand?, date_posted_start?, date_posted_end?, ranges?, sort_metric? }
+    date_posted_start / date_posted_end are YYYY-MM-DD calendar dates bounding
+    the seller's listings by itemCreationDate (collection-time filter).
+    ranges / sort_metric are the client-side filter + sort configuration; they
+    don't change collection — they're persisted into the run's inputs so loading
+    the run restores the exact configuration the user saw.
     """
     data = request.get_json()
 
@@ -280,13 +285,34 @@ def research_copy_seller():
         except (TypeError, ValueError):
             yield error_event("top_n, k, and min_sold must be integers")
             return
-        weights = data.get("weights")
-        if weights is not None and not isinstance(weights, dict):
-            yield error_event("weights must be an object")
+        collect_demand = bool(data.get("collect_demand", True))
+
+        date_posted_start = (data.get("date_posted_start") or "").strip() or None
+        date_posted_end = (data.get("date_posted_end") or "").strip() or None
+        for date_value, name in ((date_posted_start, "date_posted_start"),
+                                 (date_posted_end, "date_posted_end")):
+            if date_value is not None:
+                try:
+                    datetime.strptime(date_value, "%Y-%m-%d")
+                except ValueError:
+                    yield error_event(f"{name} must be a YYYY-MM-DD date")
+                    return
+
+        ranges = data.get("ranges")
+        if ranges is not None and not isinstance(ranges, dict):
+            yield error_event("ranges must be an object")
+            return
+        sort_metric = data.get("sort_metric")
+        if sort_metric is not None and sort_metric not in ("demand", "competition", "velocity"):
+            yield error_event("sort_metric must be one of: demand, competition, velocity")
             return
 
-        print(f"[API] /api/research/copy-seller: seller={seller} top_n={top_n} k={k} min_sold={min_sold}")
-        for event in run_copy_seller(seller, top_n=top_n, k=k, min_sold=min_sold, weights=weights):
+        print(f"[API] /api/research/copy-seller: seller={seller} top_n={top_n} k={k} min_sold={min_sold} collect_demand={collect_demand} date_posted={date_posted_start}→{date_posted_end} sort_metric={sort_metric}")
+        for event in run_copy_seller(
+            seller, top_n=top_n, k=k, min_sold=min_sold, collect_demand=collect_demand,
+            date_posted_start=date_posted_start, date_posted_end=date_posted_end,
+            ranges=ranges, sort_metric=sort_metric,
+        ):
             event_type = event.get("type")
             if event_type == "progress":
                 extra = {k: v for k, v in event.items() if k not in ("type", "step", "status")}
@@ -316,7 +342,7 @@ def list_copy_seller_runs():
 
 @app.route('/api/research/copy-seller/runs/<run_id>', methods=['GET'])
 def get_copy_seller_run(run_id):
-    """Fetch one full Pipeline Run (input + weights + candidates) by run_id."""
+    """Fetch one full Pipeline Run (input + candidates) by run_id."""
     try:
         print(f"[API] /api/research/copy-seller/runs/{run_id} endpoint called")
         run = load_pipeline_run(run_id)

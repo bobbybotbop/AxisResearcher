@@ -10,7 +10,7 @@ import json
 import os
 import re
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -39,10 +39,10 @@ _USAGE_FILE = os.path.join(_COLLECTED_DATA_DIR, "ebay_api_usage.json")
 # Pure metric functions
 # ---------------------------------------------------------------------------
 
-def compute_sold_velocity(estimated_sold, item_creation_date, now=None):
-    """estimatedSoldQuantity ÷ listing age in days (minimum age: 1 day).
+def _parse_item_creation_date(item_creation_date):
+    """Parse an eBay itemCreationDate ISO string to an aware datetime.
 
-    Returns None when the creation date is missing or unparseable.
+    Returns None when missing or unparseable.
     """
     if not item_creation_date:
         return None
@@ -52,6 +52,17 @@ def compute_sold_velocity(estimated_sold, item_creation_date, now=None):
         return None
     if created.tzinfo is None:
         created = created.replace(tzinfo=timezone.utc)
+    return created
+
+
+def compute_sold_velocity(estimated_sold, item_creation_date, now=None):
+    """estimatedSoldQuantity ÷ listing age in days (minimum age: 1 day).
+
+    Returns None when the creation date is missing or unparseable.
+    """
+    created = _parse_item_creation_date(item_creation_date)
+    if created is None:
+        return None
     now = now or datetime.now(timezone.utc)
     age_days = max((now - created).total_seconds() / 86400.0, 1.0)
     return estimated_sold / age_days
@@ -86,6 +97,37 @@ def select_top_listings(detailed_items, min_sold, top_n):
     ]
     eligible.sort(key=lambda item: _extract_sold_quantity(item) or 0, reverse=True)
     return eligible[:top_n]
+
+
+def filter_listings_by_date_posted(detailed_items, date_posted_start=None, date_posted_end=None):
+    """Keep only listings whose itemCreationDate falls within [start, end].
+
+    Both bounds are calendar dates (YYYY-MM-DD strings), inclusive — the end
+    date covers the whole day. Listings with a missing/unparseable creation
+    date are excluded when a range is given. With no range, returns the input
+    unchanged. Applied before the top-N cut and before metric computation.
+    """
+    if not date_posted_start and not date_posted_end:
+        return detailed_items
+    start_dt = None
+    end_dt = None
+    if date_posted_start:
+        start_dt = datetime.fromisoformat(str(date_posted_start)).replace(tzinfo=timezone.utc)
+    if date_posted_end:
+        # Inclusive of the whole end day: bound at the start of the next day.
+        end_day = datetime.fromisoformat(str(date_posted_end)).replace(tzinfo=timezone.utc)
+        end_dt = end_day + timedelta(days=1)
+    kept = []
+    for item in detailed_items:
+        created = _parse_item_creation_date(item.get("itemCreationDate"))
+        if created is None:
+            continue
+        if start_dt and created < start_dt:
+            continue
+        if end_dt and created >= end_dt:
+            continue
+        kept.append(item)
+    return kept
 
 
 # ---------------------------------------------------------------------------
@@ -158,9 +200,13 @@ def simplify_title_to_phrase(title, config=None):
     return _deterministic_trim(title, config)
 
 
-def estimate_api_call_cost(top_n, k):
-    """≈ N×(1+K) + seller setup (one getItem per listing + one search per phrase)."""
-    return top_n * (1 + k) + SELLER_SETUP_CALLS
+def estimate_api_call_cost(top_n, k, collect_demand=True):
+    """≈ N×(1 + K·[demand on]) + seller setup.
+
+    One search per phrase (Competition Count) always runs; the K sold-sum
+    getItem lookups per phrase only run when Demand collection is on.
+    """
+    return top_n * (1 + (k if collect_demand else 0)) + SELLER_SETUP_CALLS
 
 
 # ---------------------------------------------------------------------------
@@ -233,14 +279,17 @@ def _safe_seller_dirname(seller_username):
 def save_pipeline_run(run, storage_root=None, now=None):
     """Persist one Pipeline Run as JSON; returns the saved record.
 
-    `run` carries seller, inputs, weights, and product_candidates; this adds
-    run_id and timestamp. Written to <storage_root>/<seller>/runs/<run_id>.json.
+    `run` carries seller, inputs, and product_candidates; this adds run_id and
+    timestamp. Written to <storage_root>/<seller>/runs/<run_id>.json. Any
+    legacy `weights` field on the record is dropped — ranking weights are no
+    longer part of a Pipeline Run.
     """
     root = storage_root or _COLLECTED_DATA_DIR
     now = now or datetime.now(timezone.utc)
     timestamp = now.isoformat()
     run_id = now.strftime("%Y%m%d_%H%M%S_%f")
-    record = {**run, "run_id": run_id, "timestamp": timestamp}
+    record = {k: v for k, v in run.items() if k != "weights"}
+    record = {**record, "run_id": run_id, "timestamp": timestamp}
 
     runs_dir = os.path.join(root, _safe_seller_dirname(run["seller"]), "runs")
     os.makedirs(runs_dir, exist_ok=True)
@@ -267,7 +316,10 @@ def _run_summaries(root):
 def list_pipeline_runs(storage_root=None):
     """List past Pipeline Runs as summaries (newest first).
 
-    Summary shape: run_id, seller, timestamp, weights, candidate_count.
+    Summary shape: run_id, seller, timestamp, candidate_count, inputs — the
+    run's full configuration (sort metric, metric range filters, date-posted
+    range, Demand toggle) so past configurations can be compared at a glance.
+    Legacy runs carrying a `weights` field still load; the weights are ignored.
     """
     root = storage_root or _COLLECTED_DATA_DIR
     if not os.path.isdir(root):
@@ -277,8 +329,8 @@ def list_pipeline_runs(storage_root=None):
             "run_id": run.get("run_id", ""),
             "seller": run.get("seller", ""),
             "timestamp": run.get("timestamp", ""),
-            "weights": run.get("weights"),
             "candidate_count": len(run.get("product_candidates") or []),
+            "inputs": run.get("inputs") or {},
         }
         for run in _run_summaries(root)
         if "product_candidates" in run
@@ -288,13 +340,17 @@ def list_pipeline_runs(storage_root=None):
 
 
 def load_pipeline_run(run_id, storage_root=None):
-    """Load one full Pipeline Run (input + weights + candidates) by run_id."""
+    """Load one full Pipeline Run (input + candidates) by run_id.
+
+    Legacy runs carrying a `weights` field still load; the weights are ignored
+    (dropped from the returned record).
+    """
     root = storage_root or _COLLECTED_DATA_DIR
     if not os.path.isdir(root):
         return None
     for run in _run_summaries(root):
         if run.get("run_id") == run_id:
-            return run
+            return {k: v for k, v in run.items() if k != "weights"}
     return None
 
 
@@ -336,16 +392,31 @@ def single_search_by_query(query, limit=50):
 # Pipeline orchestration
 # ---------------------------------------------------------------------------
 
-def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, weights=None, storage_root=None):
+def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1,
+                    date_posted_start=None, date_posted_end=None,
+                    storage_root=None, collect_demand=True,
+                    ranges=None, sort_metric=None):
     """Run the Copy Seller pipeline, yielding progress/result/error event dicts.
 
-    Emits raw (unranked) Product Candidates; ranking happens client-side from
-    these cached metrics plus the user's current weights. On completion the
-    Pipeline Run (input + weights + candidates) is persisted under
-    Collected-Data/<seller>/runs/ and the milestone is logged.
+    Emits raw Product Candidates with their collected metrics; ordering happens
+    client-side by one user-picked metric. On completion the Pipeline Run
+    (input + candidates) is persisted under Collected-Data/<seller>/runs/ and
+    the milestone is logged.
+
+    When collect_demand is False, the K per-product sold-sum getItem lookups
+    are skipped (the one search per product still runs, so Competition Count
+    is still collected) and each candidate's demand_coefficient is None.
+
+    date_posted_start / date_posted_end (YYYY-MM-DD) bound the seller's own
+    listings by itemCreationDate — a collection-time filter applied before the
+    top-N cut and before any metric is computed.
+
+    ranges / sort_metric are the client-side filter + sort configuration at run
+    time. They don't change collection — they're recorded into the run's inputs
+    so loading the run restores the exact configuration the user saw.
     """
     tracker = ApiUsageTracker()
-    estimated_cost = estimate_api_call_cost(top_n, k)
+    estimated_cost = estimate_api_call_cost(top_n, k, collect_demand=collect_demand)
 
     yield {
         "type": "progress",
@@ -366,7 +437,7 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, weights=None, s
         return
     yield {"type": "progress", "step": "Checking API budget", "status": "completed"}
 
-    log_event("copy_seller_run", "started", seller=seller_username, top_n=top_n, k=k, min_sold=min_sold)
+    log_event("copy_seller_run", "started", seller=seller_username, top_n=top_n, k=k, min_sold=min_sold, collect_demand=collect_demand)
     calls_made = 0
     try:
         yield {"type": "progress", "step": "Collecting seller listings", "status": "in_progress"}
@@ -396,7 +467,25 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, weights=None, s
             "fetched": len(detailed),
         }
 
-        top_listings = select_top_listings(detailed, min_sold=min_sold, top_n=top_n)
+        # Date-posted range filter (ticket 12): collection-time filter on the
+        # seller's own listings, applied before the top-N cut and before any
+        # metric is computed.
+        date_filtered = filter_listings_by_date_posted(
+            detailed,
+            date_posted_start=date_posted_start,
+            date_posted_end=date_posted_end,
+        )
+        if not date_filtered:
+            yield {
+                "type": "error",
+                "error": (
+                    f"No listings posted within the date range "
+                    f"{date_posted_start or '…'} → {date_posted_end or '…'}"
+                ),
+            }
+            return
+
+        top_listings = select_top_listings(date_filtered, min_sold=min_sold, top_n=top_n)
         if not top_listings:
             yield {"type": "error", "error": f"No listings at or above min-sold threshold ({min_sold})"}
             return
@@ -418,15 +507,20 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, weights=None, s
             active_total = search["total_items"]
             # itemSummaries carry no sold data; fetch each top-K result's getItem
             # detail and sum estimatedSoldQuantity (the N×(1+K) cost model).
-            top_k_sold_sum = 0
-            for result in search["items"][:k]:
-                legacy_id = _extract_listing_id(result.get("itemId"))
-                if not legacy_id:
-                    continue
-                detail = single_get_detailed_item_data(f"v1|{legacy_id}|0", verbose=False)
-                calls_made += 1
-                if detail:
-                    top_k_sold_sum += _extract_sold_quantity(detail) or 0
+            # Skipped when Demand collection is off — the candidate's
+            # demand_coefficient is then None (not collected).
+            demand_coefficient = None
+            if collect_demand:
+                top_k_sold_sum = 0
+                for result in search["items"][:k]:
+                    legacy_id = _extract_listing_id(result.get("itemId"))
+                    if not legacy_id:
+                        continue
+                    detail = single_get_detailed_item_data(f"v1|{legacy_id}|0", verbose=False)
+                    calls_made += 1
+                    if detail:
+                        top_k_sold_sum += _extract_sold_quantity(detail) or 0
+                demand_coefficient = compute_demand_coefficient(top_k_sold_sum, active_total)
 
             candidates.append({
                 "listing_url": item.get("itemWebUrl", ""),
@@ -437,7 +531,7 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, weights=None, s
                 "price": item.get("price", {}).get("value"),
                 "currency": item.get("price", {}).get("currency"),
                 "image_url": (item.get("image") or {}).get("imageUrl"),
-                "demand_coefficient": compute_demand_coefficient(top_k_sold_sum, active_total),
+                "demand_coefficient": demand_coefficient,
                 "competition_count": active_total,
                 "sold_velocity": compute_sold_velocity(
                     _extract_sold_quantity(item) or 0, item.get("itemCreationDate")
@@ -455,11 +549,18 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, weights=None, s
             "copy_seller_run", "completed",
             seller=seller_username, candidates=len(candidates), api_calls=calls_made,
         )
+        run_inputs = {
+            "top_n": top_n, "k": k, "min_sold": min_sold,
+            "collect_demand": collect_demand,
+            "date_posted_start": date_posted_start,
+            "date_posted_end": date_posted_end,
+            "ranges": ranges,
+            "sort_metric": sort_metric,
+        }
         saved_run = save_pipeline_run(
             {
                 "seller": seller_username,
-                "inputs": {"top_n": top_n, "k": k, "min_sold": min_sold},
-                "weights": weights,
+                "inputs": run_inputs,
                 "product_candidates": candidates,
             },
             storage_root=storage_root,
@@ -474,8 +575,7 @@ def run_copy_seller(seller_username, top_n=25, k=20, min_sold=1, weights=None, s
                 "seller": seller_username,
                 "run_id": saved_run["run_id"],
                 "timestamp": saved_run["timestamp"],
-                "inputs": {"top_n": top_n, "k": k, "min_sold": min_sold},
-                "weights": weights,
+                "inputs": run_inputs,
                 "api_calls_made": calls_made,
                 "api_calls_used_today": tracker.used_today,
                 "product_candidates": candidates,

@@ -3,11 +3,24 @@
  * streamed by /api/research/copy-seller (backend/copy_seller.py).
  */
 
-/** User-adjustable importances per metric; canonical shape used across the UI. */
-export interface RankingWeights {
-  demand: number;
-  competition: number;
-  velocity: number;
+/** Metrics a Product Candidate can be sorted by (greatest-to-least). */
+export type SortMetric = "demand" | "competition" | "velocity";
+
+/**
+ * An acceptable range for one metric. Either bound may be null — a null bound
+ * means "any" on that side (no filtering). Both null = the metric does not
+ * filter at all.
+ */
+export interface MetricRange {
+  min: number | null;
+  max: number | null;
+}
+
+/** Per-metric acceptable ranges. A Product Candidate outside any set range is dropped. */
+export interface MetricRangeFilters {
+  demand: MetricRange;
+  competition: MetricRange;
+  velocity: MetricRange;
 }
 
 export interface ProductCandidate {
@@ -19,17 +32,31 @@ export interface ProductCandidate {
   price: number | null;
   currency: string | null;
   image_url: string | null;
-  demand_coefficient: number;
+  /** Null when Demand collection was off for the run (not collected). */
+  demand_coefficient: number | null;
   competition_count: number;
   sold_velocity: number | null;
+}
+
+/** The configuration recorded into a Pipeline Run's inputs. */
+export interface PipelineRunInputs {
+  top_n: number;
+  k: number;
+  min_sold: number;
+  collect_demand?: boolean;
+  date_posted_start: string | null;
+  date_posted_end: string | null;
+  /** Per-metric acceptable-range filters active at run time (null = unset). */
+  ranges?: MetricRangeFilters | null;
+  /** The metric the results were sorted by at run time (null = unset). */
+  sort_metric?: SortMetric | null;
 }
 
 export interface CopySellerResult {
   seller: string;
   run_id?: string;
   timestamp?: string;
-  inputs: { top_n: number; k: number; min_sold: number };
-  weights?: RankingWeights | null;
+  inputs: PipelineRunInputs;
   api_calls_made: number;
   api_calls_used_today: number;
   product_candidates: ProductCandidate[];
@@ -40,8 +67,8 @@ export interface PipelineRunSummary {
   run_id: string;
   seller: string;
   timestamp: string;
-  weights: RankingWeights | null;
   candidate_count: number;
+  inputs: PipelineRunInputs;
 }
 
 /** A full persisted Pipeline Run, from GET /api/research/copy-seller/runs/<id>. */
@@ -49,7 +76,6 @@ export interface PipelineRun {
   run_id: string;
   seller: string;
   timestamp: string;
-  inputs: { top_n: number; k: number; min_sold: number };
-  weights: RankingWeights | null;
+  inputs: PipelineRunInputs;
   product_candidates: ProductCandidate[];
 }

@@ -17,7 +17,7 @@ A non-blocking step in the Title Search Pipeline after a candidate link is chose
 
 ## Site Image Scraper
 A per-site module (parallel to the per-site downloaders) that extracts the main model gallery images from a 3D file site page. Uses the most reliable deterministic method per site — data API where available, DOM scraping where necessary:
-- **Thingiverse**: no public API returns the gallery anymore (the v2 `complete` endpoint dropped `images[]`), so the hydrated SPA's image carousel (`div.carousel-root`) is scraped with the UC browser, paging through slides to defeat lazy-loading; the v2 API's `default_image` is the fallback
+- **Thingiverse**: v2 API `things/{id}/complete` → `images[].url`
 - **Printables**: GraphQL `images[].filePath` → `media.printables.com/{filePath}`
 - **Thangs**: `__NEXT_DATA__` JSON → `attachments[].imageUrl`
 - **MakerWorld**: SSR `div.swiper-slide > img.swiper-lazy` src (strip resize params) or design API `pictures[]`
@@ -31,7 +31,7 @@ A persisted record of a downloaded 3D file, stored in the SQLite database and br
 A new top-level tab in the app, laid out like the History tab: searchable, paginated list of Saved 3D File cards with title, source site, match label, timestamp, and a gallery of the source site's images. No 3D rendered images are stored here.
 
 ## Site Priority
-The user-defined ordering of 3D file sites (Thingiverse, Printables, MakerWorld, Cults3D, Thangs) that determines which candidate link is chosen when multiple whitelisted sites appear in search results. Editable via drag-and-drop in the Settings tab using `@hello-pangea/dnd` (the project's existing DnD library). Applies to both pipelines' result ranking. Stored in localStorage.
+The user-defined ordering of 3D file sites (Thingiverse, Printables, MakerWorld, Cults3D, Thangs, Yeggi) that determines which candidate link is chosen when multiple whitelisted sites appear in search results. Editable via drag-and-drop in the Settings tab using `@hello-pangea/dnd` (the project's existing DnD library). Applies to both pipelines' result ranking. Stored in localStorage.
 
 ## Studio Render (Step 4)
 The fourth step of the 3D File Finder: renders the downloaded 3D model into a professional product photo — pure white background, soft grounding shadow, "Amazon hero shot" look — via headless Blender on the backend. Exactly one camera angle per render (for now).
@@ -73,34 +73,34 @@ A new top-level tab for debugging: a file-browser-style interface over the SQLit
 The Testing tab is a development sandbox: every control, threshold, and intermediate value should be exposed and editable so features can be debugged and tuned before promotion to the main workflow. Nothing in the Testing tab should be a hidden constant.
 
 ## Research Pipeline
-A named, multi-step market-research workflow under the Testing tab, distinct from the 3D File Finder pipelines (which find 3D files). A Research Pipeline takes a typed input (e.g. an eBay seller), collects raw per-product metrics, and produces a ranked list of Product Candidates. "Copy Seller" is the first Research Pipeline.
+A named, multi-step market-research workflow under the Testing tab, distinct from the 3D File Finder pipelines (which find 3D files). A Research Pipeline takes a typed input (e.g. an eBay seller), collects raw per-product metrics, and produces a sortable list of Product Candidates. "Copy Seller" is the first Research Pipeline.
 
 ## Pipeline Run
-A persisted record of one execution of a Research Pipeline: its input (including the metric range filters, sort choice, and date-posted range), a timestamp, and the resulting Product Candidates. Runs are saved so different filter configurations can be compared.
+A persisted record of one execution of a Research Pipeline: its input, a timestamp, and the resulting Product Candidates with their raw metrics. Runs are saved so past results can be reloaded and re-sorted without re-running the pipeline.
 
 ## Product Candidate
-A single product identified by a Research Pipeline, carrying: the seller's representative eBay listing link, a simplified search phrase, and its collected market metrics. The unit of a Pipeline Run's output.
+A single product identified by a Research Pipeline, carrying: the seller's representative eBay listing link, a simplified search phrase, and its collected market metrics. The unit of a Pipeline Run's results.
 
 ## Metric
-One measured signal about a Product Candidate. The three Metrics are the Demand Coefficient, the Competition Count, and the Sold Velocity. Each Metric may carry an optional Metric Range Filter. Metrics are independent: collecting or filtering on one does not require another.
+One measured signal about a Product Candidate. The three Metrics are the Demand Coefficient, the Competition Count, and the Sold Velocity. Metrics are independent: collecting or filtering on one does not require another. In the UI each Metric is shown under a plain-English display name (noted on each Metric's entry).
 
 ## Metric Range Filter
-An optional user-set acceptable range (minimum and/or maximum) on one Metric. A Product Candidate whose Metric value falls outside the range is removed from the results. An unset bound means "any" — the Metric does not filter. Filtering is distinct from collection: a Metric can be collected and displayed without filtering on it.
-
-## Sort Metric
-The single Metric the user picks to order the surviving Product Candidates, greatest to least. There is no composite score and no ranking across Metrics — only filtering by Metric Range Filters, then sorting by the chosen Sort Metric.
+An optional user-set acceptable range (minimum and/or maximum) on one Metric. A Product Candidate whose Metric value falls outside the range is removed from the results. An unset bound means "any" — the Metric does not filter. Filtering operates on cached candidates, so editing a range re-filters live without re-running the pipeline.
 
 ## Date-Posted Range
-An optional start-and-end date range applied to the seller's own listings by their posted date (itemCreationDate), before the top-N cut and before any Metric is computed. It narrows which listings become Product Candidates.
+An optional start-and-end date range applied to the seller's own listings by their posted date (itemCreationDate), before the top-N cut and before any Metric is computed. It narrows which listings become Product Candidates. Because it is a collection-time filter, applying it requires a pipeline re-run. No range set means "any date".
 
 ## Demand Coefficient
-The aggregate sold quantity summed over the top K search results for a Product Candidate's simplified search phrase, divided by the total number of active listings for that phrase — a proxy for how saturated vs. in-demand a product is. Collecting it costs K eBay API calls per product (one getItem per top-K result), so it is optional and independently toggleable from the Competition Count.
+The aggregate sold quantity summed over the top K search results for a Product Candidate's simplified search phrase, divided by the total number of active listings for that phrase — a proxy for how saturated vs. in-demand a product is. Collecting it costs K eBay API calls per product (one getItem per top-K result), so it is optional and independently toggleable from the Competition Count. Displayed in the UI as "Demand score".
 
 ## Competition Count
-The number of active listings also selling the same product (matching the Product Candidate's simplified search phrase) — the search total. A standalone Metric, separate from the Demand Coefficient, and free to collect (no extra eBay API calls).
+The number of active listings also selling the same product (matching the Product Candidate's simplified search phrase) — the search total. A standalone Metric, separate from the Demand Coefficient, and free to collect (no extra eBay API calls). Fewer competitors is better. Displayed in the UI as "Listings selling this".
 
 ## Sold Velocity
-A Product Candidate's total sold quantity divided by its listing age (estimatedSoldQuantity ÷ days since itemCreationDate, both from the eBay Browse API). A proxy for how fast a product sells. Free to collect (derived from data already fetched). Caveat: estimatedSoldQuantity is an estimate, and itemCreationDate resets on relist.
+A Product Candidate's total sold quantity divided by its listing age (estimatedSoldQuantity ÷ days since itemCreationDate, both from the eBay Browse API). A proxy for how fast a product sells. Free to collect (derived from data already fetched). Caveat: estimatedSoldQuantity is an estimate, and itemCreationDate resets on relist. Displayed in the UI as "Sells per day".
+
+## Sort Metric
+The single user-picked Metric by which a Pipeline Run's Product Candidates are ordered, best-first (descending for every Metric except the Competition Count, where fewer is better, which sorts ascending). Sorting operates on cached raw metrics, so changing the Sort Metric re-orders instantly without re-running the pipeline.
 
 ## eBay API Budget
 The app's eBay API usage is capped at roughly 5,000 calls per day. Research Pipelines must be designed to bound their per-run call count (top-N listing cap, top-K sold-sum cap) so a run cannot blow the daily budget.
@@ -108,5 +108,14 @@ The app's eBay API usage is capped at roughly 5,000 calls per day. Research Pipe
 ## Camera Intent
 The camera state captured from the Step 4 live preview when the user presses Render: viewing direction, look-at target, and field of view. The backend reproduces the *direction and FOV* but auto-computes the distance so the whole model is always framed, regardless of the model's original scale or origin.
 
-## StepCard
-The unit of step status in every workflow: one card per step that owns its own status display — four states (pending, running, success, error), a single-line activity message that updates in place, and an inline error with Retry at the failed step. Success is shown inline only; a failure also fires a toast so it is noticed when scrolled away. Replaces the centralized step tracker: there is no app-wide status store, and each workflow owns its steps' status itself.
+## Task
+The atomic unit of async work in the status system. A Task has an id, a name, a status (pending / running / success / error), optional progress (current / total), and an optional error message. A Task may be standalone (e.g. "Generate images") or part of a Pipeline. Replaces the ad-hoc `is*` boolean flags and one-off progress objects.
+
+## Pipeline
+A named, ordered sequence of Tasks with a current index. A Pipeline renders as a step tracker (e.g. the Create workflow); a standalone Task renders as a progress bar or toast. Replaces the four parallel `ProgressState` objects.
+
+## Status Store
+The single frontend store that owns all Task and Pipeline state. Every async operation in the app reports through it, replacing the fragmented `useState` booleans, `ToastContainer`, and `StartupToasts` with one pipeline. Scope is strictly *waiting-state* UI: spinners, progress bars, skeletons, toasts, and step statuses while the user waits. It never touches feature inputs or outputs (whitelisted results, candidate lists, form values, intermediate debug values) — those stay in the features that own them.
+
+## PipelineTracker
+The single component that renders a Pipeline as a step tracker: per-step status icon (pending / running / done / error), step name, and the active step's determinate progress as text ("3 of 8"). It is a pure status renderer — it can display any step's waiting state regardless of whether that step also has a bespoke detail UI below it. Used by the Create workflow and all Testing pipelines.
