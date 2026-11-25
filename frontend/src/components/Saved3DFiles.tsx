@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, RefreshCw, Search, X } from "lucide-react";
 import Lightbox from "./Lightbox";
 import { btnPill, btnPillSm } from "../styles/buttonPill";
 import { formatListingDateTime } from "../utils/listingDisplay";
-import { startTaskToast } from "../utils/toasts";
+import { startTaskToast, toast } from "../utils/toasts";
 import {
   PIPELINE_IMAGE_SEARCH,
   PIPELINE_TITLE_SEARCH,
@@ -591,9 +591,6 @@ export default function Saved3DFiles() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     setFetchError(null);
-    // Report the load through the toast module (ADR 0003); the skeleton cards
-    // stay gated on the local loading flag as their local trigger.
-    const task = startTaskToast("Load saved 3D files");
     try {
       const res = await fetch(`/api/saved-3d-files?page=${page}&page_size=${pageSize}`);
       if (!res.ok) {
@@ -601,11 +598,10 @@ export default function Saved3DFiles() {
         throw new Error(err.error || `HTTP ${res.status}`);
       }
       setData((await res.json()) as Saved3DFilesResponse);
-      task.succeed();
     } catch (err) {
       const message = (err as Error).message;
       setFetchError(message);
-      task.fail(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }

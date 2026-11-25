@@ -3084,9 +3084,22 @@ function App() {
     }
   }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Auto-restock runs once per page launch, not per tab visit: load its
+  // settings immediately, then listings+quantities so the effect below can fire.
+  useEffect(() => {
+    fetch("/api/settings/auto-restock")
+      .then((res) => res.json())
+      .then((data) => {
+        if (typeof data.enabled === "boolean") setAutoRestockEnabled(data.enabled);
+        if (typeof data.quantity === "number") setAutoRestockQuantity(data.quantity);
+        if (data.enabled) void fetchAllListings();
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (
-      activeTab === "upload" &&
       autoRestockEnabled &&
       allListings.length > 0 &&
       quantitiesFetchedRef.current &&
@@ -3096,11 +3109,8 @@ function App() {
       autoRestockRanRef.current = true;
       performRestock(autoRestockQuantity, "auto");
     }
-    if (activeTab !== "upload") {
-      autoRestockRanRef.current = false;
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, autoRestockEnabled, allListings, listingQuantities]);
+  }, [autoRestockEnabled, allListings, listingQuantities]);
 
   useEffect(() => {
     if (activeTab === "settings") {
