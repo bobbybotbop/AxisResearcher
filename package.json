@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "npm run force-close && concurrently --kill-others-on-fail --names \"BACKEND,FRONTEND\" --prefix name --prefix-colors \"cyan,yellow\" \"python scripts/tee_log.py latest_logs/backend.log .venv\\\\Scripts\\\\python -u app.py\" \"python scripts/tee_log.py latest_logs/frontend.log npm --prefix frontend run dev\"",
-    "dev:backend": ".venv\\Scripts\\python app.py",
+    "dev": "npm run force-close && concurrently --kill-others-on-fail --names \"BACKEND,FRONTEND\" --prefix name --prefix-colors \"cyan,yellow\" \"node scripts/py.js scripts/tee_log.py latest_logs/backend.log node scripts/venv_py.js -u app.py\" \"node scripts/py.js scripts/tee_log.py latest_logs/frontend.log npm --prefix frontend run dev\"",
+    "dev:backend": "node scripts/venv_py.js app.py",
     "dev:frontend": "cd frontend && npm run dev",
-    "force-close": "python scripts/force_close_ports.py",
-    "check": "npm --prefix frontend run type-check && .venv\\Scripts\\python -m pytest tests/ -q"
+    "force-close": "node scripts/py.js scripts/force_close_ports.py",
+    "check": "npm --prefix frontend run type-check && node scripts/venv_py.js -m pytest tests/ -q"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
